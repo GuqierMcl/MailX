@@ -24,7 +24,7 @@
 
 ## 2. 认证与写入型秘密
 
-当前 `AuthenticationInput` 支持密码类配置：普通密码、邮箱授权码和应用专用密码在这里都属于 `password`，QQ / Foxmail、网易 163 / 126 / yeah.net、139 已有各自的授权码引导，iCloud 与 Gmail 分别提供 Apple 和 Google 应用专用密码引导。`mode=shared` 让收发引用同一认证配置；`mode=separate` 使用独立配置。
+当前 `AuthenticationInput` 支持密码类配置：普通密码、邮箱授权码和应用专用密码在这里都属于 `password`。QQ / Foxmail、网易 163 / 126 / yeah.net、139 和新浪免费邮提供授权码引导；iCloud、Gmail、飞书中国版和国际版 Lark 提供各自的应用或设备专用密码引导。`mode=shared` 让收发引用同一认证配置；`mode=separate` 使用独立配置。
 
 秘密修改必须明确选择：
 

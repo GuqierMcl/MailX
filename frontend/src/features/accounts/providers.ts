@@ -6,6 +6,9 @@ import netease163Logo from '@/assets/providers/netease-163.png'
 import netease126Logo from '@/assets/providers/netease-126.png'
 import neteaseYeahLogo from '@/assets/providers/netease-yeah.png'
 import mail139Logo from '@/assets/providers/mail-139.png'
+import sinaMailLogo from '@/assets/providers/sina-mail.jpg'
+import feishuLogo from '@/assets/providers/feishu.png'
+import larkLogo from '@/assets/providers/lark.png'
 import icloudMailLogo from '@/assets/providers/icloud-mail.png'
 import gmailLogo from '@/assets/providers/gmail.svg'
 import outlookLogo from '@/assets/providers/outlook.svg'
@@ -13,11 +16,16 @@ import microsoftLogo from '@/assets/providers/microsoft.svg'
 import exchangeLogo from '@/assets/providers/exchange.png'
 import type { ConnectionConfig } from '@/generated/accounts'
 
-export type ProviderPreset = {
-  domains: readonly string[]
+type PresetServers = {
   imap: Omit<ConnectionConfig, 'username'>
   smtp: Omit<ConnectionConfig, 'username'>
 }
+
+export type ProviderPreset = PresetServers & (
+  | { domains: readonly string[]; serversByDomain?: Readonly<Partial<Record<string, PresetServers>>> }
+  /** Explicit selection for organization domains, with fixed provider endpoints. */
+  | { domains: 'organization'; serversByDomain?: never }
+)
 
 /** Guidance for a preset that signs in with a provider-issued client secret. */
 export type ProviderSetup = {
@@ -248,6 +256,83 @@ export const GMAIL_PROVIDER: MailProvider = {
   },
 }
 
+const SINA_COM_SERVERS: PresetServers = {
+  imap: { host: 'imap.sina.com', port: 993, tls: 'implicit' },
+  smtp: { host: 'smtp.sina.com', port: 465, tls: 'implicit' },
+}
+const SINA_SERVERS_BY_DOMAIN = {
+  'sina.com': SINA_COM_SERVERS,
+  'sina.cn': {
+    imap: { host: 'imap.sina.cn', port: 993, tls: 'implicit' },
+    smtp: { host: 'smtp.sina.cn', port: 465, tls: 'implicit' },
+  },
+} satisfies Record<string, PresetServers>
+const SINA_DOMAINS = Object.keys(SINA_SERVERS_BY_DOMAIN)
+
+export const SINA_PROVIDER: MailProvider = {
+  id: 'sina',
+  get name() { return t('accounts:sinaProviderName') },
+  domain: SINA_DOMAINS.join(' / '),
+  get description() { return t('accounts:sinaProviderDescription') },
+  searchAliases: ['Sina', '新浪', '新浪邮箱', '新浪免费邮'],
+  logo: sinaMailLogo,
+  icon: Mail01Icon,
+  preset: { domains: SINA_DOMAINS, ...SINA_COM_SERVERS, serversByDomain: SINA_SERVERS_BY_DOMAIN },
+  get setup(): ProviderSetup {
+    return {
+      credentialKind: 'authorizationCode',
+      title: t('accounts:sinaSetupTitle'),
+      description: t('accounts:sinaSetupDescription'),
+      emailHint: t('accounts:sinaEmailHint'),
+      emailPlaceholder: 'you@sina.com',
+      emailRequired: t('accounts:sinaEmailRequired'),
+      credentialHint: t('accounts:sinaAuthorizationCodeHint'),
+      authenticationHelp: t('accounts:sinaAuthenticationHelp'),
+    }
+  },
+}
+
+// An organization's address may look the same on either service. Only the
+// explicitly selected preset determines where its dedicated password is used.
+const HOSTED_MAIL = {
+  feishu: { serverDomain: 'feishu.cn', logo: feishuLogo, searchAliases: ['Feishu', '飞书', '飞书邮箱', '企业邮箱'] },
+  lark: { serverDomain: 'larksuite.com', logo: larkLogo, searchAliases: ['Lark Suite', '飞书国际版', '国际版飞书', '企业邮箱'] },
+} as const
+
+function hostedMailProvider(id: keyof typeof HOSTED_MAIL): MailProvider {
+  const { serverDomain, logo, searchAliases } = HOSTED_MAIL[id]
+  return {
+    id,
+    get name() { return t(`accounts:${id}ProviderName`) },
+    get domain() { return t('accounts:organizationDomain') },
+    get description() { return t(`accounts:${id}ProviderDescription`) },
+    searchAliases: [...searchAliases, serverDomain],
+    logo,
+    icon: Mail01Icon,
+    preset: {
+      domains: 'organization',
+      imap: { host: `imap.${serverDomain}`, port: 993, tls: 'implicit' },
+      smtp: { host: `smtp.${serverDomain}`, port: 465, tls: 'implicit' },
+    },
+    get setup(): ProviderSetup {
+      return {
+        credentialKind: 'appPassword',
+        title: t(`accounts:${id}SetupTitle`),
+        description: t(`accounts:${id}SetupDescription`),
+        emailHint: t(`accounts:${id}EmailHint`),
+        emailPlaceholder: 'you@company.com',
+        emailRequired: t(`accounts:${id}EmailRequired`),
+        credentialHint: t(`accounts:${id}AppPasswordHint`),
+        authenticationHelp: t(`accounts:${id}AuthenticationHelp`),
+        providerPolicyHelp: t(`accounts:${id}ProviderPolicyHelp`),
+      }
+    },
+  }
+}
+
+export const FEISHU_PROVIDER = hostedMailProvider('feishu')
+export const LARK_PROVIDER = hostedMailProvider('lark')
+
 // The ids are the host's reviewed provider ids and are also stored as the
 // account's `providerId`. Outlook uses Microsoft's product icon; the work entry
 // uses the Microsoft logo, as Microsoft's sign-in guidance asks for work or
@@ -290,7 +375,11 @@ export const MICROSOFT_WORK_PROVIDER: MailProvider = {
   },
 }
 
-export const PROVIDERS: MailProvider[] = [GMAIL_PROVIDER, ICLOUD_PROVIDER, MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER, QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER, EXCHANGE_PROVIDER, GENERIC_PROVIDER]
+export const PROVIDERS: MailProvider[] = [
+  GMAIL_PROVIDER, ICLOUD_PROVIDER, MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER,
+  QQ_PROVIDER, NETEASE_163_PROVIDER, NETEASE_126_PROVIDER, NETEASE_YEAH_PROVIDER, MAIL_139_PROVIDER,
+  SINA_PROVIDER, FEISHU_PROVIDER, LARK_PROVIDER, EXCHANGE_PROVIDER, GENERIC_PROVIDER,
+]
 
 const CREDENTIAL_TEXT_KEYS = {
   password: {
@@ -315,10 +404,10 @@ export function providerCredentialText(setup?: ProviderSetup) {
 
 /** Address errors use only the preset's reviewed domains and localized guidance. */
 export function providerEmailRequired(provider: MailProvider): string {
-  if (!provider.preset) return t('accounts:invalidEmail')
-  return provider.setup?.emailRequired ?? t('accounts:providerEmailRequired', {
-    domains: provider.preset.domains.map((domain) => `@${domain}`).join(' / '),
-  })
+  const domains = provider.preset?.domains
+  return provider.setup?.emailRequired ?? (domains && domains !== 'organization'
+    ? t('accounts:providerEmailRequired', { domains: domains.map((domain) => `@${domain}`).join(' / ') })
+    : t('accounts:invalidEmail'))
 }
 
 /** Local filtering keeps the registry's order and follows the current UI language. */

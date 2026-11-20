@@ -7,7 +7,7 @@ This page covers the basics of the desktop app. Published installers are listed 
 ## Install and add an account
 
 1. Pick the installer for your platform in Releases and open it as described in that release's install notes. macOS has separate Apple silicon and Intel builds; Windows has an x64 installer; Linux has x64 AppImage, deb and rpm. The macOS build is signed and notarized, so it opens normally; the Windows and Linux builds are not code-signed yet. You can check your download against the `SHA256SUMS.txt` of the same release.
-2. Prepare client access on your provider's website, enabling IMAP / SMTP where required, and get a client password, authorization code or app-specific password. MailX has built-in entries for Gmail, iCloud, Outlook, Microsoft 365, QQ Mail / Foxmail, 163, 126, yeah.net and 139; any other account takes manual server and port settings. Outlook and Microsoft 365 sign in in your browser and need no password or authorization code (see below); sign-in in the browser is not available for other providers yet.
+2. Choose your provider in **Add account**. For Gmail, iCloud, QQ Mail / Foxmail, 163, 126, yeah.net, 139, Sina Mail, Feishu Mail and Lark Mail, enable client access as required and get the password or authorization code issued for an email client. Outlook and Microsoft 365 use browser sign-in instead. For another IMAP / SMTP service, choose manual setup and enter its servers and ports.
 3. Add the account in MailX with its address and client credential; if you need a proxy, set SOCKS5 or HTTP CONNECT for that account. You can test incoming and outgoing sign-in before saving and see each result. A successful sign-in test only means authentication works — confirm actual delivery with a test recipient of your own.
 4. After saving, wait for the sync. The top of the sidebar collects Inbox, Starred, Drafts and Sent from all accounts, with Archive, Junk and Trash under More; with several accounts, hover a row and use its arrow to list each account. Each account is collapsed below that; open it to see all of its folders, including Inbox and Sent. When you choose a folder for one account, that account's name appears beside the message list heading. To give the mail more room, collapse the sidebar from the title bar or with Cmd/Ctrl+B: it becomes a narrow column of icons with the same places, tooltips that show unread counts, and menus for More and each account. Your choice is remembered. If the provider refuses the connection, check that client access is enabled, that the authorization code is valid, and your network routing.
 
@@ -26,6 +26,24 @@ First [create an iCloud Mail address](https://support.apple.com/guide/icloud/cre
 Choose iCloud for an `@icloud.com`, `@me.com` or `@mac.com` address. MailX fills in `imap.mail.me.com:993` with implicit TLS and `smtp.mail.me.com:587` with STARTTLS, sharing the app-specific password. Both usernames default to your full email address. If incoming sign-in fails, Advanced settings lets you change only the IMAP username to the part before `@`, as [Apple's server guide](https://support.apple.com/en-us/102525) suggests; keep the full address for SMTP.
 
 Changing or resetting your Apple Account password revokes all app-specific passwords. Generate a new one and update the account connection in MailX to restore access. Apple Account authorization sign-in is not available in MailX. Use manual IMAP / SMTP setup for an iCloud+ custom domain; aliases have no separate sender selector, and MailX does not automatically merge addresses that share one mailbox. Mail Drop is not available, so Apple's ordinary message-size limit still applies to attachments and inline images.
+
+### Sina Free Mail
+
+Choose **Sina Free Mail** for a free `@sina.com` or `@sina.cn` mailbox. In Sina webmail, [enable IMAP4/SMTP and generate a client authorization code](https://help.sina.com.cn/comquestiondetail/view/1566/). You need both: a code alone does not enable access. Enter the code in MailX, not your webmail password.
+
+Use the same entry for either address. For `@sina.cn`, MailX fills in `imap.sina.cn` and `smtp.sina.cn`; for `@sina.com`, it uses `imap.sina.com` and `smtp.sina.com`. Both use ports 993 and 465 with implicit TLS. VIP mailboxes have [different servers](https://help.sina.com.cn/comquestiondetail/view/158/); use manual setup for those.
+
+### Feishu Mail (China)
+
+Choose this entry if **Feishu hosts your organization's mailbox**, even when the address ends in your company's domain. Ask your administrator to allow third-party email clients. In the Feishu desktop app, open **Settings → Mail → Third-party email client login**, generate a [dedicated password](https://www.feishu.cn/hc/zh-CN/articles/902478147400-在第三方邮箱客户端登录飞书邮箱) for the device and enter it in MailX with your full member address.
+
+MailX uses `imap.feishu.cn:993` and `smtp.feishu.cn:465` with implicit TLS regardless of the address suffix. Mailing lists cannot sign in. For a linked external mailbox, choose its actual provider. For a mailbox hosted by Lark, choose **Lark Mail (International)** instead.
+
+### Lark Mail (International)
+
+Choose **Lark Mail (International)** if Lark hosts your organization's mailbox. Your administrator must allow third-party email clients. In the **Lark desktop app**, open **Settings → Mail → Third-party email client login** and [generate a dedicated password for this device](https://www.larksuite.com/hc/en-US/articles/378111206512-log-in-to-lark-mail-through-a-third-party-email-client). Enter your full member email address and that password in MailX. A mailing list is not a member mailbox; for an external mailbox merely linked in Lark, choose its actual provider.
+
+Lark uses `imap.larksuite.com:993` and `smtp.larksuite.com:465`, both with implicit TLS. The end of your email address does not determine which service hosts it. MailX uses the entry you chose and never tries your password against the other service if sign-in fails.
 
 ### Microsoft (Outlook / Microsoft 365)
 

@@ -453,6 +453,11 @@ fn provider_help_url(provider_id: &str) -> Result<&'static str, AppError> {
         "139" => Ok("https://help.mail.10086.cn/statichtml/22/Content/1234606.html"),
         "icloud" => Ok("https://support.apple.com/en-us/102654"),
         "gmail" => Ok("https://support.google.com/accounts/answer/185833"),
+        "sina" => Ok("https://help.sina.com.cn/comquestiondetail/view/1566/"),
+        "feishu" => Ok("https://www.feishu.cn/hc/zh-CN/articles/902478147400"),
+        "lark" => Ok(
+            "https://www.larksuite.com/hc/en-US/articles/378111206512-log-in-to-lark-mail-through-a-third-party-email-client",
+        ),
         "netease163" | "netease126" | "neteaseYeah" => Ok(
             "https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b",
         ),
@@ -1488,6 +1493,28 @@ mod tests {
                 "https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b"
             );
         }
+        for (provider, url) in [
+            (
+                "sina",
+                "https://help.sina.com.cn/comquestiondetail/view/1566/",
+            ),
+            (
+                "feishu",
+                "https://www.feishu.cn/hc/zh-CN/articles/902478147400",
+            ),
+            (
+                "lark",
+                "https://www.larksuite.com/hc/en-US/articles/378111206512-log-in-to-lark-mail-through-a-third-party-email-client",
+            ),
+        ] {
+            let args = parse::<ProviderHelpArgs>(&InvokeBody::Json(json!({"providerId":provider})))
+                .unwrap();
+            assert_eq!(provider_help_url(&args.provider_id).unwrap(), url);
+            assert_eq!(
+                provider_help_url(url).unwrap_err(),
+                AppError::validation("providerId")
+            );
+        }
         for provider in [
             "https://attacker.invalid",
             "foxmail",
@@ -1506,13 +1533,25 @@ mod tests {
             "gmail/../",
             "GMAIL",
             "google",
+            "SINA",
+            "sina.com",
+            "fastmail",
+            "Fastmail",
+            "fastmail.com",
+            "fastmail ",
+            "FEISHU",
+            "feishu/../",
+            "feishu-intl",
+            "lark-cn",
+            "LARK",
+            "larksuite",
         ] {
             assert_eq!(
                 provider_help_url(provider).unwrap_err(),
                 AppError::validation("providerId")
             );
         }
-        for provider in ["139", "icloud", "gmail"] {
+        for provider in ["139", "icloud", "gmail", "sina", "feishu", "lark"] {
             assert!(
                 parse::<ProviderHelpArgs>(&InvokeBody::Json(
                     json!({"providerId":provider, "url":"https://attacker.invalid"})

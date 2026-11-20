@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { changeDraft, draftToConnection, draftToRoute, initialDraft } from './account-draft'
+import { changeDraft, changeDraftServer, draftServer, draftToConnection, draftToRoute, initialDraft } from './account-draft'
 import { exampleAccount } from './test-fixtures'
-import { GMAIL_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
+import { FEISHU_PROVIDER, GMAIL_PROVIDER, ICLOUD_PROVIDER, LARK_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER, SINA_PROVIDER, type MailProvider } from './providers'
 import { MailxClientError } from '@/lib/mailx-client'
 
 describe('login username defaults', () => {
@@ -45,6 +45,100 @@ describe('login username defaults', () => {
     draft.smtp.username = ''
     expect(draftToConnection(draft, account)).toMatchObject({
       imap: { username: account.emailAddress }, smtp: { username: account.emailAddress },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
+    })
+  })
+})
+
+describe('new provider address and server boundaries', () => {
+  const credential = '  synthetic-secret  '
+  function presetDraft(provider: MailProvider, emailAddress: string) {
+    const draft = initialDraft(null, provider)
+    return { ...draft, emailAddress, sharedPassword: { replace: true, value: credential } }
+  }
+
+  it.each([
+    { provider: SINA_PROVIDER, address: 'Mailbox@SINA.COM', imap: 'imap.sina.com', smtp: 'smtp.sina.com' },
+    { provider: SINA_PROVIDER, address: 'Mailbox@SINA.CN', imap: 'imap.sina.cn', smtp: 'smtp.sina.cn' },
+    { provider: FEISHU_PROVIDER, address: 'Team.Member+Ops@Mail.Example.COM', imap: 'imap.feishu.cn', smtp: 'smtp.feishu.cn' },
+    { provider: LARK_PROVIDER, address: 'Team.Member+Ops@Mail.Example.COM', imap: 'imap.larksuite.com', smtp: 'smtp.larksuite.com' },
+  ])('resolves $address for $provider.id without rewriting the login or credential', ({ provider, address, imap, smtp }) => {
+    const draft = presetDraft(provider, ` ${address} `)
+    expect(draftToConnection(draft, null, provider)).toMatchObject({
+      emailAddress: address, providerId: provider.id,
+      imap: { host: imap, port: 993, tls: 'implicit', username: address },
+      smtp: { host: smtp, port: 465, tls: 'implicit', username: address },
+      authentication: { kind: 'password', mode: 'shared', password: { action: 'replace', value: credential } },
+    })
+  })
+
+  it.each(['vip.sina.com', 'vip.sina.cn', 'sina.com.example.com', 'evil-sina.cn', 'sina.cn.', 'example.com'])('rejects the out-of-scope Sina domain %s', (domain) => {
+    expect(() => draftToConnection(presetDraft(SINA_PROVIDER, `me@${domain}`), null, SINA_PROVIDER)).toThrow(
+      expect.objectContaining({ failure: expect.objectContaining({ code: 'validation', field: 'emailAddress' }) }),
+    )
+  })
+
+  describe.each([FEISHU_PROVIDER, LARK_PROVIDER])('$id organization addresses', (provider) => {
+    it.each(['me@-company.com', 'me@company-.com', 'me@company..com', 'me@company.com/path', 'me@company.com:443', 'me@example.test@company.com', 'me\u0085@company.com', `me@${'a'.repeat(64)}.com`])('rejects a malformed address: %s', (address) => {
+      expect(() => draftToConnection(presetDraft(provider, address), null, provider)).toThrow(
+        expect.objectContaining({ failure: expect.objectContaining({ code: 'validation', field: 'emailAddress' }) }),
+      )
+    })
+
+    it.each(['Mailbox+deliveries@team.company.example', '成员+分组@team.company.example', 'Mailbox@team.company.example.'])('preserves the login %s and leaves mailbox eligibility to the provider', (address) => {
+      expect(draftToConnection(presetDraft(provider, address), null, provider)).toMatchObject({
+        emailAddress: address, imap: { username: address }, smtp: { username: address },
+      })
+    })
+  })
+
+  it('keeps explicit Sina edits per field even when an override equals the primary default', () => {
+    let draft = presetDraft(SINA_PROVIDER, 'me@sina.cn')
+    draft = changeDraftServer(draft, 'imap', 'host', 'imap.sina.com')
+    draft = changeDraftServer(draft, 'smtp', 'port', '587')
+    draft = changeDraftServer(draft, 'smtp', 'tls', 'startTls')
+    draft = changeDraftServer(draft, 'smtp', 'username', 'SendUser')
+    for (const [address, smtpHost] of [['me@SINA.COM', 'smtp.sina.com'], ['me@SINA.CN', 'smtp.sina.cn']]) {
+      draft = changeDraft(draft, 'emailAddress', address)
+      expect(draftServer(draft, 'smtp', SINA_PROVIDER)).toMatchObject({ host: smtpHost, port: '587', tls: 'startTls' })
+      expect(draftToConnection(draft, null, SINA_PROVIDER)).toMatchObject({
+        imap: { host: 'imap.sina.com', port: 993, tls: 'implicit', username: address },
+        smtp: { host: smtpHost, port: 587, tls: 'startTls', username: 'SendUser' },
+      })
+    }
+  })
+
+  it.each([
+    { provider: FEISHU_PROVIDER, domain: 'feishu.cn', other: 'larksuite.com' },
+    { provider: LARK_PROVIDER, domain: 'larksuite.com', other: 'feishu.cn' },
+  ])('pins new $provider.id accounts even when the draft contains the other region’s servers', ({ provider, domain, other }) => {
+    const draft = presetDraft(provider, 'me@team.example.com')
+    draft.imap = { ...draft.imap, host: `imap.${other}`, port: '143', tls: 'startTls' }
+    draft.smtp = { ...draft.smtp, host: `smtp.${other}`, port: '587', tls: 'startTls' }
+    const routed = { ...draft, routeKind: 'custom' as const, proxyHost: 'proxy.example.com', proxyPort: '8118' }
+    expect(draftToConnection(routed, null, provider)).toMatchObject({
+      providerId: provider.id, imap: { host: `imap.${domain}`, port: 993, tls: 'implicit' },
+      smtp: { host: `smtp.${domain}`, port: 465, tls: 'implicit' },
+      route: { kind: 'custom', host: 'proxy.example.com', port: 8118 },
+    })
+    expect(draftToConnection(routed, null)).toMatchObject({
+      providerId: null, imap: { host: `imap.${other}`, port: 143, tls: 'startTls' }, smtp: { host: `smtp.${other}`, port: 587, tls: 'startTls' },
+    })
+  })
+
+  it.each([
+    { provider: SINA_PROVIDER, savedDomain: 'example.com' },
+    { provider: FEISHU_PROVIDER, savedDomain: 'larksuite.com' },
+    { provider: LARK_PROVIDER, savedDomain: 'feishu.cn' },
+  ])('preserves saved $provider.id endpoints at $savedDomain and credentials when editing the address', ({ provider, savedDomain }) => {
+    const account = exampleAccount({
+      providerId: provider.id, emailAddress: 'member@team.example.com',
+      imap: { host: `imap.${savedDomain}`, port: 1993, tls: 'implicit', username: 'saved-in' },
+      smtp: { host: `smtp.${savedDomain}`, port: 587, tls: 'startTls', username: 'saved-out' },
+    })
+    const draft = changeDraft(initialDraft(account, provider), 'emailAddress', 'edited@elsewhere.example')
+    expect(draftToConnection(draft, account, provider)).toMatchObject({
+      providerId: provider.id, emailAddress: 'edited@elsewhere.example', imap: account.imap, smtp: account.smtp,
       authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
     })
   })

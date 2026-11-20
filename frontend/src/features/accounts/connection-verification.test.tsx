@@ -8,7 +8,7 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { ConnectionVerificationActions, ProtocolOutcome, VerificationHelp, VerificationNotice, VerificationSummary } from './connection-verification'
 import { useConnectionVerification, verificationReport } from './use-connection-verification'
 import { exampleAccount, testClient } from './test-fixtures'
-import { ICLOUD_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
+import { FEISHU_PROVIDER, ICLOUD_PROVIDER, LARK_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 
 function report(accountId: string, revision: number): AccountConnectionVerification {
   return {
@@ -77,8 +77,8 @@ describe('account connection verification', () => {
     expect(screen.queryByText('· 收发均已通过')).not.toBeInTheDocument()
   })
 
-  it('offers iCloud app-password recovery when IMAP authentication fails without retrying or sending', async () => {
-    const account = exampleAccount({ providerId: 'icloud' })
+  it.each([ICLOUD_PROVIDER, FEISHU_PROVIDER, LARK_PROVIDER])('offers $id app-password recovery when IMAP authentication fails without retrying or sending', async (provider) => {
+    const account = exampleAccount({ providerId: provider.id })
     const client = testClient([account])
     client.verifyAccountConnection.mockResolvedValue({
       ...report(account.id, account.revision),
@@ -88,11 +88,12 @@ describe('account connection verification', () => {
     await userEvent.click(screen.getByRole('button', { name: '验证收发连接' }))
     expect(await screen.findByText(/^· (收信|发信)未通过$/)).toBeInTheDocument()
     expect(screen.getAllByText('已通过')).toHaveLength(1)
-    expect(screen.getByText(ICLOUD_PROVIDER.setup!.authenticationHelp)).toBeInTheDocument()
+    expect(screen.getByText(provider.setup!.authenticationHelp)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '如何获取授权码' })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '如何生成应用专用密码' }))
-    expect(client.openProviderHelp).toHaveBeenCalledWith('icloud')
-    expect(client.verifyAccountConnection).toHaveBeenCalledOnce()
+    expect(client.openProviderHelp).toHaveBeenCalledExactlyOnceWith(provider.id)
+    expect(client.verifyAccountConnection).toHaveBeenCalledExactlyOnceWith(account.id, account.revision, expect.any(AbortSignal))
+    expect(client.verifyDraftConnection).not.toHaveBeenCalled()
     expect(client.queueSend).not.toHaveBeenCalled()
   })
 

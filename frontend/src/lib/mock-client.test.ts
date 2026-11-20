@@ -48,19 +48,32 @@ describe('mock provider help', () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
     try {
       const client = createMockClient()
-      for (const providerId of ['qq', '139', 'icloud', 'gmail', 'netease163', 'netease126', 'neteaseYeah']) {
-        await client.openProviderHelp(providerId)
-        expect(open).toHaveBeenLastCalledWith(providerId === 'qq'
-          ? 'https://help.mail.qq.com/detail/0/1087'
-          : providerId === '139' ? 'https://help.mail.10086.cn/statichtml/22/Content/1234606.html'
-            : providerId === 'icloud' ? 'https://support.apple.com/en-us/102654'
-              : providerId === 'gmail' ? 'https://support.google.com/accounts/answer/185833'
-                : 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b', '_blank', 'noopener,noreferrer')
+      const neteaseHelp = 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b'
+      const helpUrls = {
+        qq: 'https://help.mail.qq.com/detail/0/1087',
+        '139': 'https://help.mail.10086.cn/statichtml/22/Content/1234606.html',
+        icloud: 'https://support.apple.com/en-us/102654',
+        gmail: 'https://support.google.com/accounts/answer/185833',
+        netease163: neteaseHelp,
+        netease126: neteaseHelp,
+        neteaseYeah: neteaseHelp,
+        sina: 'https://help.sina.com.cn/comquestiondetail/view/1566/',
+        feishu: 'https://www.feishu.cn/hc/zh-CN/articles/902478147400',
+        lark: 'https://www.larksuite.com/hc/en-US/articles/378111206512-log-in-to-lark-mail-through-a-third-party-email-client',
       }
-      for (const providerId of ['https://example.com', 'constructor', 'netease', '139.com', '139/../', 'icloud.com', 'icloud/../', 'ICLOUD', 'gmail.com', 'GMAIL', 'google', '']) {
+      for (const [providerId, url] of Object.entries(helpUrls)) {
+        await client.openProviderHelp(providerId)
+        expect(open).toHaveBeenLastCalledWith(url, '_blank', 'noopener,noreferrer')
+      }
+      for (const providerId of [
+        'https://example.com', 'constructor', 'netease', '139.com', '139/../', 'icloud.com', 'icloud/../', 'ICLOUD', 'gmail.com', 'GMAIL', 'google', '',
+        'SINA', 'sina.com', 'fastmail', 'Fastmail', 'fastmail.com', 'fastmail ',
+        'FEISHU', 'feishu/../', 'feishu-intl', 'lark-cn', 'LARK', 'larksuite',
+        helpUrls.sina, helpUrls.feishu, helpUrls.lark,
+      ]) {
         await expect(client.openProviderHelp(providerId)).rejects.toMatchObject({ failure: { code: 'validation', field: 'providerId' } })
       }
-      expect(open).toHaveBeenCalledTimes(7)
+      expect(open).toHaveBeenCalledTimes(Object.keys(helpUrls).length)
     } finally { open.mockRestore() }
   })
 })
