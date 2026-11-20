@@ -34,8 +34,11 @@ function setup(initial: UpdateSnapshot, options: { canInstall?: boolean } = {}) 
 describe('the update flow', () => {
   it('downloads, installs and restarts in order', async () => {
     const { client, emit } = setup(available)
-    await userEvent.click(await screen.findByRole('button', { name: 'MailX 0.2.0 可用' }))
+    const updateNow = await screen.findByRole('button', { name: '立即更新' })
+    expect(screen.getByText('建议更新至此版本，以获得最新改进。')).toBeInTheDocument()
+    await userEvent.click(updateNow)
     expect(screen.getByRole('dialog', { name: 'MailX 0.2.0' })).toBeInTheDocument()
+    expect(client.downloadUpdate).not.toHaveBeenCalled()
     expect(screen.getByText('0.1.0 → 0.2.0')).toBeInTheDocument()
     // Notes are elements, including a link that goes back to the host.
     expect(screen.getByText('Faster').closest('strong')).not.toBeNull()
@@ -151,7 +154,9 @@ describe('the update flow', () => {
 
   it('only explains how to get the release when the edition cannot install', async () => {
     const { client } = setup({ ...available, canInstall: false } as UpdateSnapshot, { canInstall: false })
-    await userEvent.click(await screen.findByRole('button', { name: 'MailX 0.2.0 可用' }))
+    const viewUpdate = await screen.findByRole('button', { name: '查看更新' })
+    expect(screen.queryByRole('button', { name: '立即更新' })).not.toBeInTheDocument()
+    await userEvent.click(viewUpdate)
     expect(screen.getByRole('dialog', { name: 'MailX 0.2.0' })).toBeInTheDocument()
     expect(screen.getByText('当前安装方式不支持应用内更新，请从 GitHub 下载新版本，或使用安装 MailX 时的包管理器更新。')).toBeInTheDocument()
     for (const name of ['下载更新', '立即重启', '稍后（退出时安装）', '取消下载', '后台继续', '稍后']) {
@@ -172,6 +177,8 @@ describe('update notices', () => {
     expect(screen.queryByText('MailX 0.2.0 可用')).not.toBeInTheDocument()
     act(() => emit({ ...available, phase: 'ready' }))
     expect(await screen.findByText('0.2.0 已下载')).toBeInTheDocument()
+    expect(screen.getByText('请在方便时重启 MailX，以完成安装。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '立即重启' })).toBeInTheDocument()
     act(() => emit(downloading))
     act(() => emit({ ...available, phase: 'ready' }))
     expect(screen.getAllByText('0.2.0 已下载')).toHaveLength(1)
@@ -272,7 +279,7 @@ describe('update notices', () => {
     await waitFor(() => expect(screen.getByText('downloading')).toBeInTheDocument())
   })
 
-  it('announces a found version once per run and opens the modal on a manual check', async () => {
+  it('announces a found version once per run and opens the modal from the toast', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       const client = testClient()
@@ -293,8 +300,7 @@ describe('update notices', () => {
       state.emit({ canInstall: true, phase: 'checking' })
       state.emit(available)
       expect(screen.getAllByText('MailX 0.2.0 可用')).toHaveLength(1)
-      // Closing the toast leaves the title-bar button.
-      await userEvent.click(screen.getByRole('button', { name: '查看更新' }))
+      await userEvent.click(screen.getByRole('button', { name: '立即更新' }))
       expect(screen.getByRole('dialog', { name: 'MailX 0.2.0' })).toBeInTheDocument()
     } finally {
       vi.useRealTimers()

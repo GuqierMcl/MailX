@@ -6,9 +6,10 @@ import { cn } from "cn"
 function ScrollArea({
   className,
   children,
+  horizontal = false,
   viewportRef,
   ...props
-}: ScrollAreaPrimitive.Root.Props & { viewportRef?: React.Ref<HTMLDivElement> }) {
+}: ScrollAreaPrimitive.Root.Props & { horizontal?: boolean; viewportRef?: React.Ref<HTMLDivElement> }) {
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
@@ -23,6 +24,7 @@ function ScrollArea({
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollBar />
+      {horizontal && <ScrollBar orientation="horizontal" />}
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   )

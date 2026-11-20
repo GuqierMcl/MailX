@@ -438,6 +438,8 @@ export interface MailxClient {
   // --- Updates (docs/architecture/updater.md). Main window only.
   /** The current update state, including whether this edition can install one. */
   getUpdateState(): Promise<UpdateSnapshot>
+  /** Consumes the matching successful-install notice after displaying it. */
+  acknowledgeUpdateInstalled(version: string): Promise<void>
   /** Checks the release manifest now; a failure comes back as a `failed` snapshot. */
   checkForUpdates(): Promise<UpdateSnapshot>
   /** Starts downloading the version that was found; progress arrives through `onUpdateState`. */
@@ -774,6 +776,7 @@ export function createDesktopClient(): MailxClient {
     onComposerCloseRequested: (listener) => subscribe<{ generation: number }>(HOST_EVENTS.composerCloseRequested, listener),
     onAppCloseCancelled: (listener) => subscribe<{ generation: number }>(HOST_EVENTS.appCloseCancelled, listener),
     getUpdateState: () => call<UpdateSnapshot>('updater_get_state'),
+    acknowledgeUpdateInstalled: (version) => call<void>('updater_acknowledge_installed', { version }),
     checkForUpdates: () => call<UpdateSnapshot>('updater_check'),
     downloadUpdate: () => call<UpdateSnapshot>('updater_download'),
     cancelUpdate: () => call<UpdateSnapshot>('updater_cancel'),

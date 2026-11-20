@@ -200,6 +200,8 @@ pub(crate) fn cap_notes(notes: Option<String>) -> Option<String> {
 pub(crate) struct Snapshot {
     pub(crate) can_install: bool,
     pub(crate) install_on_quit: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) installed_update_version: Option<String>,
     #[serde(flatten)]
     pub(crate) state: UpdateState,
 }
@@ -473,10 +475,12 @@ mod tests {
         let json = serde_json::to_value(Snapshot {
             can_install: false,
             install_on_quit: false,
+            installed_update_version: Some("0.1.0".into()),
             state: available(),
         })
         .unwrap();
         assert_eq!(json["canInstall"], false);
+        assert_eq!(json["installedUpdateVersion"], "0.1.0");
         assert_eq!(json["phase"], "available");
         assert_eq!(json["version"], "0.2.0");
     }
@@ -522,6 +526,7 @@ mod tests {
             let json = serde_json::to_value(Snapshot {
                 can_install: true,
                 install_on_quit: true,
+                installed_update_version: None,
                 state,
             })
             .unwrap();
@@ -529,6 +534,7 @@ mod tests {
             assert_eq!(json["notes"], details.notes.as_deref().unwrap(), "{json}");
             assert_eq!(json["date"], details.date.unwrap(), "{json}");
             assert!(json.get("details").is_none(), "{json}");
+            assert!(json.get("installedUpdateVersion").is_none(), "{json}");
         }
     }
 

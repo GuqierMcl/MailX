@@ -14,6 +14,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
+- Settings briefly shows a scrollbar when the menu does not fit, and About follows Notifications in the App group. / 设置菜单放不下时会短暂显示滚动条，“关于”位于“应用”组的“通知”之后。 ([#166](https://github.com/GuqierMcl/MailX/pull/166))
+- Update notices explain the next step and, after a successful in-app update, show the installed version with a link to its release notes. / 更新提示说明下一步操作，并在应用内更新成功后显示已安装的版本和对应的更新说明入口。 ([#166](https://github.com/GuqierMcl/MailX/pull/166))
 - A brief network drop no longer shows a sync warning: a failure that MailX will retry stays quiet for its first 30 seconds, and problems that need you still appear at once. / 短暂网络中断不再显示同步异常：会自动重试的失败在最初 30 秒内保持安静，需要处理的同步问题仍然立即提示。 ([#161](https://github.com/GuqierMcl/MailX/pull/161))
 
 ### 🚀 Feature

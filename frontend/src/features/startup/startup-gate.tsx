@@ -15,7 +15,7 @@ const POLL_INTERVAL_MS = 500
 
 type QueryFailure = ClientFailure
 
-export function StartupGate({ client }: { client: MailxClient }) {
+export function StartupGate({ client, children }: { client: MailxClient; children?: React.ReactNode }) {
   const [status, setStatus] = useState<StartupStatus | null>(null)
   const [queryFailure, setQueryFailure] = useState<QueryFailure | null>(null)
   const [retrying, setRetrying] = useState(false)
@@ -90,7 +90,7 @@ export function StartupGate({ client }: { client: MailxClient }) {
 
   if (!client.available) return <UnavailableScreen />
   if (queryFailure) return <TransportFailureScreen failure={queryFailure} onRetry={() => { void queryStatus() }} />
-  if (status?.state === 'ready') return <Workbench client={client} />
+  if (status?.state === 'ready') return <><Workbench client={client} />{children}</>
   if (status?.state === 'failed') {
     return <StartupFailureScreen status={status} retrying={retrying} onRetry={() => { void retryStartup() }} />
   }

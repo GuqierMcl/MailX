@@ -25,17 +25,14 @@ function pushableClient(initial: McpStatus = { state: 'off' }) {
 afterEach(() => vi.restoreAllMocks())
 
 describe('settings dialog navigation', () => {
-  it('groups pages under headings, with 关于 alone at the bottom', () => {
+  it('groups pages under headings, with 关于 in the application group', () => {
     const { dialog } = renderMcp(testClient(), { section: 'general' })
-    const groups = within(dialog).getAllByTestId(/^settings-nav-group-/)
+    const nav = within(dialog).getByRole('navigation', { name: '设置' })
+    const groups = within(nav).getAllByTestId(/^settings-nav-group-/)
     expect(groups.map((group) => group.getAttribute('data-testid'))).toEqual(['settings-nav-group-app', 'settings-nav-group-mail', 'settings-nav-group-integrations'])
     const names = (group: HTMLElement) => within(group).getAllByRole('button').map((button) => button.textContent)
-    expect(groups.map(names)).toEqual([['通用', '外观', '快捷键', '通知'], ['发信', '联系人', '增强', '安全性', '翻译'], ['AI', 'MCP']])
+    expect(groups.map(names)).toEqual([['通用', '外观', '快捷键', '通知', '关于'], ['发信', '联系人', '增强', '安全性', '翻译'], ['AI', 'MCP']])
     expect(groups.map((group) => group.firstElementChild?.textContent)).toEqual(['应用', '邮件', '集成'])
-    const about = within(dialog).getByRole('button', { name: '关于' })
-    expect(groups.some((group) => group.contains(about))).toBe(false)
-    const all = within(dialog).getAllByRole('button').filter((button) => ['通用', 'MCP', '关于'].includes(button.textContent ?? ''))
-    expect(all.at(-1)).toBe(about)
   })
 
   it('opens the MCP page for the mcp target and switches to it from the nav', async () => {

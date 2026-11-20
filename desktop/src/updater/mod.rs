@@ -19,7 +19,7 @@ use crate::window_chrome::MAIN_WINDOW;
 mod cache;
 mod policy;
 
-use cache::Cache;
+use cache::{Cache, InstallRecovery};
 use policy::{
     AutomaticDownload, CHECK_TIMEOUT, DOWNLOAD_TIMEOUT, FailureStage, ReleaseDetails, Snapshot,
     UpdateState, cap_notes, is_newer, next_wait, progress_due,
@@ -49,6 +49,7 @@ struct Inner {
     scheduler_started: bool,
     settings_revision: Option<u64>,
     install_failure: Option<String>,
+    installed_update_version: Option<String>,
     automatic: AutomaticDownload,
 }
 
@@ -226,6 +227,7 @@ fn snapshot(app: &AppHandle, inner: &Inner) -> Snapshot {
     Snapshot {
         can_install: can_install(app),
         install_on_quit: inner.install_on_quit && inner.state().may_restart(),
+        installed_update_version: inner.installed_update_version.clone(),
         state: inner.state(),
     }
 }
@@ -271,20 +273,26 @@ async fn initialize(app: &AppHandle, state: &UpdaterState) {
         .get_or_init(|| async {
             let cache = state.lock().cache.clone();
             let current = app.package_info().version.to_string();
-            let failure = tauri::async_runtime::spawn_blocking(move || {
-                cache.and_then(|cache| cache.failure(&current).ok().flatten())
+            let recovery = tauri::async_runtime::spawn_blocking(move || {
+                cache.and_then(|cache| cache.recover_installation(&current).ok().flatten())
             })
             .await
             .ok()
             .flatten();
-            if let Some(failure) = failure {
-                let mut inner = state.lock();
-                inner.install_failure = Some(failure.version.clone());
-                inner.state = Some(UpdateState::Failed {
-                    stage: FailureStage::Install,
-                    version: Some(failure.version),
-                    details: Some(failure.details),
-                });
+            match recovery {
+                Some(InstallRecovery::Failed(failure)) => {
+                    let mut inner = state.lock();
+                    inner.install_failure = Some(failure.version.clone());
+                    inner.state = Some(UpdateState::Failed {
+                        stage: FailureStage::Install,
+                        version: Some(failure.version),
+                        details: Some(failure.details),
+                    });
+                }
+                Some(InstallRecovery::Installed(version)) => {
+                    state.lock().installed_update_version = Some(version);
+                }
+                None => {}
             }
         })
         .await;
@@ -734,6 +742,12 @@ struct OpenLinkArgs {
     url: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AcknowledgeInstalledArgs {
+    version: String,
+}
+
 #[tauri::command]
 pub(crate) async fn updater_get_state(
     window: WebviewWindow,
@@ -742,7 +756,48 @@ pub(crate) async fn updater_get_state(
 ) -> Result<mailx_core::ApiResult<Snapshot>, ()> {
     let args =
         authorize(&window, "updater_get_state").and_then(|_| parse::<EmptyArgs>(request.body()));
-    Ok(respond(args.map(|_| updater.report(window.app_handle()))))
+    Ok(respond(match args {
+        Ok(_) => {
+            initialize(window.app_handle(), &updater).await;
+            Ok(updater.report(window.app_handle()))
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+/// Acknowledge only the version actually presented by the main window.
+#[tauri::command]
+pub(crate) async fn updater_acknowledge_installed(
+    window: WebviewWindow,
+    updater: State<'_, UpdaterState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<mailx_core::ApiResult<()>, ()> {
+    let args = authorize(&window, "updater_acknowledge_installed")
+        .and_then(|_| parse::<AcknowledgeInstalledArgs>(request.body()));
+    let args = match args {
+        Ok(args) => args,
+        Err(error) => return Ok(respond(Err(error))),
+    };
+    let state = updater.inner().clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut inner = state.lock();
+        if inner.installed_update_version.as_deref() != Some(args.version.as_str()) {
+            return Ok(false);
+        }
+        if let Some(cache) = &inner.cache {
+            cache
+                .acknowledge_installed()
+                .map_err(|_| AppError::new(ErrorCode::StorageUnavailable))?;
+        }
+        inner.installed_update_version = None;
+        Ok(true)
+    })
+    .await
+    .unwrap_or_else(|_| Err(AppError::new(ErrorCode::Internal)));
+    if matches!(result, Ok(true)) {
+        emit(window.app_handle(), &updater);
+    }
+    Ok(respond(result.map(|_| ())))
 }
 
 #[tauri::command]

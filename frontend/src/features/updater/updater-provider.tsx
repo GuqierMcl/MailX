@@ -54,11 +54,16 @@ export function UpdaterProvider({ client, children }: { client: MailxClient; chi
       if (!show) continue
       if (notice.kind === 'available') {
         toast.info(t('updater:availableToast', { version: notice.version }), {
+          description: t('updater:availableToastDescription'),
           timeout: 0,
-          action: { label: t('updater:viewUpdate'), onClick: () => setOpen(true) },
+          action: {
+            label: t(next.canInstall ? 'updater:updateNow' : 'updater:viewUpdate'),
+            onClick: () => setOpen(true),
+          },
         })
       } else if (notice.kind === 'ready') {
         toast.info(t('updater:downloadedToast', { version: notice.version }), {
+          description: t('updater:downloadedToastDescription'),
           timeout: 0,
           action: {
             label: t('updater:restartNow'),

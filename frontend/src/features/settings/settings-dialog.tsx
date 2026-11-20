@@ -1,12 +1,13 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { useState } from 'react'
+import { ScrollArea as ScrollAreaPrimitive } from '@base-ui/react/scroll-area'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import { AiMagicIcon, ComputerIcon, InboxIcon, InformationCircleIcon, KeyboardIcon, LanguagesIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Sidebar,
-  SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -46,7 +47,6 @@ type SettingsDialogProps = {
 export function SettingsDialog({ client, target, onClose }: SettingsDialogProps) {
   useTranslation()
   type NavItem = { id: SettingsSection; name: string; icon: IconSvgElement }
-  // Related pages sit together under a small heading; About stands alone at the bottom.
   const GROUPS: { id: string; heading: string; items: NavItem[] }[] = [
     {
       id: 'app',
@@ -56,6 +56,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
         { id: 'appearance', name: t('settings:appearance'), icon: PaintBoardIcon },
         { id: 'shortcuts', name: t('settings:shortcuts'), icon: KeyboardIcon },
         { id: 'notifications', name: t('settings:notifications'), icon: Notification03Icon },
+        { id: 'about', name: t('settings:about'), icon: InformationCircleIcon },
       ],
     },
     {
@@ -74,7 +75,6 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
       { id: 'mcp', name: t('settings:mcp'), icon: McpServerIcon },
     ] },
   ]
-  const ABOUT: NavItem = { id: 'about', name: t('settings:about'), icon: InformationCircleIcon }
   const [section, setSection] = useState<SettingsSection>('general')
 
   // Reset the view whenever the dialog is opened with a new target.
@@ -84,7 +84,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
     if (target) setSection(target.section)
   }
 
-  const sectionName = [...GROUPS.flatMap((group) => group.items), ABOUT].find((item) => item.id === section)?.name
+  const sectionName = GROUPS.flatMap((group) => group.items).find((item) => item.id === section)?.name
 
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
@@ -97,18 +97,23 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
             <SidebarHeader className="shrink-0 px-4 py-3 md:pt-5 md:pb-1">
               <DialogTitle className="text-base font-semibold">{t('settings:title')}</DialogTitle>
             </SidebarHeader>
-            <SidebarContent className="min-w-0 flex-row md:flex-col">
-              {GROUPS.map((group) => (
-                <SidebarGroup key={group.id} className="w-auto shrink-0 py-2 md:w-full md:px-2 md:pt-3 md:pb-1" data-testid={`settings-nav-group-${group.id}`}>
-                  {/* The strip in narrow windows has no room for headings. */}
-                  <SidebarGroupLabel className="hidden md:flex">{group.heading}</SidebarGroupLabel>
-                  <NavMenu items={group.items} section={section} onSelect={setSection} />
-                </SidebarGroup>
-              ))}
-              <SidebarGroup className="w-auto shrink-0 py-2 md:mt-auto md:w-full md:p-2">
-                <NavMenu items={[ABOUT]} section={section} onSelect={setSection} />
-              </SidebarGroup>
-            </SidebarContent>
+            <ScrollArea
+              render={<nav />}
+              role="navigation"
+              aria-label={t('settings:title')}
+              className="settings-nav min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-thumb]]:bg-sidebar-foreground/45"
+              horizontal
+            >
+              <ScrollAreaPrimitive.Content className="flex w-max data-has-overflow-x:pb-2.5 md:w-full md:flex-col md:data-has-overflow-y:pe-2.5">
+                {GROUPS.map((group) => (
+                  <SidebarGroup key={group.id} className="w-auto shrink-0 py-2 md:w-full md:px-2 md:pt-3 md:pb-1" data-testid={`settings-nav-group-${group.id}`}>
+                    {/* The strip in narrow windows has no room for headings. */}
+                    <SidebarGroupLabel className="hidden md:flex">{group.heading}</SidebarGroupLabel>
+                    <NavMenu items={group.items} section={section} onSelect={setSection} />
+                  </SidebarGroup>
+                ))}
+              </ScrollAreaPrimitive.Content>
+            </ScrollArea>
           </Sidebar>
           <main className="flex min-h-0 min-w-0 flex-col overflow-hidden md:col-start-2 md:row-span-2 md:row-start-1">
             <header className="flex h-14 shrink-0 items-center gap-2 px-6 md:h-16 md:pr-12">

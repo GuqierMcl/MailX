@@ -1,6 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { AppearanceSync } from '@/features/settings/settings-queries'
 import { ThemeToggle } from '@/features/settings/theme-toggle'
+import { InstalledUpdateNotice } from '@/features/updater/installed-update-notice'
 import { UpdaterProvider } from '@/features/updater/updater-provider'
 import { useUpdater } from '@/features/updater/updater-context'
 import { McpTitleIcon } from '@/features/mcp/mcp-title-icon'
@@ -93,7 +94,9 @@ function App() {
               <UpdaterTitleBar client={client} />
               {/* The island's shadow extends upward onto the title-bar canvas. */}
               <div className="relative min-h-0 flex-1">
-                <StartupGate client={client} />
+                <StartupGate client={client}>
+                  <InstalledUpdateNotice client={client} host={windowHost} />
+                </StartupGate>
               </div>
             </UpdaterProvider>
           </div>

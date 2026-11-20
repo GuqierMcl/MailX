@@ -22,6 +22,8 @@ export type ReleaseDetails = {
 export type UpdateSnapshot = {
   /** Whether the prepared update will install on quit; older adapters omit it. */
   installOnQuit?: boolean
+  /** A confirmed installation waiting to be announced in the main window. */
+  installedUpdateVersion?: string
 } & (
   | { canInstall: boolean; phase: 'idle' }
   | { canInstall: boolean; phase: 'checking' }

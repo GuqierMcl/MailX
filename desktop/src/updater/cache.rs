@@ -20,6 +20,7 @@ const METADATA_LIMIT: u64 = 128 * 1024;
 const PACKAGE_LIMIT: u64 = 1024 * 1024 * 1024;
 const PACKAGE_METADATA: &str = "package.json";
 const INSTALL_RECEIPT: &str = "install-attempt.json";
+const INSTALLED_NOTICE: &str = "installed-notice.json";
 
 #[derive(Clone)]
 pub(crate) struct Cache {
@@ -34,10 +35,22 @@ pub(crate) struct CachedPackage {
     pub(crate) manual: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-pub(crate) struct InstallFailure {
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub(crate) struct InstallAttempt {
     pub(crate) version: String,
     pub(crate) details: ReleaseDetails,
+}
+
+impl InstallAttempt {
+    fn upgraded_to(&self, running: &str) -> bool {
+        self.version == running && is_newer(&self.details.current, running)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum InstallRecovery {
+    Failed(InstallAttempt),
+    Installed(String),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -150,33 +163,55 @@ impl Cache {
         details.notes = cap_notes(details.notes);
         write_json(
             &self.directory.join(INSTALL_RECEIPT),
-            &InstallFailure {
+            &InstallAttempt {
                 version: version.into(),
                 details,
             },
         )
     }
 
-    /// An attempted installation is only a failure while the running version
-    /// is older. This also handles a user repairing the app with a manual install.
-    pub(crate) fn failure(&self, current_version: &str) -> io::Result<Option<InstallFailure>> {
+    /// A successful attempt is moved out of the package cache's cleanup path.
+    /// It can then wait across silent launches until the main window shows it.
+    pub(crate) fn recover_installation(
+        &self,
+        current_version: &str,
+    ) -> io::Result<Option<InstallRecovery>> {
         let _guard = self.lock();
-        let failure = match read_json::<InstallFailure>(&self.directory.join(INSTALL_RECEIPT)) {
-            Ok(Some(failure)) => failure,
-            Ok(None) => return Ok(None),
-            Err(_) => {
-                self.clear_failure_unlocked()?;
-                return Ok(None);
+        let receipt = self.directory.join(INSTALL_RECEIPT);
+        let notice = self.directory.join(INSTALLED_NOTICE);
+        match read_json::<InstallAttempt>(&receipt) {
+            Ok(Some(attempt)) if attempt.upgraded_to(current_version) => {
+                fs::rename(&receipt, &notice)?;
+                // Package cleanup must not suppress a confirmed update.
+                let _ = self.clear_package_unlocked();
+                return Ok(Some(InstallRecovery::Installed(attempt.version)));
             }
-        };
-        if !is_newer(current_version, &failure.version) {
-            self.clear_unlocked()?;
-            return Ok(None);
+            Ok(Some(mut attempt)) if is_newer(current_version, &attempt.version) => {
+                // The most recent install attempt takes precedence.
+                let _ = remove_if_present(&notice);
+                attempt.details.current = current_version.into();
+                attempt.details.notes = cap_notes(attempt.details.notes);
+                return Ok(Some(InstallRecovery::Failed(attempt)));
+            }
+            Ok(Some(_)) => self.clear_unlocked()?,
+            Err(_) => self.clear_failure_unlocked()?,
+            Ok(None) => {}
         }
-        let mut failure = failure;
-        failure.details.current = current_version.into();
-        failure.details.notes = cap_notes(failure.details.notes);
-        Ok(Some(failure))
+        match read_json::<InstallAttempt>(&notice) {
+            Ok(Some(attempt)) if attempt.upgraded_to(current_version) => {
+                Ok(Some(InstallRecovery::Installed(attempt.version)))
+            }
+            Ok(None) => Ok(None),
+            _ => {
+                remove_if_present(&notice)?;
+                Ok(None)
+            }
+        }
+    }
+
+    pub(crate) fn acknowledge_installed(&self) -> io::Result<()> {
+        let _guard = self.lock();
+        remove_if_present(&self.directory.join(INSTALLED_NOTICE))
     }
 
     pub(crate) fn clear_failure(&self) -> io::Result<()> {
@@ -199,6 +234,7 @@ impl Cache {
         self.clean_packages(None)
     }
 
+    /// Discards a prepared update, not the successful install notice.
     pub(crate) fn clear(&self) -> io::Result<()> {
         let _guard = self.lock();
         self.clear_unlocked()
@@ -444,18 +480,88 @@ mod tests {
     }
 
     #[test]
-    fn failed_installation_is_reported_until_the_running_version_catches_up() {
+    fn failed_installation_is_reported_while_the_running_version_is_older() {
         let directory = tempfile::tempdir().unwrap();
         let cache = Cache::new(directory.path().into());
         cache.store(&update(), b"test", false).unwrap();
         cache.mark_install_attempt("2.0.0", &details()).unwrap();
-        let failure = cache.failure("1.5.0").unwrap().unwrap();
+        let Some(InstallRecovery::Failed(failure)) = cache.recover_installation("1.5.0").unwrap()
+        else {
+            panic!("an older running version must report the failure");
+        };
         assert_eq!(failure.version, "2.0.0");
         assert_eq!(failure.details.current, "1.5.0");
         assert_eq!(failure.details.notes, details().notes);
-        assert!(cache.failure("2.0.0").unwrap().is_none());
+        assert!(!cache.directory.join(INSTALLED_NOTICE).exists());
+    }
+
+    #[test]
+    fn a_confirmed_install_survives_cache_cleanup_and_reopening_until_acknowledged() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = Cache::new(directory.path().into());
+        cache.store(&update(), b"test", false).unwrap();
+        cache.mark_install_attempt("2.0.0", &details()).unwrap();
+        let installed = Some(InstallRecovery::Installed("2.0.0".into()));
+        assert_eq!(cache.recover_installation("2.0.0").unwrap(), installed);
         assert!(!cache.directory.join(INSTALL_RECEIPT).exists());
         assert!(!cache.directory.join(PACKAGE_METADATA).exists());
+        cache.clear().unwrap();
+        cache.clear_failure().unwrap();
+
+        let reopened = Cache::new(directory.path().into());
+        assert_eq!(reopened.recover_installation("2.0.0").unwrap(), installed);
+        reopened.acknowledge_installed().unwrap();
+        reopened.acknowledge_installed().unwrap();
+        let reopened = Cache::new(directory.path().into());
+        assert_eq!(reopened.recover_installation("2.0.0").unwrap(), None);
+    }
+
+    #[test]
+    fn no_attempt_no_version_increase_or_a_different_launch_target_cannot_confirm_an_update() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = Cache::new(directory.path().into());
+        assert_eq!(cache.recover_installation("2.0.0").unwrap(), None);
+        cache.store(&update(), b"test", false).unwrap();
+        assert_eq!(cache.recover_installation("2.0.0").unwrap(), None);
+
+        cache.mark_install_attempt("1.0.0", &details()).unwrap();
+        assert_eq!(cache.recover_installation("1.0.0").unwrap(), None);
+
+        cache.mark_install_attempt("2.0.0", &details()).unwrap();
+        assert_eq!(cache.recover_installation("3.0.0").unwrap(), None);
+        assert_eq!(cache.recover_installation("2.0.0").unwrap(), None);
+    }
+
+    #[test]
+    fn a_pending_notice_is_discarded_on_a_different_version_or_a_new_failed_attempt() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = Cache::new(directory.path().into());
+        for running in ["1.0.0", "3.0.0"] {
+            cache.mark_install_attempt("2.0.0", &details()).unwrap();
+            assert_eq!(
+                cache.recover_installation("2.0.0").unwrap(),
+                Some(InstallRecovery::Installed("2.0.0".into()))
+            );
+            assert_eq!(cache.recover_installation(running).unwrap(), None);
+            assert_eq!(cache.recover_installation("2.0.0").unwrap(), None);
+        }
+
+        cache.mark_install_attempt("2.0.0", &details()).unwrap();
+        cache.recover_installation("2.0.0").unwrap();
+        cache
+            .mark_install_attempt(
+                "3.0.0",
+                &ReleaseDetails {
+                    current: "2.0.0".into(),
+                    ..details()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            cache.recover_installation("2.0.0").unwrap(),
+            Some(InstallRecovery::Failed(attempt)) if attempt.version == "3.0.0"
+        ));
+        assert!(!cache.directory.join(INSTALLED_NOTICE).exists());
     }
 
     #[test]
@@ -466,10 +572,10 @@ mod tests {
         cache.store(&update, b"test", false).unwrap();
         cache.mark_install_attempt("2.0.0", &details()).unwrap();
         cache.clear_package().unwrap();
-        assert!(cache.failure("1.0.0").unwrap().is_some());
+        assert!(cache.recover_installation("1.0.0").unwrap().is_some());
         cache.store(&update, b"test", false).unwrap();
         cache.clear_failure().unwrap();
-        assert!(cache.failure("1.0.0").unwrap().is_none());
+        assert_eq!(cache.recover_installation("1.0.0").unwrap(), None);
         assert!(cache.load(&update).unwrap().is_some());
     }
 
@@ -481,7 +587,9 @@ mod tests {
         fs::write(cache.directory.join(PACKAGE_METADATA), b"{").unwrap();
         assert!(cache.load(&update()).unwrap().is_none());
         fs::write(cache.directory.join(INSTALL_RECEIPT), b"{").unwrap();
-        assert!(cache.failure("1.0.0").unwrap().is_none());
+        fs::write(cache.directory.join(INSTALLED_NOTICE), b"{").unwrap();
+        assert_eq!(cache.recover_installation("1.0.0").unwrap(), None);
+        assert!(!cache.directory.join(INSTALLED_NOTICE).exists());
     }
 
     #[test]
@@ -498,6 +606,6 @@ mod tests {
             cache.clear_package().unwrap();
         }
         receipt.join().unwrap();
-        assert!(cache.failure("1.0.0").unwrap().is_some());
+        assert!(cache.recover_installation("1.0.0").unwrap().is_some());
     }
 }
