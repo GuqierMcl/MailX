@@ -438,6 +438,7 @@ fn main() {
             compose::composer_close,
             compose::composer_cancel_close,
             updater::updater_get_state,
+            updater::updater_acknowledge_installed,
             updater::updater_check,
             updater::updater_download,
             updater::updater_cancel,

@@ -139,6 +139,7 @@ fn main() {
             "composer_close",
             "composer_cancel_close",
             "updater_get_state",
+            "updater_acknowledge_installed",
             "updater_check",
             "updater_download",
             "updater_cancel",

@@ -288,6 +288,19 @@ html[data-translucent].dark .app-canvas {
   display: none;
 }
 
+/* Entering the idle state shows a brief scroll hint, including on open. */
+.settings-nav:not(:has(:focus-visible)) > [data-slot="scroll-area-scrollbar"]:not([data-hovering], [data-scrolling], :active) {
+  opacity: 0;
+  animation: settings-nav-scroll-hint 1.2s var(--settings-nav-scroll-easing, ease-out);
+}
+@keyframes settings-nav-scroll-hint {
+  0%, 83% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-nav { --settings-nav-scroll-easing: step-end; }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;}

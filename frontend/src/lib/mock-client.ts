@@ -1204,6 +1204,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     onComposerCloseRequested: () => () => undefined,
     // The browser preview has no updater: it announces a version but cannot install one.
     getUpdateState: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),
+    acknowledgeUpdateInstalled: async () => undefined,
     checkForUpdates: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),
     downloadUpdate: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),
     cancelUpdate: async () => ({ canInstall: false, phase: 'available', version: PREVIEW_UPDATE.version, current: PREVIEW_UPDATE.current, notes: PREVIEW_UPDATE.notes, date: PREVIEW_UPDATE.date }),

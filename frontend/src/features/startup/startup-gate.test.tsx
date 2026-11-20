@@ -28,12 +28,14 @@ describe('startup gate', () => {
     const pending = deferred<Awaited<ReturnType<MailxClient['getStartupStatus']>>>()
     const client = testClient()
     client.getStartupStatus.mockReturnValueOnce(pending.promise)
-    render(<StartupGate client={client} />)
+    render(<StartupGate client={client}><span>ready content</span></StartupGate>)
 
     expect(screen.getByRole('status', { name: '正在初始化本地数据' })).toBeInTheDocument()
+    expect(screen.queryByText('ready content')).not.toBeInTheDocument()
     expect(client.listAccounts).not.toHaveBeenCalled()
     await act(async () => { pending.resolve({ state: 'ready', revision: 1 }) })
     await waitFor(() => expect(screen.getByText('还没有邮箱账号')).toBeInTheDocument())
+    expect(screen.getByText('ready content')).toBeInTheDocument()
     expect(client.listAccounts).toHaveBeenCalledTimes(1)
   })
 

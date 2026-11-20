@@ -316,6 +316,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | MailxClient 方法 | Tauri 命令与参数 | 成功结果 |
 | --- | --- | --- |
 | `getUpdateState()` | `updater_get_state`，空对象 | `UpdateSnapshot` |
+| `acknowledgeUpdateInstalled(version)` | `updater_acknowledge_installed`，`{ version: string }` | `null`；清除匹配版本的待展示记录，重复确认或版本不匹配时无效果 |
 | `checkForUpdates()` | `updater_check`，空对象 | 检查后的 `UpdateSnapshot`；自动更新开启时可能已进入 downloading 或 ready |
 | `downloadUpdate()` | `updater_download`，空对象 | 启动手动下载或失败重试后的 `UpdateSnapshot` |
 | `cancelUpdate()` | `updater_cancel`，空对象 | 取消下载后的 `UpdateSnapshot`；该版本在本次进程中暂停自动下载 |
@@ -331,6 +332,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 - failed 携带 `stage: check | download | install`。check 的 version 为 null，没有目标说明；download / install 保留目标 version 与完整说明，重试调用 `downloadUpdate()` 重新准备更新。
 - `canInstall` 反映安装能力：macOS、Windows、AppImage 为 true，deb / rpm 为 false；false 时不展示下载、安装或重启控件，调用下载返回 `unsupported`。
 - `installOnQuit` 只在 ready 且当前包已安排退出安装时为 true；自动更新已关闭且包来自自动下载时为 false。前端按此显示“稍后（退出时安装）”或“稍后”，不能只凭 ready 推定安装授权。手动下载包仍保留该次同意。
+- `installedUpdateVersion?: string` 是待提示的已安装版本，独立于新一轮更新的 `phase` 和 `version`。主窗口展示后调用 `acknowledgeUpdateInstalled`，成功确认后快照省略该字段。
 
 界面先订阅再查询，拒绝晚于新事件返回的旧初始快照，手动检查响应也不覆盖已经到达的新事件；任何带目标版本的手动结果都可打开详情。自动下载直接进入 downloading，不先推送 available 通知；ready 和上次未完成安装的提示按版本、阶段在本次运行中去重。
 
