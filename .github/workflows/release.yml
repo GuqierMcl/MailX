@@ -119,7 +119,11 @@ jobs:
     # The updater signing key lives in this environment's secrets; a fork or a
     # pull request never reaches it.
     environment: release
-    timeout-minutes: 60
+    # Notarization waits on Apple's queue, which is outside this workflow's
+    # control: the first signed run spent 45 minutes there after a build of
+    # about 15. An unsigned build needed well under 60, so the ceiling leaves
+    # room for a slow queue rather than cutting a build that is still waiting.
+    timeout-minutes: 90
     env:
       APPIMAGE_EXTRACT_AND_RUN: "1"
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
