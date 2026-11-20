@@ -18,6 +18,7 @@
 //! with no extra bookkeeping, and the loop re-checks before every model
 //! request, so a revocation also stops runs that are already going.
 mod agent;
+mod compose;
 mod confirm;
 mod conversations;
 mod email_summary;
@@ -53,13 +54,14 @@ use runs::Runs;
 use summary::SummaryCache;
 pub use types::{
     AssistantEvent, AssistantEventKind, CachedEmailSummary, ChatContext, ChatTurn,
-    ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ConfirmAction, ConfirmAttachment,
-    ConfirmDraftChange, ConfirmOutcome, ConfirmWarning, ConfirmationDetails, ConfirmationRequest,
-    ConversationChange, ConversationDetail, ConversationList, ConversationSummary,
-    ConversationsChanged, DEFAULT_CONVERSATION_PAGE, FinishedReason, FlagRestore,
+    ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ComposeAssistState, ComposeTask,
+    ConfirmAction, ConfirmAttachment, ConfirmDraftChange, ConfirmOutcome, ConfirmWarning,
+    ConfirmationDetails, ConfirmationRequest, ConversationChange, ConversationDetail,
+    ConversationList, ConversationSummary, ConversationsChanged, DEFAULT_CONVERSATION_PAGE,
+    FinishedReason, FlagRestore, MAX_COMPOSE_INSTRUCTION_CHARS, MAX_COMPOSE_TEXT_CHARS,
     MAX_CONTEXT_EMAILS, MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, Occasion, OrganizeChange,
-    PendingConfirmation, RunKind, RunKindTag, RunReasoning, RunSnapshot, RunState, StartRun,
-    ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
+    PendingConfirmation, RewriteStyle, RunKind, RunKindTag, RunReasoning, RunSnapshot, RunState,
+    StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
 };
 
 /// The built-in assistant. Cheap to clone; clones share their runs.
@@ -198,12 +200,21 @@ impl Assistant {
                 }
                 None
             }
+            RunKind::ComposeAssist { draft_id, task } => {
+                compose::valid(draft_id, task)?;
+                None
+            }
             RunKind::NowSummary { .. } => None,
         };
         let tag = match request.kind {
             RunKind::NowSummary { .. } => RunKindTag::NowSummary,
             RunKind::Chat { .. } => RunKindTag::Chat,
             RunKind::EmailSummary { .. } => RunKindTag::EmailSummary,
+            RunKind::ComposeAssist { .. } => RunKindTag::ComposeAssist,
+        };
+        let draft_scope = match &request.kind {
+            RunKind::ComposeAssist { draft_id, .. } => Some(draft_id.clone()),
+            _ => None,
         };
         let ready = match inner.gate().await? {
             Gate::Ready(ready) => ready,
@@ -212,11 +223,16 @@ impl Assistant {
                     RunKind::Chat {
                         conversation_id, ..
                     } => conversation_id.clone(),
-                    RunKind::NowSummary { .. } | RunKind::EmailSummary { .. } => None,
+                    RunKind::NowSummary { .. }
+                    | RunKind::EmailSummary { .. }
+                    | RunKind::ComposeAssist { .. } => None,
                 };
-                let id = inner
-                    .runs
-                    .create(tag, conversation_id, RunState::AwaitingConsent)?;
+                let id = inner.runs.create_for_draft(
+                    tag,
+                    conversation_id,
+                    RunState::AwaitingConsent,
+                    draft_scope,
+                )?;
                 return inner.runs.snapshot(&id);
             }
         };
@@ -238,6 +254,9 @@ impl Assistant {
             } => {
                 self.start_email_summary(*ready, &email_id, style, language, fresh.unwrap_or(false))
                     .await
+            }
+            RunKind::ComposeAssist { draft_id, task } => {
+                self.start_compose(*ready, &draft_id, &task).await
             }
             RunKind::Chat {
                 conversation_id,
@@ -515,6 +534,66 @@ impl Assistant {
         ));
         inner.runs.set_abort(&run_id, task.abort_handle());
         inner.runs.snapshot(&run_id)
+    }
+
+    async fn start_compose(
+        &self,
+        ready: Ready,
+        draft_id: &str,
+        task: &ComposeTask,
+    ) -> Result<RunSnapshot, AppError> {
+        let inner = &self.inner;
+        let input = compose::input(inner, &ready.settings, draft_id, task).await?;
+        let code = match task {
+            ComposeTask::Draft { language, .. } => language.as_deref(),
+            ComposeTask::Rewrite {
+                style: RewriteStyle::Translate { code },
+                ..
+            } => Some(code.as_str()),
+            _ => None,
+        };
+        let language = code.and_then(crate::translate::provider::ai::language_name);
+        let system = prompt::compose_system(task, language);
+        let run_id = inner.runs.create_for_draft(
+            RunKindTag::ComposeAssist,
+            None,
+            RunState::Running,
+            Some(draft_id.to_owned()),
+        )?;
+        let task = tokio::spawn(agent::compose(inner.clone(), run_id.clone(), system, input));
+        inner.runs.set_abort(&run_id, task.abort_handle());
+        inner.runs.snapshot(&run_id)
+    }
+
+    /// Whether the composer can offer writing help: the assistant is on, a
+    /// model is usable, and whether consent was given for it. Reads settings
+    /// only.
+    pub async fn compose_state(&self) -> Result<ComposeAssistState, AppError> {
+        let inner = &self.inner;
+        let settings = inner.settings.get()?.settings.assistant;
+        let none = ComposeAssistState {
+            usable: false,
+            consented: false,
+            service: String::new(),
+        };
+        if !settings.enabled {
+            return Ok(none);
+        }
+        let Some((binding, service)) = inner.ai.assistant_service().await? else {
+            return Ok(none);
+        };
+        Ok(ComposeAssistState {
+            usable: true,
+            consented: settings.consented.as_ref() == Some(&binding),
+            service,
+        })
+    }
+
+    /// The draft a compose run works on; `None` for any other run or an
+    /// unknown id. The host checks it before a composer window may follow or
+    /// stop the run.
+    pub fn compose_run_draft(&self, run_id: &str) -> Option<String> {
+        self.inner.runs.draft_of(run_id)
     }
 
     /// The newest summary kept for an email whose body has not changed since,

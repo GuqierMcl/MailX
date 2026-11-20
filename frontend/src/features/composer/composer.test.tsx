@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/toast'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import type { Account, Draft } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
+import { MOD_KEY } from '@/features/mail/shortcuts'
 import { Composer } from './composer'
 import { AUTOSAVE_DELAY_MS, SAVING_INDICATOR_DELAY_MS } from './use-draft-editor'
 
@@ -547,7 +548,8 @@ describe('Cc and Bcc rows', () => {
     setup()
     await body()
     await userEvent.hover(screen.getByRole('button', { name: '密送' }))
-    expect(await screen.findByText('密送（Cmd/Ctrl+Alt+B）')).toBeInTheDocument()
+    // The platform's own modifier, never both.
+    expect(await screen.findByText(`密送（${MOD_KEY}+Alt+B）`)).toBeInTheDocument()
   })
 
   it('fold away when left empty, and stay when they have an address', async () => {

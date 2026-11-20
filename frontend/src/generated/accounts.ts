@@ -1332,13 +1332,31 @@ context?: ChatContext, } | { "type": "emailSummary", emailId: string, style?: Su
  * Skip the cached summary and ask the model again; the new one
  * replaces it.
  */
-fresh?: boolean, };
+fresh?: boolean, } | { "type": "composeAssist", draftId: string, task: ComposeTask, };
 
 export type ChatContext = { "type": "email", emailId: string, } | { "type": "emails", emailIds: Array<string>, } | { "type": "draft", draftId: string, };
 
+export type ComposeTask = { "type": "draft", instruction: string, language?: string, } | { "type": "rewrite", text: string, style: RewriteStyle, } | { "type": "proofread", text: string, };
+
+export type RewriteStyle = { "type": "polish" } | { "type": "formal" } | { "type": "friendly" } | { "type": "concise" } | { "type": "expand" } | { "type": "translate", code: string, } | { "type": "custom", instruction: string, };
+
+export type ComposeAssistState = {
+/**
+ * The assistant is on and a model is usable.
+ */
+usable: boolean,
+/**
+ * The user agreed to send mail content to that model's connection.
+ */
+consented: boolean,
+/**
+ * The connection's name, for the consent question.
+ */
+service: string, };
+
 export type Occasion = "newYear" | "springFestival" | "lantern" | "dragonBoat" | "qixi" | "midAutumn" | "xiaohan" | "dahan" | "lichun" | "yushui" | "jingzhe" | "chunfen" | "qingming" | "guyu" | "lixia" | "xiaoman" | "mangzhong" | "xiazhi" | "xiaoshu" | "dashu" | "liqiu" | "chushu" | "bailu" | "qiufen" | "hanlu" | "shuangjiang" | "lidong" | "xiaoxue" | "daxue" | "dongzhi";
 
-export type RunKindTag = "nowSummary" | "chat" | "emailSummary";
+export type RunKindTag = "nowSummary" | "chat" | "emailSummary" | "composeAssist";
 
 export type CachedEmailSummary = { style: SummaryStyle,
 /**

@@ -7,6 +7,7 @@ mod badge;
 mod body_protocol;
 mod commands;
 mod compose;
+mod compose_assist;
 mod compose_files;
 mod diagnostics;
 mod lifecycle;
@@ -231,10 +232,20 @@ fn main() {
                         );
                     }
                     // Run state, text, tools and confirmation requests; the
-                    // main window is the only one that can answer them.
+                    // main window is the only one that can answer them. A
+                    // compose run's events go only to the window that has its
+                    // draft: its composer window, else the main window's
+                    // inline composer.
                     mailx_core::CoreEvent::Assistant(event) => {
+                        let target = event
+                            .draft_id
+                            .as_deref()
+                            .and_then(window_access::parse_draft_id)
+                            .map(|id| window_access::composer_label(&id))
+                            .filter(|label| handle.get_webview_window(label).is_some())
+                            .unwrap_or_else(|| window_chrome::MAIN_WINDOW.to_owned());
                         let _ = handle.emit_to(
-                            EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                            EventTarget::webview_window(target),
                             assistant::EVENT,
                             event,
                         );
@@ -388,6 +399,11 @@ fn main() {
             assistant::assistant_clear_conversations,
             assistant::assistant_email_summary,
             assistant::assistant_clear_email_summaries,
+            compose_assist::compose_assist_state,
+            compose_assist::compose_assist_grant_consent,
+            compose_assist::compose_assist_start,
+            compose_assist::compose_assist_cancel,
+            compose_assist::compose_assist_snapshot,
             commands::settings_get,
             commands::settings_update,
             commands::notifications_test,

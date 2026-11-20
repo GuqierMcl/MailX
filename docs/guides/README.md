@@ -145,7 +145,7 @@ Finished translations are kept on this computer so reopening a message does not 
 
 ## AI
 
-Settings → Integrations → AI connects MailX to AI model providers. Translation can use a model (choose "AI model" under Translation), the assistant can write the summary line on the Now page, and it can summarize the email you are reading. Nothing you read or write is sent to a model unless you agree to it.
+Settings → Integrations → AI connects MailX to AI model providers. Translation can use a model (choose "AI model" under Translation), the assistant can write the summary line on the Now page, it can summarize the email you are reading, and it can help you write in the composer. Nothing you read or write is sent to a model unless you agree to it.
 
 ### Add a provider
 
@@ -188,6 +188,18 @@ With the assistant on and a model set up, the reading toolbar has an "AI summary
 The first time, the card asks before anything is sent ("Summarizing sends this email to …"); choose Allow, which is the same agreement as for the assistant, and the summary starts. The subject, sender, date and text of that email go to the provider; attachments and pictures do not. Summaries are kept on this computer, so reopening an email shows its summary at once without sending it again; a summary is only reused while the email is unchanged, and Regenerate replaces it. Kept summaries are not encrypted, like the rest of your mail cache, and they are removed with the email or its account.
 
 Nothing is summarized without a click unless you ask for it. In the summary panel, "Always summarize mail from …" makes that sender's mail summarize itself whenever you open it. Under Settings → Integrations → AI → Assistant, "Summarize emails as you open them" (off by default) does it for every email with a text of at least 200 characters, which sends each opened email to the model; "Always summarize these senders" lists the addresses you added, with a button to remove each; and "Email summaries" has "Clear summaries", which deletes every kept summary and shows how many it removed. This feature has only been checked with automated tests and a preview with sample data, not yet by hand on the desktop app or with real AI providers. Reply suggestions, summaries of a whole conversation, and AI help while writing are not available yet.
+
+### Write with AI
+
+With the assistant on and a model set up, the writing toolbar has an "AI writing" button (a sparkle). It offers Draft… (say what to write), Rewrite (Polish, More formal, Friendlier, More concise, Expand, Translate into… or Your own request…) and Proofread. Select text first to get a small bubble above it with Rewrite and Proofread; with nothing selected, they use everything you wrote above the quoted original. In an empty body a "Draft with AI" hint sits at the cursor. Cmd/Ctrl+J in the body opens the same menu, and starts a draft when the body is empty.
+
+The answer streams into a card right after your text and shows exactly what would go into the draft, in the draft's own styles. Editing inside the text being rewritten closes the card. Choose "Accept" to replace your text in one step (Undo brings the earlier wording back), "Insert below" to keep both, "Try again" to ask for another version and compare earlier ones with the arrows, "Discard" to leave the draft as it was, or "Ask more" to carry on about this draft in the assistant panel (main window only). Enter accepts; Esc stops or discards. Proofread shows its changes: removed words struck through, added words underlined, with a count; when nothing needs fixing, the card says so.
+
+A draft's language follows the email you are answering by default; you can pick another language in the card before generating. Rewriting keeps the language you wrote in, and Translate into… uses the same languages as translation.
+
+The quoted original of a reply, a forward's original and pictures are never sent for rewriting or changed. If your selection reaches into the quote or includes a picture, the card explains why and nothing is sent. AI writing changes nothing in the draft by itself: it runs only when you ask, and its answer stays a preview until you accept it.
+
+The first time, the card asks before anything is sent ("Writing help sends this draft and the email it answers to …"); Allow is the same agreement as for the assistant. The text you selected or wrote and the draft's headers (sender, recipients, subject) go to the provider; when drafting, the email it answers is read too, up to 8,000 characters. Attachments and pictures are not sent. This feature has only been checked with automated tests and a preview with sample data, not yet by hand on the desktop app or with real AI providers. Subject suggestions, a check before sending and saved custom instructions are not available yet.
 
 ## Composing and sending
 

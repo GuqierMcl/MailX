@@ -14,9 +14,11 @@ import {
   Image01Icon, TextAlignLeftIcon, TextAlignCenterIcon, TextAlignRightIcon, TextColorIcon, PaintBoardIcon, Tick02Icon,
 } from '@hugeicons/core-free-icons'
 import { IconButton } from '@/components/icon-button'
+import { MOD_KEY } from '@/features/mail/shortcuts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { DraftAttachmentSummary, InlineImage } from '@/generated/accounts'
+import { ComposeAi, type ComposeAiProps } from './ai/compose-ai-layer'
 import { InlineImageController } from './inline-image'
 import { allowedMailLink, mailEditorOptions } from './mail-body-editor-schema'
 import { MAIL_COLORS, MAIL_HIGHLIGHTS, type MailColor, type MailHighlight, type MailTextAlign } from './mail-body-format'
@@ -46,6 +48,8 @@ type MailBodyEditorProps = {
   onPasteImages?: (files: File[]) => void
   /** Fold the quoted original of a reply (display only); read when the editor starts. */
   foldReplyQuote?: boolean
+  /** Writing help (ai-chat-ui.md 5.3); absent where the host offers none. */
+  ai?: Omit<ComposeAiProps, 'editor' | 'readOnly' | 'toolbarSlot'>
 }
 
 type LinkPopup = MailBodySelection & { href: string }
@@ -91,12 +95,13 @@ const blockActions: FormatAction[] = [
 ]
 
 /** A host-independent editor. Draft revisions, saving and sending live outside. */
-export default function MailBodyEditor({ value, onChange, readOnly = false, editorRef, inlineImages, onInsertImage, onPasteImages, foldReplyQuote = false }: MailBodyEditorProps) {
+export default function MailBodyEditor({ value, onChange, readOnly = false, editorRef, inlineImages, onInsertImage, onPasteImages, foldReplyQuote = false, ai }: MailBodyEditorProps) {
   const { i18n } = useTranslation('composer')
   const [linkPopup, setLinkPopup] = useState<LinkPopup | null>(null)
   const [linkError, setLinkError] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [formatPopup, setFormatPopup] = useState<FormatPopup | null>(null)
+  const [aiSlot, setAiSlot] = useState<HTMLDivElement | null>(null)
   const root = useRef<HTMLDivElement>(null)
   const linkInput = useRef<HTMLInputElement>(null)
   const popup = useRef<HTMLDivElement>(null)
@@ -346,7 +351,7 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
     <IconButton
       key={action.label}
       label={action.label}
-      tip={action.shortcut ? `${action.label}（Cmd/Ctrl+${action.shortcut}）` : action.label}
+      tip={action.shortcut ? `${action.label}（${MOD_KEY}+${action.shortcut}）` : action.label}
       size="icon-sm"
       disabled={readOnly || !editor}
       aria-pressed={action.mark ? state?.active.includes(action.mark) ?? false : undefined}
@@ -362,11 +367,11 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
 
   const historyButtons = (inMenu = false) => (
     <>
-      <IconButton label={t('composer:action.undo')} tip={t('composer:toolbar.undoShortcut')} size="icon-sm" disabled={readOnly || !state?.undo} role={inMenu ? 'menuitem' : undefined}
+      <IconButton label={t('composer:action.undo')} tip={t('composer:toolbar.undoShortcut', { mod: MOD_KEY })} size="icon-sm" disabled={readOnly || !state?.undo} role={inMenu ? 'menuitem' : undefined}
         onMouseDown={(event) => event.preventDefault()} onClick={() => { if (editor?.isEditable) { editor.view.focus(); editor.commands.undo() }; setMoreOpen(false) }}>
         <HugeiconsIcon icon={UndoIcon} strokeWidth={1.8} aria-hidden="true" />
       </IconButton>
-      <IconButton label={t('composer:toolbar.redo')} tip={t('composer:toolbar.redoShortcut')} size="icon-sm" disabled={readOnly || !state?.redo} role={inMenu ? 'menuitem' : undefined}
+      <IconButton label={t('composer:toolbar.redo')} tip={t('composer:toolbar.redoShortcut', { mod: MOD_KEY })} size="icon-sm" disabled={readOnly || !state?.redo} role={inMenu ? 'menuitem' : undefined}
         onMouseDown={(event) => event.preventDefault()} onClick={() => { if (editor?.isEditable) { editor.view.focus(); editor.commands.redo() }; setMoreOpen(false) }}>
         <HugeiconsIcon icon={RedoIcon} strokeWidth={1.8} aria-hidden="true" />
       </IconButton>
@@ -404,8 +409,9 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
   return (
     <div ref={root} className="mail-body-editor">
       <div role="toolbar" aria-label={t('composer:toolbar.format')} className="mail-format-toolbar">
+        {ai && <div ref={setAiSlot} className="mail-format-group mail-ai-slot" />}
         <div className="mail-format-group">
-          <IconButton label={t('composer:toolbar.paragraphCurrent', { style: state?.heading ? t('composer:toolbar.heading', { level: state.heading }) : t('composer:field.body') })} tip={t('composer:toolbar.paragraphShortcut')} size="icon-sm"
+          <IconButton label={t('composer:toolbar.paragraphCurrent', { style: state?.heading ? t('composer:toolbar.heading', { level: state.heading }) : t('composer:field.body') })} tip={t('composer:toolbar.paragraphShortcut', { mod: MOD_KEY })} size="icon-sm"
             disabled={readOnly || !editor} aria-haspopup="menu" aria-expanded={formatPopup?.kind === 'paragraph'} className="mail-paragraph-trigger"
             onMouseDown={(event) => event.preventDefault()} onClick={() => openFormat('paragraph')}>
             <span>{state?.heading ? t('composer:toolbar.heading', { level: state.heading }) : t('composer:field.body')}</span><HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={1.8} aria-hidden="true" />
@@ -414,7 +420,7 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
         <div className="mail-format-group">{markActions.map((action) => actionButton(action))}</div>
         <div className="mail-format-group mail-format-colors">{colorButtons()}</div>
         <div className="mail-format-group">
-          <IconButton label={t('composer:toolbar.link')} tip={t('composer:toolbar.linkShortcut')} size="icon-sm" disabled={readOnly || !editor} aria-pressed={state?.link ?? false}
+          <IconButton label={t('composer:toolbar.link')} tip={t('composer:toolbar.linkShortcut', { mod: MOD_KEY })} size="icon-sm" disabled={readOnly || !editor} aria-pressed={state?.link ?? false}
             className="mail-format-button" onMouseDown={(event) => event.preventDefault()} onClick={openLink}>
             <HugeiconsIcon icon={Link01Icon} strokeWidth={1.8} aria-hidden="true" />
           </IconButton>
@@ -474,7 +480,7 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
           className={`mail-editor-popup mail-choice-popup ${formatPopup.kind === 'paragraph' ? 'mail-paragraph-menu' : 'mail-palette-menu'}`}
           onKeyDownCapture={(event) => menuKeyDown(event, formatPopup.kind === 'paragraph' ? 1 : 3)}>
           {formatChoices.map((choice) => (
-            <IconButton key={choice.name} label={choice.label} tip={formatPopup.kind === 'paragraph' && choice.name !== '0' ? `${choice.label}（Cmd/Ctrl+Alt+${choice.name}）` : choice.label}
+            <IconButton key={choice.name} label={choice.label} tip={formatPopup.kind === 'paragraph' && choice.name !== '0' ? `${choice.label}（${MOD_KEY}+Alt+${choice.name}）` : choice.label}
               role="menuitemradio" aria-checked={formatValue === choice.name} className="mail-choice-button" size="sm"
               onMouseDown={(event) => event.preventDefault()} onClick={() => applyFormat(choice.name)}>
               {formatPopup.kind !== 'paragraph' && <span aria-hidden="true" className="mail-color-swatch" data-swatch-color={formatPopup.kind === 'color' ? choice.name : undefined} data-swatch-highlight={formatPopup.kind === 'highlight' ? choice.name : undefined} />}
@@ -485,6 +491,7 @@ export default function MailBodyEditor({ value, onChange, readOnly = false, edit
         </div>
       )}
       <EditorContent editor={editor} className="mail-body-surface" />
+      {ai && <ComposeAi {...ai} editor={editor} readOnly={readOnly} toolbarSlot={aiSlot} />}
       {state?.quoteWidget && createPortal(
         <IconButton label={t('composer:editor.showQuote')} size="icon-xs" className="mail-quote-fold-button"
           onMouseDown={(event) => event.preventDefault()}

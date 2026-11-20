@@ -5,6 +5,8 @@ import type {
   AiConsent,
   AssistantEvent,
   CachedEmailSummary,
+  ComposeAssistState,
+  ComposeTask,
   ConversationDetail,
   ConversationList,
   ConversationsChanged,
@@ -420,6 +422,16 @@ export interface MailxClient {
   assistantEmailSummary(emailId: string): Promise<CachedEmailSummary | null>
   /** Deletes every kept email summary; resolves with how many there were. */
   assistantClearEmailSummaries(): Promise<number>
+  // --- Writing help in the composer (ai-chat-ui.md 5.3). Composer windows and the inline composer, each for its own draft.
+  /** Whether writing help can be offered: the assistant is on with a usable model, and whether consent was given. */
+  composeAssistState(): Promise<ComposeAssistState>
+  /** The same consent as `assistantGrantConsent`, from a composer. */
+  composeAssistGrantConsent(): Promise<AiConsent>
+  /** Starts a compose run for the draft; its events arrive on `onAssistantEvent` in the window that has the draft. */
+  composeAssistStart(draftId: string, task: ComposeTask): Promise<RunSnapshot>
+  /** Stops a compose run of this window's draft. */
+  composeAssistCancel(runId: string): Promise<void>
+  composeAssistSnapshot(runId: string): Promise<RunSnapshot>
   /** Saved conversations changed (a turn was saved, one was deleted, an account's were removed): refetch the list. */
   onAssistantConversationsChanged(listener: (changed: ConversationsChanged) => void): () => void
 
@@ -781,6 +793,11 @@ export function createDesktopClient(): MailxClient {
     assistantClearConversations: () => call<void>('assistant_clear_conversations'),
     assistantEmailSummary: (emailId) => call<CachedEmailSummary | null>('assistant_email_summary', { emailId }),
     assistantClearEmailSummaries: () => call<number>('assistant_clear_email_summaries'),
+    composeAssistState: () => call<ComposeAssistState>('compose_assist_state'),
+    composeAssistGrantConsent: () => call<AiConsent>('compose_assist_grant_consent'),
+    composeAssistStart: (draftId, task) => call<RunSnapshot>('compose_assist_start', { request: { draftId, task } }),
+    composeAssistCancel: (runId) => call<void>('compose_assist_cancel', { runId }),
+    composeAssistSnapshot: (runId) => call<RunSnapshot>('compose_assist_snapshot', { runId }),
     onAssistantConversationsChanged: (listener) => subscribe<ConversationsChanged>(HOST_EVENTS.assistantConversations, listener),
     getMcpStatus: () => call<McpStatus>('mcp_get_status'),
     setMcpEnabled: (enabled) => call<McpStatus>('mcp_set_enabled', { enabled }),

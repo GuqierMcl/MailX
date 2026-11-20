@@ -13,11 +13,13 @@ import type { InlineComposer } from './use-inline-composer'
  * same `Composer` as in a window, with "在新窗口中打开" and "关闭" in its header.
  * It fades in over whatever the reader showed. Esc does nothing here on purpose.
  */
-export function InlineComposerPane({ client, accounts, inline }: {
+export function InlineComposerPane({ client, accounts, inline, onAskAi }: {
   client: MailxClient
   /** In display order (`layout.accountOrder`), as the sender picker lists them. */
   accounts: Account[]
   inline: InlineComposer
+  /** Opens the assistant's island, which already has this draft as its context. */
+  onAskAi?: () => void
 }) {
   useTranslation()
   const draft = inline.current
@@ -36,6 +38,7 @@ export function InlineComposerPane({ client, accounts, inline }: {
         controllerRef={inline.controllerRef}
         onSent={inline.close}
         onDiscarded={inline.close}
+        onAskAi={onAskAi}
         headerActions={(
           <>
             <IconButton label={t('mail:inlineComposePopOut')} onClick={() => void inline.popOut()}>

@@ -45,6 +45,8 @@ struct Entry {
     created: u64,
     /// When the open thinking stretch (the last one) began.
     thinking_since: Option<Instant>,
+    /// The draft a compose run works on; its events go to that draft's window.
+    draft_id: Option<String>,
 }
 
 fn utf16_len(text: &str) -> u32 {
@@ -174,6 +176,7 @@ impl Runs {
             run_id: run_id.to_owned(),
             seq: snapshot.seq,
             kind,
+            draft_id: entry.draft_id.clone(),
         }));
     }
 
@@ -184,6 +187,18 @@ impl Runs {
         kind: RunKindTag,
         conversation_id: Option<String>,
         state: RunState,
+    ) -> Result<String, AppError> {
+        self.create_for_draft(kind, conversation_id, state, None)
+    }
+
+    /// [`Self::create`] for a run about one draft: every event, the first
+    /// included, carries the draft id so the host can route it.
+    pub(crate) fn create_for_draft(
+        &self,
+        kind: RunKindTag,
+        conversation_id: Option<String>,
+        state: RunState,
+        draft_id: Option<String>,
     ) -> Result<String, AppError> {
         let mut table = self.lock();
         Self::sweep_at(&mut table, Instant::now());
@@ -222,6 +237,7 @@ impl Runs {
             finished_at: None,
             created,
             thinking_since: None,
+            draft_id,
         };
         Self::record(
             &self.events,
@@ -269,9 +285,18 @@ impl Runs {
                 finished_at: Some(Instant::now()),
                 created,
                 thinking_since: None,
+                draft_id: None,
             },
         );
         snapshot
+    }
+
+    /// The draft a run works on, if it is a compose run.
+    pub(crate) fn draft_of(&self, run_id: &str) -> Option<String> {
+        self.lock()
+            .runs
+            .get(run_id)
+            .and_then(|entry| entry.draft_id.clone())
     }
 
     /// Records that the run goes without tools.
