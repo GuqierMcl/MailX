@@ -14,7 +14,7 @@
 ## 安装与添加账号
 
 1. 在 Releases 选择对应平台的安装包，按该版本安装说明打开。macOS 区分 Apple 芯片与 Intel；Windows 提供 x64 安装程序；Linux 提供 x64 AppImage、deb 和 rpm。macOS 安装包已签名并公证，可以直接打开；Windows 与 Linux 安装包尚未做代码签名。可用同一版本的 `SHA256SUMS.txt` 核对下载文件。
-2. 在邮箱服务商网站准备客户端访问，按服务商要求启用 IMAP / SMTP，并取得客户端密码、授权码或应用专用密码。MailX 内置 Gmail、iCloud、Outlook、Microsoft 365、QQ / Foxmail、163、126、yeah.net 和 139 入口，其他账号可手动填写服务器与端口。Outlook 和 Microsoft 365 在浏览器中登录，不需要密码或授权码（见下文）；其他服务商暂不支持浏览器登录。
+2. 在**添加账号**中选择服务商。Gmail、iCloud、QQ / Foxmail、163、126、yeah.net、139、新浪邮箱、飞书邮箱和 Lark 邮箱需要按服务商要求开启客户端访问，并取得客户端密码或授权码。Outlook 和 Microsoft 365 在浏览器中登录。其他 IMAP / SMTP 服务可选手动配置，填写服务器与端口。
 3. 在 MailX 添加账号，填写地址与客户端凭证；需要代理时，为该账号设置 SOCKS5 或 HTTP CONNECT。可在保存前测试收发登录并分别查看结果。登录测试成功只表示可以认证，实际投递仍需用自己的测试收件人确认。
 4. 保存后等待同步。侧栏顶部汇总所有账号的收件箱、星标、草稿和已发送，归档、垃圾邮件和已删除收在“更多”里；有多个账号时，悬停某一行并点它的箭头可按账号分别列出。下方的各账号默认折叠，展开后可以看到该账号的全部文件夹，包括收件箱和已发送。选择某个账号的文件夹后，邮件列表标题旁会显示该邮箱的名称。想给邮件更多空间时，用标题栏按钮或 Cmd/Ctrl+B 收起侧栏：它会变成一列图标，入口不变，悬停显示名称和未读数，“更多”和账号改为弹出菜单；选择会被记住。服务商拒绝连接时，检查客户端协议是否开启、授权码是否有效以及网络路由。
 
@@ -33,6 +33,24 @@
 `@icloud.com`、`@me.com` 和 `@mac.com` 地址可选择 iCloud 入口。MailX 预填 `imap.mail.me.com:993` 隐式 TLS 与 `smtp.mail.me.com:587` STARTTLS，收发共享应用专用密码。两端用户名默认使用完整邮箱地址；收信登录失败时，可按 [Apple 服务器指南](https://support.apple.com/en-us/102525)，在高级设置中仅将 IMAP 用户名改为 `@` 前的部分，SMTP 保持完整地址。
 
 修改或重置 Apple 账号主密码会撤销全部应用专用密码，需重新生成并在 MailX 的账号连接设置中更新。MailX 尚未提供 Apple 账号授权登录。iCloud+ 自定义域请使用手动 IMAP / SMTP 入口；别名没有独立的发件人选择器，指向同一邮箱的多个地址也不会自动合并。Mail Drop 尚不可用，附件与内嵌图片仍受 Apple 普通邮件大小限制。
+
+### 新浪免费邮箱
+
+免费的 `@sina.com` 和 `@sina.cn` 邮箱都选择**新浪免费邮箱**。先在新浪网页版[开启 IMAP4/SMTP 并生成客户端授权码](https://help.sina.com.cn/comquestiondetail/view/1566/)。两步都要做，只拿到授权码并不会开通服务。在 MailX 里填授权码，不要填网页登录密码。
+
+`@sina.cn` 预填 `imap.sina.cn` 和 `smtp.sina.cn`，`@sina.com` 则预填 `imap.sina.com` 和 `smtp.sina.com`。两组端口都是 993 和 465，使用隐式 TLS。新浪 VIP 邮箱的[服务器不同](https://help.sina.com.cn/comquestiondetail/view/158/)，请使用手动配置。
+
+### 飞书邮箱（中国版）
+
+如果**企业的邮箱由飞书托管**，即使地址后缀是公司自己的域名，也请选择这个入口。管理员须先允许第三方邮箱客户端登录。然后在飞书桌面端进入**设置 → 邮箱 → 第三方邮箱客户端登录**，为设备生成[专用密码](https://www.feishu.cn/hc/zh-CN/articles/902478147400-在第三方邮箱客户端登录飞书邮箱)，在 MailX 填写完整的成员邮箱地址和该密码。
+
+无论地址后缀是什么，预设都使用 `imap.feishu.cn:993` 和 `smtp.feishu.cn:465`，均为隐式 TLS。邮件组不能登录。在飞书内绑定的外部邮箱请选择实际托管商；如果邮箱由国际版 Lark 托管，请选择 **Lark 邮箱（国际版）**。
+
+### Lark 邮箱（国际版）
+
+如果企业邮箱由 Lark 托管，选择 **Lark 邮箱（国际版）**。管理员须先允许第三方邮件客户端登录。然后在 **Lark 桌面端**进入**设置 → 邮箱 → 第三方邮箱客户端登录**，为这台设备[生成专用密码](https://www.larksuite.com/hc/zh-CN/articles/378111206512-在第三方邮箱客户端登录-lark-邮箱)。在 MailX 填写完整成员邮箱地址和该密码。邮件组不能当作成员邮箱登录；如果只是在 Lark 里绑定了外部邮箱，请选择实际托管商。
+
+Lark 使用 `imap.larksuite.com:993` 和 `smtp.larksuite.com:465`，均为隐式 TLS。公司邮箱的后缀不能用来区分飞书和 Lark；MailX 只连接你选中的服务，登录失败也不会把密码拿到另一个服务上尝试。
 
 ### Microsoft（Outlook / Microsoft 365）
 

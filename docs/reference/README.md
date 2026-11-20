@@ -11,5 +11,6 @@
 | [Gmail 接入评估](gmail-integration.md) | 应用专用密码预设、双语引导、官方图标和帮助入口已有实现；OAuth（自建 / 官方应用）的条件与缺口已评估，未实现；真实账号与标签语义待验收。 |
 | [Microsoft 365 / Outlook.com（Exchange）接入评估](microsoft-integration.md) | 已实现，Outlook.com 个人账号已手测添加与收信同步，Microsoft 365 待真实账号验证；选定 OAuth + IMAP / SMTP（XOAUTH2），Entra 公共客户端已注册并试跑授权，记录了通用 OAuth 基础需满足的条件；自建 Exchange 与世纪互联版本暂不覆盖。 |
 | [iCloud 邮箱接入可行性评估](icloud-mail-integration.md) | 专用预设、应用专用密码双语引导及官方帮助入口已有实现；沿用标准兼容策略，真实账号、历史域、别名和自定义域仍待验收。 |
+| [邮箱服务商预设候选](mail-provider-preset-candidates.md) | 新浪免费邮、飞书中国版、Lark 国际版预设的范围、官方端点与真实账号验收条件；Fastmail 暂缓，其余候选仍为选型建议。 |
 
 新增调研文档时在本页维护入口，`docs/README.md` 仅介绍本目录的职责，不逐项列出调研主题。

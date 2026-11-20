@@ -5,6 +5,8 @@ import { providerEmailRequired, type MailProvider } from './providers'
 
 export type ConnectionDraft = Omit<ConnectionConfig, 'port'> & { port: string }
 export type SecretDraft = { replace: boolean; value: string }
+type Protocol = 'imap' | 'smtp'
+type EndpointField = 'host' | 'port' | 'tls'
 
 // Transient connection form state, intentionally distinct from the Rust-generated wire types.
 export type AccountDraft = {
@@ -13,6 +15,8 @@ export type AccountDraft = {
   ews?: { url: string; username: string; manual: boolean }
   imap: ConnectionDraft
   smtp: ConnectionDraft
+  /** Track explicit edits only for new presets with domain-specific defaults. */
+  endpointOverrides?: Partial<Record<Protocol, Partial<Record<EndpointField, true>>>>
   mode: AuthenticationMode
   sharedPassword: SecretDraft
   imapPassword: SecretDraft
@@ -36,6 +40,7 @@ export function initialDraft(account: Account | null, provider?: MailProvider): 
     emailAddress: account?.emailAddress ?? '',
     imap: account && 'imap' in account ? { ...account.imap, port: String(account.imap.port) } : { host: '', tls: 'implicit', ...provider?.preset?.imap, port: String(provider?.preset?.imap.port ?? 993), username: '' },
     smtp: account && 'smtp' in account ? { ...account.smtp, port: String(account.smtp.port) } : { host: '', tls: 'implicit', ...provider?.preset?.smtp, port: String(provider?.preset?.smtp.port ?? 465), username: '' },
+    ...(!account && provider?.preset?.serversByDomain ? { endpointOverrides: {} } : {}),
     mode: password?.mode ?? 'shared',
     sharedPassword: secret(password?.imap.passwordConfigured),
     imapPassword: secret(password?.imap.passwordConfigured),
@@ -62,6 +67,47 @@ export function changeDraft<K extends keyof AccountDraft>(draft: AccountDraft, k
     changed.confirmImageProxyDns = false
   }
   return changed
+}
+
+export function changeDraftServer<K extends keyof ConnectionDraft>(draft: AccountDraft, protocol: Protocol, field: K, value: ConnectionDraft[K]): AccountDraft {
+  const next = { ...draft, [protocol]: { ...draft[protocol], [field]: value } }
+  if (draft.endpointOverrides && field !== 'username') {
+    next.endpointOverrides = { ...draft.endpointOverrides, [protocol]: { ...draft.endpointOverrides[protocol], [field]: true } }
+  }
+  return next
+}
+
+function emailDomain(emailAddress: string): string | undefined {
+  return /^[^\s@]+@([^\s@]+)$/.exec(emailAddress.trim())?.[1].toLowerCase()
+}
+
+/** Domain-based defaults never change saved connections or explicit field edits. */
+export function draftServer(draft: AccountDraft, protocol: Protocol, newProvider?: MailProvider): ConnectionDraft {
+  const value = draft[protocol]
+  const preset = newProvider?.preset
+  if (!preset) return value
+  if (preset.domains === 'organization') {
+    return { ...value, ...preset[protocol], port: String(preset[protocol].port) }
+  }
+  if (!preset.serversByDomain) return value
+  const domain = emailDomain(draft.emailAddress)
+  const defaults = (domain && preset.domains.includes(domain) ? preset.serversByDomain[domain] ?? preset : preset)[protocol]
+  const overrides = draft.endpointOverrides?.[protocol]
+  return {
+    ...value,
+    host: overrides?.host ? value.host : defaults.host,
+    port: overrides?.port ? value.port : String(defaults.port),
+    tls: overrides?.tls ? value.tls : defaults.tls,
+  }
+}
+
+function validOrganizationAddress(address: string, domain: string): boolean {
+  // Match core's text and DNS hostname checks; leave mailbox naming and hosting
+  // rules to the provider. The address never determines the server endpoint.
+  const hostname = domain.replace(/\.+$/, '')
+  return new TextEncoder().encode(address).length <= 320 && !/\p{Cc}/u.test(address)
+    && hostname.length <= 253
+    && hostname.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))
 }
 
 export function clearSecrets(draft: AccountDraft): AccountDraft {
@@ -93,7 +139,7 @@ function host(value: string, field: string): string {
   return result
 }
 
-function connection(value: ConnectionDraft, protocol: 'imap' | 'smtp', emailAddress: string): ConnectionConfig {
+function connection(value: ConnectionDraft, protocol: Protocol, emailAddress: string): ConnectionConfig {
   // Use Unicode White_Space plus U+FEFF at both the JS and Rust input boundaries.
   const username = value.username.replace(/^[\s\u0085]+|[\s\u0085]+$/g, '') || emailAddress
   return { ...value, host: host(value.host, `${protocol}.host`), port: port(value.port, `${protocol}.port`), username }
@@ -108,12 +154,15 @@ function secret(value: SecretDraft, field: string): SecretUpdate {
 /** Validates the draft into a connection; throws a field error for the first problem. */
 export function draftToConnection(draft: AccountDraft, account: Account | null, provider?: MailProvider): ConnectionInput {
   const emailAddress = draft.emailAddress.trim()
-  if (!/^[^\s@]+@[^\s@]+$/.test(emailAddress)) invalid('emailAddress', t('accounts:invalidEmail'))
-  if (!account && provider?.preset && !provider.preset.domains.includes(emailAddress.split('@')[1].toLowerCase())) {
+  const domain = emailDomain(emailAddress)
+  if (!domain) invalid('emailAddress', t('accounts:invalidEmail'))
+  const newProvider = account ? undefined : provider
+  const domains = newProvider?.preset?.domains
+  if (provider && domains && (domains === 'organization' ? !validOrganizationAddress(emailAddress, domain) : !domains.includes(domain))) {
     invalid('emailAddress', providerEmailRequired(provider))
   }
-  const imap = connection(draft.imap, 'imap', emailAddress)
-  const smtp = connection(draft.smtp, 'smtp', emailAddress)
+  const imap = connection(draftServer(draft, 'imap', newProvider), 'imap', emailAddress)
+  const smtp = connection(draftServer(draft, 'smtp', newProvider), 'smtp', emailAddress)
   const authentication: ConnectionInput['authentication'] = account?.authentication.kind === 'oauth2'
     ? { kind: 'oauth2', configuration: account.authentication.configuration }
     : draft.mode === 'shared'

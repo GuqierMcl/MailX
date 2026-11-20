@@ -44,6 +44,19 @@ import { mockMcpAgents } from '@/features/mcp/mock-agents'
 import { mockDraftBody, mockPlainToHtml } from './mock-draft-body'
 import { cachedLanguage, systemLocale } from '@/i18n/locale'
 
+// Browser preview mirrors the desktop command's closed list of help targets.
+const NETEASE_HELP = 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b'
+const PROVIDER_HELP_URLS = new Map<string, string>([
+  ['qq', 'https://help.mail.qq.com/detail/0/1087'],
+  ['139', 'https://help.mail.10086.cn/statichtml/22/Content/1234606.html'],
+  ['icloud', 'https://support.apple.com/en-us/102654'],
+  ['gmail', 'https://support.google.com/accounts/answer/185833'],
+  ['netease163', NETEASE_HELP], ['netease126', NETEASE_HELP], ['neteaseYeah', NETEASE_HELP],
+  ['sina', 'https://help.sina.com.cn/comquestiondetail/view/1566/'],
+  ['feishu', 'https://www.feishu.cn/hc/zh-CN/articles/902478147400'],
+  ['lark', 'https://www.larksuite.com/hc/en-US/articles/378111206512-log-in-to-lark-mail-through-a-third-party-email-client'],
+])
+
 function normalizedAccountOrder(value: unknown): string[] | null {
   if (!Array.isArray(value) || value.length > 256) return null
   const order = new Set<string>()
@@ -536,13 +549,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       return { verificationId: crypto.randomUUID(), imap: { ...verified }, smtp: { ...verified }, ...('ews' in connection ? { ews: { ...verified } } : {}) }
     },
     async openProviderHelp(providerId) {
-      const url = providerId === 'qq' ? 'https://help.mail.qq.com/detail/0/1087'
-        : providerId === '139' ? 'https://help.mail.10086.cn/statichtml/22/Content/1234606.html'
-          : providerId === 'icloud' ? 'https://support.apple.com/en-us/102654'
-            : providerId === 'gmail' ? 'https://support.google.com/accounts/answer/185833'
-              : providerId === 'netease163' || providerId === 'netease126' || providerId === 'neteaseYeah'
-                ? 'https://help.mail.163.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b'
-                : null
+      const url = PROVIDER_HELP_URLS.get(providerId)
       if (!url) throw new MailxClientError({ code: 'validation', message: '配置参数无效。', field: 'providerId' })
       window.open(url, '_blank', 'noopener,noreferrer')
     },

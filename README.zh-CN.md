@@ -36,9 +36,13 @@
 
 MailX 为以下邮箱服务提供独立添加入口。多数服务商只需选择后填写邮箱地址和服务商为客户端提供的密码、授权码或应用专用密码，服务器设置会自动填好；Outlook 和 Microsoft 365 则改为在浏览器中登录。
 
-| <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud 邮箱" height="32"> | <img src="frontend/src/assets/providers/outlook.svg" alt="Outlook" height="32"> | <img src="frontend/src/assets/providers/microsoft.svg" alt="Microsoft 365" height="32"> | <img src="frontend/src/assets/providers/qqmail.png" alt="QQ 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-163.png" alt="网易 163 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="网易 126 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="网易 Yeah 邮箱" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 邮箱" height="32"> | <img src="frontend/src/assets/providers/exchange.png" alt="Microsoft Exchange" height="32"> |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Gmail | iCloud 邮箱 | Outlook | Microsoft 365 | QQ 邮箱 | 163 邮箱 | 126 邮箱 | Yeah 邮箱 | 139 邮箱 | Exchange（自建服务器） |
+| <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud 邮箱" height="32"> | <img src="frontend/src/assets/providers/outlook.svg" alt="Outlook" height="32"> | <img src="frontend/src/assets/providers/microsoft.svg" alt="Microsoft 365" height="32"> | <img src="frontend/src/assets/providers/exchange.png" alt="Microsoft Exchange" height="32"> | <img src="frontend/src/assets/providers/feishu.png" alt="飞书" height="32"> | <img src="frontend/src/assets/providers/lark.png" alt="Lark" height="32"> | <img src="frontend/src/assets/providers/qqmail.png" alt="QQ 邮箱" height="32"> |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Gmail | iCloud 邮箱 | Outlook | Microsoft 365 | Exchange（自建服务器） | [飞书邮箱（中国版）](docs/guides/zh-CN/README.md#飞书邮箱中国版) | [Lark 邮箱（国际版）](docs/guides/zh-CN/README.md#lark-邮箱国际版) | QQ 邮箱 |
+| <img src="frontend/src/assets/providers/netease-163.png" alt="网易 163 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="网易 126 邮箱" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="网易 Yeah 邮箱" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 邮箱" height="32"> | <img src="frontend/src/assets/providers/sina-mail.jpg" alt="新浪免费邮箱" height="32"> |  |  |  |
+| 163 邮箱 | 126 邮箱 | Yeah 邮箱 | 139 邮箱 | [新浪免费邮箱](docs/guides/zh-CN/README.md#新浪免费邮箱) |  |  |  |
+
+企业自有域名不能用来判断托管商，请按实际开通的服务选择“飞书邮箱（中国版）”或“Lark 邮箱（国际版）”。
 
 Gmail 接受 `@gmail.com` 和 `@googlemail.com` 地址，使用 Google 应用专用密码，需要先开启两步验证。生成方法和不可用的情况见[添加账号指南](docs/guides/zh-CN/README.md#gmail)。
 

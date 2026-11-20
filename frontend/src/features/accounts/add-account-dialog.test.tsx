@@ -40,7 +40,9 @@ function fillQqConnection(dialog: HTMLElement, emailAddress = 'synthetic@qq.com'
 }
 
 async function chooseProvider(dialog: HTMLElement, provider: MailProvider) {
-  fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: provider.preset!.domains[0] } })
+  const domains = provider.preset?.domains
+  const query = domains && domains !== 'organization' ? domains[0] : provider.name
+  fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: query } })
   const option = within(dialog).getByRole('radio', { name: provider.name })
   const logo = option.closest('label')!.querySelector('img')
   if (provider.logo) expect(logo).toHaveAttribute('src', provider.logo)
@@ -75,6 +77,17 @@ describe('add account wizard', () => {
     expect(within(dialog).getByRole('radio', { name: /IMAP\/SMTP/ })).toBeInTheDocument()
     expect(within(dialog).getByRole('searchbox', { name: '搜索邮箱服务商' })).toBeInTheDocument()
     expect(within(dialog).queryByLabelText('邮箱地址')).not.toBeInTheDocument()
+  })
+
+  it('omits Fastmail from the picker and keeps manual setup available', () => {
+    const { dialog } = renderDialog()
+    const picker = within(dialog)
+    const search = picker.getByRole('searchbox')
+    expect(picker.queryByRole('radio', { name: /fastmail/i })).not.toBeInTheDocument()
+    fireEvent.change(search, { target: { value: 'fastmail.com' } })
+    expect(picker.queryByRole('radio', { name: /fastmail/i })).not.toBeInTheDocument()
+    fireEvent.change(search, { target: { value: 'IMAP/SMTP' } })
+    expect(picker.getByRole('radio', { name: 'IMAP/SMTP' })).toBeEnabled()
   })
 
   it('selects a provider on click and moves on only with the next button', async () => {

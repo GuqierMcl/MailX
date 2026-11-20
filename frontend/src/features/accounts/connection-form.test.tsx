@@ -96,6 +96,25 @@ describe('connection form', () => {
     })
   })
 
+  it('round-trips a saved fastmail id, endpoints and separate credentials after its preset is removed', async () => {
+    const savedAuth = exampleAccount().authentication
+    const account = exampleAccount({
+      providerId: 'fastmail', emailAddress: 'owner@fastmail.com',
+      imap: { host: 'imap.fastmail.com', port: 993, tls: 'implicit', username: 'original-in' },
+      smtp: { host: 'relay.example.com', port: 587, tls: 'startTls', username: 'original-out' },
+      authentication: { ...savedAuth, mode: 'separate', smtp: { ...savedAuth.smtp, id: 'auth-out' } },
+    })
+    const { submit } = renderForm(account)
+    expect(screen.getByLabelText('IMAP 主机')).toHaveValue(account.imap.host)
+    expect(screen.getByLabelText('SMTP 主机')).toHaveValue(account.smtp.host)
+    await userEvent.click(screen.getByRole('button', { name: '保存更改' }))
+    expect(submit).toHaveBeenCalledOnce()
+    expect(submit.mock.calls[0][0]).toMatchObject({
+      providerId: 'fastmail', emailAddress: account.emailAddress, imap: account.imap, smtp: account.smtp,
+      authentication: { kind: 'password', mode: 'separate', imapPassword: { action: 'keep' }, smtpPassword: { action: 'keep' } },
+    })
+  })
+
   it('uses app-password labels and placeholders for separate iCloud credentials', async () => {
     renderForm(null, vi.fn(), ICLOUD_PROVIDER)
     expect(screen.getByLabelText('应用专用密码')).toHaveAttribute('placeholder', '输入应用专用密码')

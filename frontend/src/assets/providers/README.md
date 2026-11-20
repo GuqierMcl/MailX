@@ -2,7 +2,7 @@
 
 这里保存随前端打包的第三方服务商标识，用于识别用户选择的邮箱服务商；不属于 MailX 自有品牌，也不由 `branding/logo.svg` 派生。应用运行时不从服务商站点加载这些图标。
 
-2026-10-30 起采用官方发布的原始素材：栅格图以本地 PNG 保存，官方提供静态 SVG 的（Gmail）直接保存原文件。保留完整图形、字形、配色、背景与长宽比例，不再提取部分数字、删去标识文字或使用 VTracer 描摹为 SVG。CSS 只做等比显示，不对图像重新着色。
+2026-10-30 起采用官方发布的原始素材：优先按实际格式保存本地原文件。保留完整图形、字形、配色、背景与长宽比例，不再提取部分数字、删去标识文字或使用 VTracer 描摹为 SVG。CSS 只做等比显示，不对图像重新着色。
 
 ## 选材和处理规范
 
@@ -93,6 +93,28 @@
 - 素材署名：Microsoft。来源仓库的文档许可为 [CC BY 4.0](https://github.com/MicrosoftDocs/microsoft-365-docs/blob/f732381b56f7c3aa64fb28abe56213b30ccdb7e3/LICENSE)（[许可说明](https://creativecommons.org/licenses/by/4.0/)）；原图未修改。该许可不授予商标权，Exchange 名称与标识仍属于 Microsoft。此图仅用于标识 MailX 支持的产品，不表示 Microsoft 背书。
 - 使用方式：`exchange-self-hosted` 的 `logo` 本地导入；选择入口、账号标签和启用服务商图标的头像沿用现有 `object-contain` 等比显示，关闭服务商图标偏好时仍显示账号首字。
 
+## 新浪免费邮箱
+
+- 文件：`sina-mail.jpg`，84 × 84 RGB JPEG，5,268 字节。完整保留黄底、白色信封和新浪眼睛图形，用于 `sina.com` 与 `sina.cn` 免费邮箱；不用于新浪 VIP 邮箱或企业邮箱。
+- 来源链：[新浪帮助中心](https://help.sina.com.cn/)的新浪产品列表在“新浪邮箱”条目中引用[原图](https://n.sinaimg.cn/default/transform/168/w84h84/20190417/_Ur2-hvvuiym8988844.png)，并链接到 [新浪邮箱官方客户端下载页](https://mail.sina.com.cn/client/mobile/index.php?suda-key=mail_app&suda-value=login)；同一列表的“新浪企邮”有独立图标。原图 URL 虽以 `.png` 结尾，响应为 `image/jpeg`，文件亦解码为 JPEG。仅按实际格式命名，本地与原件字节一致。
+- 未采用 [免费邮箱登录页](https://mail.sina.com.cn/)的 [favicon](https://mail.sina.com.cn/favicon.ico)：与[新浪门户 favicon](https://www.sina.com.cn/favicon.ico)字节相同；也未拆取登录页或下载页的横向字标。核验日期：2026-11-19。
+
+## Fastmail
+
+- 专用预设暂缓，没有 Fastmail 添加入口；以下仅保留素材调研，不随应用打包标识。核验日期：2026-11-19。
+- 原件：[Fastmail 媒体中心](https://www.fastmail.com/media-kit/) → **Download logos** → [官方 ZIP](https://www.fastmail.com/assets/brand/Fastmail_Logos.zip)。其中 `Fastmail_Logos_RGB/FM-Icon-RGB.png` 是独立彩色图标，3073 × 3073，118,934 字节，SHA-256 `bd08edf72f994cd6c9c99710030d3617bc32ed5806839fa2bb614b4e61b02fce`。图标确实存在；未确认的是 MailX 的分发许可。
+- [Fastmail 品牌指南](https://www.fastmail.com/policies/brand-guidelines/) General terms §2 的有限许可仅限 Fastmail 批准的用途，例举符合 API 条款和开发者政策的开发者开发所定义的 `Client Application`；Logo use guidelines §1.5.2.6 列明不得分发或以其他方式提供标识。仅采用标准 IMAP/SMTP 的预设不应视作获批应用，也不据媒体包可下载就认定有分发许可。另核对了 [Fastmail 现行服务条款](https://www.fastmail.com/policies/terms-of-service/)（2026-07-02 生效）。
+
+## 飞书邮箱（中国版）
+
+- 文件：`feishu.png`，700 × 700 RGBA PNG，13,812 字节。此入口使用**飞书主品牌标识**，不使用帮助中心“邮箱”栏目的黄色信封。只用于“飞书邮箱（中国版）”；国际版入口使用下列 Lark 官网原件。
+- 来源链：[飞书邮箱产品页](https://www.feishu.cn/product/email)的 `link[rel="icon"]` 指向[官方透明底 PNG](https://p1-hera.feishucdn.com/tos-cn-i-jbbdkfciu3/84a9f036fe2b44f99b899fff4beeb963~tplv-jbbdkfciu3-image:0:0.image)；[飞书官网](https://www.feishu.cn/)的分享图也使用该素材的缩小版本。保留官方配色、留白及透明度，不做格式转换、裁切或主题换色。核验日期：2026-11-20。
+
+## Lark Mail（国际版）
+
+- 文件：`lark.png`，700 × 700 RGBA PNG，13,052 字节。仅用于 `lark` 入口，和中国版入口分别显示完整产品名称；不通过改色、裁切或叠加角标区分两者。
+- 来源：[Lark 邮箱产品页](https://www.larksuite.com/en_us/product/email)的 `link[rel="icon"]` 引用[透明背景 PNG 原件](https://p16-hera-overseas.larksuitecdn.com/tos-mya-i-lojyj5t9n9/9b87226605154fb7b8141a9c94de22e9.png~tplv-lojyj5t9n9-origin.image)。直接保存 CDN 返回的完整文件，未重新编码；不复用中国版素材，也不从横向字标提取图形。核验日期：2026-11-20。
+
 ## 文件核验与维护
 
 QQ 邮箱与网易邮箱的核验日期：2026-10-30；中国移动 139 邮箱的核验日期：2026-11-11；iCloud Mail 的核验日期：2026-11-06；Gmail 的核验日期：2026-11-08；Microsoft Outlook 与 Microsoft 标识的核验日期：2026-11-10；Exchange 的核验日期：2026-11-16。下表记录本地文件的 SHA-256，用于发现素材更新或意外修改。
@@ -109,5 +131,8 @@ QQ 邮箱与网易邮箱的核验日期：2026-10-30；中国移动 139 邮箱�
 | `outlook.svg` | `81bfb24bb128298a9ed0ea6fe8d9ba8cff703b26d6a7cbd18cc4314cecba8f1f` |
 | `microsoft.svg` | `929f48f88c8ca7f3f5d294be47ec4caf51acc28ac25340c19a903125d7ecd84a` |
 | `exchange.png` | `c5b2dbc1cc27483d5513ed183a5dedac5d59ad101a57593909b24e1048281ebd` |
+| `sina-mail.jpg` | `bfbce800e745826ba115147d9f30764a00f903ffc8be95abe25a84adc4811b0e` |
+| `feishu.png` | `cfd2b879c472a2674520492c84a0304c537a19964b8a2dcd3562c57de773268b` |
+| `lark.png` | `a99925e6db13b5a72c64dde7ec4d9b63b8af6d84ec2e5fd2e7c975d00a519c3c` |
 
 服务商名称及图形属于各自权利人，与 MailX 自有品牌资源分开维护。

@@ -244,18 +244,37 @@ describe('saved connection verification', () => {
     expect(args.request.verificationId).toMatch(/^[0-9a-f-]{36}$/)
   })
 
-  it('does not begin an already cancelled verification and forwards help by provider only', async () => {
+  it('does not begin an already cancelled verification', async () => {
     const controller = new AbortController()
     controller.abort()
     const client = createDesktopClient()
     await expect(client.verifyAccountConnection('account', 2, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
     expect(invoke).not.toHaveBeenCalled()
-    vi.mocked(invoke).mockResolvedValue({ ok: true, data: null, requestId: 'help' })
-    await client.openProviderHelp('qq')
-    expect(invoke).toHaveBeenCalledWith('accounts_open_provider_help', { providerId: 'qq' })
-    await client.openProviderHelp('139')
-    expect(invoke).toHaveBeenLastCalledWith('accounts_open_provider_help', { providerId: '139' })
   })
+})
+
+describe('desktop provider help', () => {
+  it('forwards only the provider ID to the fixed-help command', async () => {
+    vi.mocked(invoke).mockResolvedValue({ ok: true, data: null, requestId: 'help' })
+    const client = createDesktopClient()
+    const providers = ['qq', '139', 'sina', 'feishu', 'lark']
+    for (const providerId of providers) await client.openProviderHelp(providerId)
+    expect(vi.mocked(invoke).mock.calls).toEqual(providers.map((providerId) => [
+      'accounts_open_provider_help', { providerId },
+    ]))
+  })
+
+  it.each(['fastmail', 'feishu-intl', 'lark-cn', 'https://help.sina.com.cn/comquestiondetail/view/1566/'])(
+    'does not fall back to a URL opener when the host rejects %s', async (providerId) => {
+      const open = vi.spyOn(window, 'open').mockReturnValue(null)
+      try {
+        vi.mocked(invoke).mockResolvedValue({ ok: false, error: { code: 'validation', message: '', field: 'providerId' }, requestId: 'help' })
+        await expect(createDesktopClient().openProviderHelp(providerId)).rejects.toMatchObject({ failure: { code: 'validation', field: 'providerId' } })
+        expect(vi.mocked(invoke).mock.calls).toEqual([['accounts_open_provider_help', { providerId }]])
+        expect(open).not.toHaveBeenCalled()
+      } finally { open.mockRestore() }
+    },
+  )
 })
 
 describe('unsaved connection verification boundary', () => {

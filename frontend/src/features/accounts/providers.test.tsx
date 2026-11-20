@@ -1,13 +1,76 @@
-import { render, screen } from '@/test/render'
+import { act, render, screen } from '@/test/render'
+import { i18n } from '@/i18n'
 import { describe, expect, it } from 'vitest'
 import { ProviderBadge, ProviderIcon } from './provider-badge'
-import { filterProviders, GENERIC_PROVIDER, GMAIL_PROVIDER, ICLOUD_PROVIDER, MAIL_139_PROVIDER, MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER } from './providers'
+import { FEISHU_PROVIDER, filterProviders, GENERIC_PROVIDER, GMAIL_PROVIDER, ICLOUD_PROVIDER, LARK_PROVIDER, MAIL_139_PROVIDER, MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, PROVIDERS, providerOf, QQ_PROVIDER, SINA_PROVIDER } from './providers'
 
 describe('mail providers', () => {
   it('puts Gmail first, iCloud second and manual setup last in the default provider list', () => {
     expect(PROVIDERS[0]).toBe(GMAIL_PROVIDER)
     expect(PROVIDERS[1]).toBe(ICLOUD_PROVIDER)
     expect(PROVIDERS.at(-1)).toBe(GENERIC_PROVIDER)
+  })
+
+  it('lists each new provider once ahead of the manual paths without moving existing presets', () => {
+    expect(PROVIDERS.map((provider) => provider.id)).toEqual([
+      'gmail', 'icloud', 'microsoft-personal', 'microsoft-work', 'qq', 'netease163', 'netease126', 'neteaseYeah', '139',
+      'sina', 'feishu', 'lark', 'exchange-self-hosted', null,
+    ])
+  })
+
+  it.each([
+    ['SINA.COM', SINA_PROVIDER], ['sina.cn', SINA_PROVIDER], ['新浪免费邮', SINA_PROVIDER],
+    ['飞书邮箱', FEISHU_PROVIDER], ['Feishu', FEISHU_PROVIDER], ['feishu.cn', FEISHU_PROVIDER],
+    ['lark', LARK_PROVIDER], ['LARKSUITE.COM', LARK_PROVIDER], ['飞书国际版', LARK_PROVIDER],
+  ])('finds the preset for %s and resolves its persistent ID', (query, provider) => {
+    expect(filterProviders(PROVIDERS, query)).toEqual([provider])
+    expect(providerOf(provider.id)).toBe(provider)
+  })
+
+  it('resolves the two regional provider IDs independently', () => {
+    expect(providerOf('feishu')).toBe(FEISHU_PROVIDER)
+    expect(providerOf('lark')).toBe(LARK_PROVIDER)
+  })
+
+  it.each([SINA_PROVIDER, FEISHU_PROVIDER, LARK_PROVIDER])('renders a provider name and decorative icon for $id', (provider) => {
+    const { container } = render(<><ProviderIcon provider={provider} /><ProviderBadge providerId={provider.id} /></>)
+    expect(screen.getByText(provider.name)).toBeInTheDocument()
+    // This assertion also works after a bundled mark replaces the generic icon.
+    expect(container.querySelectorAll('svg[aria-hidden], img[aria-hidden]')).toHaveLength(2)
+  })
+
+  it.each([
+    [SINA_PROVIDER, /sina-mail\.jpg$/],
+    [FEISHU_PROVIDER, /\/feishu\.png$/],
+    [LARK_PROVIDER, /\/lark\.png$/],
+  ] as const)('uses the local $0.id mark without cropping in the picker and badge', (provider, filename) => {
+    const { container } = render(<><ProviderIcon provider={provider} /><ProviderBadge providerId={provider.id} /></>)
+    const images = container.querySelectorAll('img')
+    expect(images).toHaveLength(2)
+    for (const image of images) {
+      expect(image).toHaveAttribute('src', expect.stringMatching(filename))
+      expect(image.getAttribute('src')).not.toMatch(/^https?:/)
+      expect(image).toHaveClass('object-contain')
+    }
+  })
+
+  it('searches the localized descriptions in both languages', async () => {
+    const previous = i18n.language
+    try {
+      await act(async () => { await i18n.changeLanguage('en') })
+      expect(filterProviders(PROVIDERS, 'China-hosted work mail')).toEqual([FEISHU_PROVIDER])
+      expect(FEISHU_PROVIDER.name).toBe('Feishu Mail (China)')
+      expect(LARK_PROVIDER.name).toBe('Lark Mail (International)')
+      expect(filterProviders(PROVIDERS, 'Lark')).toEqual([LARK_PROVIDER])
+      expect(SINA_PROVIDER.name).toBe('Sina Free Mail')
+      await act(async () => { await i18n.changeLanguage('zh-CN') })
+      expect(filterProviders(PROVIDERS, '中国版托管企业邮箱')).toEqual([FEISHU_PROVIDER])
+      expect(FEISHU_PROVIDER.name).toBe('飞书邮箱（中国版）')
+      expect(LARK_PROVIDER.name).toBe('Lark 邮箱（国际版）')
+      expect(SINA_PROVIDER.name).toBe('新浪免费邮箱')
+    } finally {
+      await act(async () => { await i18n.changeLanguage(previous) })
+    }
   })
 
   it.each([MICROSOFT_PERSONAL_PROVIDER, MICROSOFT_WORK_PROVIDER])('shows the bundled official logo, unaltered, for $id', (provider) => {

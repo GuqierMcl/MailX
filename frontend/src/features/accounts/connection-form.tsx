@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
 import { providerCredentialText, providerEmailRequired, providerOf, type MailProvider } from './providers'
-import { changeDraft, clearSecrets, draftToConnection, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
+import { changeDraft, changeDraftServer, clearSecrets, draftServer, draftToConnection, initialDraft, type AccountDraft, type ConnectionDraft, type SecretDraft } from './account-draft'
 import { ConnectionVerificationReport } from './connection-verification'
 
 type FormProps = {
@@ -61,6 +61,7 @@ type InputFieldProps = {
   error?: ClientFailure | null
   autoComplete?: string
   errorContext?: ErrorContext
+  readOnly?: boolean
 }
 
 type LoginTestState = (
@@ -68,7 +69,7 @@ type LoginTestState = (
   | { kind: 'ready'; report: DraftConnectionVerification }
 ) & { scopeKey: string }
 
-export function TextField({ id, label, value, onChange, placeholder, description, inputMode, error, autoComplete = 'off', errorContext }: InputFieldProps) {
+export function TextField({ id, label, value, onChange, placeholder, description, inputMode, error, autoComplete = 'off', errorContext, readOnly }: InputFieldProps) {
   const invalid = error?.field === id
   const describedBy = [description && `${id}-description`, invalid && `${id}-error`].filter(Boolean).join(' ') || undefined
   return (
@@ -76,19 +77,20 @@ export function TextField({ id, label, value, onChange, placeholder, description
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Input id={id} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder}
         inputMode={inputMode} autoComplete={autoComplete} autoCapitalize="none" spellCheck={false}
-        aria-invalid={invalid} aria-describedby={describedBy} />
+        aria-invalid={invalid} aria-describedby={describedBy} readOnly={readOnly} />
       {description && <FieldDescription id={`${id}-description`}>{description}</FieldDescription>}
       {invalid && <FieldError id={`${id}-error`}>{errorText(error, errorContext)}</FieldError>}
     </Field>
   )
 }
 
-function ConnectionFields({ protocol, value, emailAddress, onChange, error }: {
+function ConnectionFields({ protocol, value, emailAddress, onChange, error, fixedEndpoint }: {
   protocol: 'imap' | 'smtp'
   value: ConnectionDraft
   emailAddress: string
-  onChange(value: ConnectionDraft): void
+  onChange<K extends keyof ConnectionDraft>(field: K, value: ConnectionDraft[K]): void
   error: ClientFailure | null
+  fixedEndpoint: boolean
 }) {
   useTranslation()
   const isImap = protocol === 'imap'
@@ -96,14 +98,14 @@ function ConnectionFields({ protocol, value, emailAddress, onChange, error }: {
   return (
     <SettingsGroup title={isImap ? t('accounts:incomingServer') : t('accounts:outgoingServer')} badge={<Badge variant="secondary">{name}</Badge>}
       description={isImap ? t('accounts:incomingParametersHint') : t('accounts:separateServersHint')}>
-        <TextField id={`${protocol}.host`} label={t('accounts:serverHost', { name })} value={value.host} error={error}
-          placeholder={isImap ? 'imap.example.com' : 'smtp.example.com'} onChange={(host) => onChange({ ...value, host })} />
+        <TextField id={`${protocol}.host`} label={t('accounts:serverHost', { name })} value={value.host} error={error} readOnly={fixedEndpoint}
+          placeholder={isImap ? 'imap.example.com' : 'smtp.example.com'} onChange={(host) => { if (!fixedEndpoint) onChange('host', host) }} />
         <div className="grid grid-cols-2 gap-4">
-          <TextField id={`${protocol}.port`} label={t('accounts:serverPort', { name })} value={value.port} inputMode="numeric" error={error}
-            onChange={(port) => onChange({ ...value, port })} />
+          <TextField id={`${protocol}.port`} label={t('accounts:serverPort', { name })} value={value.port} inputMode="numeric" error={error} readOnly={fixedEndpoint}
+            onChange={(port) => { if (!fixedEndpoint) onChange('port', port) }} />
           <Field>
             <FieldLabel htmlFor={`${protocol}.tls`}>{t('accounts:connectionSecurity')}</FieldLabel>
-            <Select value={value.tls} onValueChange={(tls: TlsMode | null) => { if (tls) onChange({ ...value, tls }) }}
+            <Select value={value.tls} disabled={fixedEndpoint} onValueChange={(tls: TlsMode | null) => { if (tls) onChange('tls', tls) }}
               items={{ implicit: 'TLS', startTls: 'STARTTLS' }}>
               <SelectTrigger id={`${protocol}.tls`} className="w-full" aria-label={t('accounts:serverSecurity', { name })}><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="implicit">TLS</SelectItem><SelectItem value="startTls">STARTTLS</SelectItem></SelectContent>
@@ -112,7 +114,7 @@ function ConnectionFields({ protocol, value, emailAddress, onChange, error }: {
         </div>
         <TextField id={`${protocol}.username`} label={t('accounts:serverUsername', { name })} value={value.username}
           placeholder={emailAddress.trim() || t('accounts:usernameDefaultPlaceholder')} description={t('accounts:usernameDefaultHint')}
-          error={error} onChange={(username) => onChange({ ...value, username })} />
+          error={error} onChange={(username) => onChange('username', username)} />
     </SettingsGroup>
   )
 }
@@ -221,6 +223,7 @@ export function ConnectionForm({
 }: FormProps) {
   useTranslation()
   const provider = selectedProvider ?? providerOf(account?.providerId ?? null)
+  const newProvider = account ? undefined : provider
   const setup = provider.setup
   const credentialText = providerCredentialText(setup)
   const errorContext = !account && provider.preset ? { emailAddress: providerEmailRequired(provider) } : undefined
@@ -252,11 +255,19 @@ export function ConnectionForm({
     setLoginTest({ kind: 'idle', scopeKey: verificationResetKey })
   }
 
-  function change<K extends keyof AccountDraft>(key: K, value: AccountDraft[K]) {
+  function edit(update: (current: AccountDraft) => AccountDraft) {
     resetTest()
-    setDraft((current) => changeDraft(current, key, value))
+    setDraft(update)
     onDirtyChange(true)
     setError(null)
+  }
+
+  function change<K extends keyof AccountDraft>(key: K, value: AccountDraft[K]) {
+    edit((current) => changeDraft(current, key, value))
+  }
+
+  function changeServer<K extends keyof ConnectionDraft>(protocol: 'imap' | 'smtp', field: K, value: ConnectionDraft[K]) {
+    edit((current) => changeDraftServer(current, protocol, field, value))
   }
 
   function changeMode(mode: AuthenticationMode) {
@@ -340,8 +351,13 @@ export function ConnectionForm({
     }
   }
 
-  const serverFields = (<><ConnectionFields protocol="imap" value={draft.imap} emailAddress={draft.emailAddress} onChange={(value) => change('imap', value)} error={error} />
-          <ConnectionFields protocol="smtp" value={draft.smtp} emailAddress={draft.emailAddress} onChange={(value) => change('smtp', value)} error={error} /></>)
+  const fixedEndpoint = newProvider?.preset?.domains === 'organization'
+  const serverFields = <>
+    <ConnectionFields protocol="imap" value={draftServer(draft, 'imap', newProvider)} emailAddress={draft.emailAddress}
+      fixedEndpoint={fixedEndpoint} error={error} onChange={(field, value) => changeServer('imap', field, value)} />
+    <ConnectionFields protocol="smtp" value={draftServer(draft, 'smtp', newProvider)} emailAddress={draft.emailAddress}
+      fixedEndpoint={fixedEndpoint} error={error} onChange={(field, value) => changeServer('smtp', field, value)} />
+  </>
   const modeFields = oauth ? <FieldDescription>{t('accounts:oauthManagedCredentials')}</FieldDescription> : (<><RadioGroup value={draft.mode} onValueChange={(value) => changeMode(value as AuthenticationMode)} aria-label={t('accounts:authenticationMode')}>
                 <Field orientation="horizontal"><RadioGroupItem id="auth-shared" value="shared" /><FieldLabel htmlFor="auth-shared">{t('accounts:sharedPassword')}</FieldLabel></Field>
                 <Field orientation="horizontal"><RadioGroupItem id="auth-separate" value="separate" /><FieldLabel htmlFor="auth-separate">{t('accounts:separatePasswords')}</FieldLabel></Field>
