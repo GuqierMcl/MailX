@@ -14,8 +14,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
-- Show a toast when a manual update check in About confirms that MailX is up to date. / 在「关于」页手动检查更新时，若已是最新版本，会弹出提示。
-- Show recovery actions in the center of unavailable mail bodies, draft previews and settings pages, and explain failed operations beside the affected controls. / 邮件正文、草稿预览和设置页无法加载时在内容区中央显示恢复操作，局部操作失败时在对应控件旁说明原因。
+- Show a toast when a manual update check in About confirms that MailX is up to date. / 在「关于」页手动检查更新时，若已是最新版本，会弹出提示。 ([#173](https://github.com/GuqierMcl/MailX/pull/173))
+- Show recovery actions in the center of unavailable mail bodies, draft previews and settings pages, and explain failed operations beside the affected controls. / 邮件正文、草稿预览和设置页无法加载时在内容区中央显示恢复操作，局部操作失败时在对应控件旁说明原因。 ([#173](https://github.com/GuqierMcl/MailX/pull/173))
 - Settings briefly shows a scrollbar when the menu does not fit, and About follows Notifications in the App group. / 设置菜单放不下时会短暂显示滚动条，“关于”位于“应用”组的“通知”之后。 ([#166](https://github.com/GuqierMcl/MailX/pull/166))
 - Update notices explain the next step and, after a successful in-app update, show the installed version with a link to its release notes. / 更新提示说明下一步操作，并在应用内更新成功后显示已安装的版本和对应的更新说明入口。 ([#166](https://github.com/GuqierMcl/MailX/pull/166))
 - A brief network drop no longer shows a sync warning: a failure that MailX will retry stays quiet for its first 30 seconds, and problems that need you still appear at once. / 短暂网络中断不再显示同步异常：会自动重试的失败在最初 30 秒内保持安静，需要处理的同步问题仍然立即提示。 ([#161](https://github.com/GuqierMcl/MailX/pull/161))
