@@ -247,7 +247,66 @@ mod macos {
     struct Menus {
         by_window: HashMap<String, Vec<Group>>,
         displayed: Option<Vec<Group>>,
+        built: Option<Built>,
         fallback_generation: u64,
+    }
+
+    /// The installed AppKit menu. Replacing `NSApp.mainMenu` redraws the whole
+    /// menu bar, so state-only changes are applied to these handles instead.
+    struct Built {
+        shape: Vec<Group>,
+        handles: Vec<Handle>,
+    }
+
+    enum Handle {
+        Submenu(Submenu<Wry>),
+        Item(MenuItem<Wry>),
+        Check(CheckMenuItem<Wry>),
+    }
+
+    fn predefined(item: &Item) -> bool {
+        item.native != Some(false)
+            && matches!(
+                item.id.as_str(),
+                "undo"
+                    | "redo"
+                    | "cut"
+                    | "copy"
+                    | "paste"
+                    | "selectAll"
+                    | "hide"
+                    | "hideOthers"
+                    | "showAll"
+                    | "services"
+                    | "bringAllToFront"
+            )
+    }
+
+    fn has_submenu(item: &Item) -> bool {
+        item.id == "openWindows" || !item.items.is_empty()
+    }
+
+    /// What needs a rebuild: everything except labels, enabled and checked
+    /// state of the items MailX creates itself.
+    fn shape(groups: &[Group]) -> Vec<Group> {
+        fn strip(items: &mut [Item]) {
+            for item in items {
+                strip(&mut item.items);
+                // Applied in place; AppKit manages predefined items itself.
+                item.enabled = false;
+                if predefined(item) {
+                    continue;
+                }
+                item.label.clear();
+                item.checked = item.checked.map(|_| false);
+            }
+        }
+        let mut groups = groups.to_vec();
+        for group in &mut groups {
+            group.label.clear();
+            strip(&mut group.items);
+        }
+        groups
     }
 
     impl Menus {
@@ -350,17 +409,29 @@ mod macos {
             });
             return;
         }
-        if rebuild(app, &groups).is_ok() {
+        let shape = shape(&groups);
+        let updated = match menus.built.as_ref() {
+            Some(built) if built.shape == shape => apply(&built.handles, &groups).is_ok(),
+            _ => false,
+        };
+        if updated {
+            menus.displayed = Some(groups);
+            return;
+        }
+        if let Ok(handles) = rebuild(app, &groups) {
+            menus.built = Some(Built { shape, handles });
             menus.displayed = Some(groups);
         }
     }
 
-    fn rebuild(app: &AppHandle, groups: &[Group]) -> tauri::Result<()> {
+    fn rebuild(app: &AppHandle, groups: &[Group]) -> tauri::Result<Vec<Handle>> {
         let menu = Menu::new(app)?;
+        let mut handles = Vec::new();
         let mut help = None;
         for group in groups {
             let submenu = Submenu::new(app, &group.label, true)?;
-            append_items(app, &submenu, &group.items)?;
+            handles.push(Handle::Submenu(submenu.clone()));
+            append_items(app, &submenu, &group.items, &mut handles)?;
             menu.append(&submenu)?;
             if group.id == "help" {
                 help = Some(submenu);
@@ -370,10 +441,71 @@ mod macos {
         if let Some(help) = help {
             help.set_as_help_menu_for_nsapp()?;
         }
+        Ok(handles)
+    }
+
+    /// Visits items in the order `rebuild` created their handles.
+    fn apply(handles: &[Handle], groups: &[Group]) -> tauri::Result<()> {
+        fn items(
+            handles: &mut std::slice::Iter<'_, Handle>,
+            list: &[Item],
+        ) -> tauri::Result<()> {
+            for item in list {
+                if item.id == "separator" || predefined(item) {
+                    continue;
+                }
+                match (handles.next(), item.checked) {
+                    (Some(Handle::Submenu(handle)), _) if has_submenu(item) => {
+                        set_text(handle.text()?, &item.label, |text| handle.set_text(text))?;
+                        if handle.is_enabled()? != item.enabled {
+                            handle.set_enabled(item.enabled)?;
+                        }
+                        items(handles, &item.items)?;
+                    }
+                    (Some(Handle::Check(handle)), Some(checked)) => {
+                        set_text(handle.text()?, &item.label, |text| handle.set_text(text))?;
+                        if handle.is_enabled()? != item.enabled {
+                            handle.set_enabled(item.enabled)?;
+                        }
+                        if handle.is_checked()? != checked {
+                            handle.set_checked(checked)?;
+                        }
+                    }
+                    (Some(Handle::Item(handle)), None) => {
+                        set_text(handle.text()?, &item.label, |text| handle.set_text(text))?;
+                        if handle.is_enabled()? != item.enabled {
+                            handle.set_enabled(item.enabled)?;
+                        }
+                    }
+                    _ => return Err(tauri::Error::WindowNotFound),
+                }
+            }
+            Ok(())
+        }
+        fn set_text(
+            current: String,
+            next: &str,
+            set: impl FnOnce(&str) -> tauri::Result<()>,
+        ) -> tauri::Result<()> {
+            if current == next { Ok(()) } else { set(next) }
+        }
+        let mut handles = handles.iter();
+        for group in groups {
+            let Some(Handle::Submenu(handle)) = handles.next() else {
+                return Err(tauri::Error::WindowNotFound);
+            };
+            set_text(handle.text()?, &group.label, |text| handle.set_text(text))?;
+            items(&mut handles, &group.items)?;
+        }
         Ok(())
     }
 
-    fn append_items(app: &AppHandle, submenu: &Submenu<Wry>, items: &[Item]) -> tauri::Result<()> {
+    fn append_items(
+        app: &AppHandle,
+        submenu: &Submenu<Wry>,
+        items: &[Item],
+        handles: &mut Vec<Handle>,
+    ) -> tauri::Result<()> {
         for item in items {
             if item.separator_before || item.id == "separator" {
                 submenu.append(&PredefinedMenuItem::separator(app)?)?;
@@ -381,9 +513,10 @@ mod macos {
             if item.id == "separator" {
                 continue;
             }
-            if item.id == "openWindows" || !item.items.is_empty() {
+            if has_submenu(item) {
                 let nested = Submenu::new(app, &item.label, item.enabled)?;
-                append_items(app, &nested, &item.items)?;
+                handles.push(Handle::Submenu(nested.clone()));
+                append_items(app, &nested, &item.items, handles)?;
                 submenu.append(&nested)?;
                 continue;
             }
@@ -410,22 +543,26 @@ mod macos {
             if let Some(native) = native {
                 submenu.append(&native)?;
             } else if let Some(checked) = item.checked {
-                submenu.append(&CheckMenuItem::with_id(
+                let check = CheckMenuItem::with_id(
                     app,
                     id,
                     &item.label,
                     item.enabled,
                     checked,
                     item.accelerator.as_deref(),
-                )?)?;
+                )?;
+                submenu.append(&check)?;
+                handles.push(Handle::Check(check));
             } else {
-                submenu.append(&MenuItem::with_id(
+                let plain = MenuItem::with_id(
                     app,
                     id,
                     &item.label,
                     item.enabled,
                     item.accelerator.as_deref(),
-                )?)?;
+                )?;
+                submenu.append(&plain)?;
+                handles.push(Handle::Item(plain));
             }
         }
         Ok(())
@@ -471,6 +608,46 @@ mod macos {
             assert_eq!(fallback[0].label, "Main");
             assert!(!item_enabled(&fallback[0].items, "close"));
             assert!(item_enabled(&fallback[0].items, "settings"));
+        }
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn only_structural_changes_rebuild_the_menu() {
+        fn groups(value: serde_json::Value) -> Vec<Group> {
+            serde_json::from_value(value).unwrap()
+        }
+        let base = groups(serde_json::json!([{
+            "id": "message", "label": "Message", "items": [
+                {"id": "reply", "label": "Reply", "enabled": false, "accelerator": "CmdOrCtrl+R"},
+                {"id": "toggleRead", "label": "Mark as Read", "enabled": true},
+                {"id": "toggleReader", "label": "Reader", "enabled": true, "checked": false},
+                {"id": "copy", "label": "Copy", "enabled": true}
+            ]
+        }]));
+        let state = groups(serde_json::json!([{
+            "id": "message", "label": "Nachricht", "items": [
+                {"id": "reply", "label": "Reply", "enabled": true, "accelerator": "CmdOrCtrl+R"},
+                {"id": "toggleRead", "label": "Mark as Unread", "enabled": false},
+                {"id": "toggleReader", "label": "Reader", "enabled": false, "checked": true},
+                {"id": "copy", "label": "Copy", "enabled": false}
+            ]
+        }]));
+        assert!(shape(&base) == shape(&state));
+
+        for changed in [
+            // A new accelerator, a plain item becoming a check item, a native
+            // edit item replaced by MailX's own, and a renamed native item.
+            serde_json::json!({"id": "reply", "label": "Reply", "enabled": false}),
+            serde_json::json!({"id": "toggleRead", "label": "Mark as Read", "enabled": true, "checked": false}),
+            serde_json::json!({"id": "copy", "label": "Copy", "enabled": true, "native": false}),
+            serde_json::json!({"id": "copy", "label": "Kopieren", "enabled": true}),
+        ] {
+            let mut next = base.clone();
+            let id = changed["id"].as_str().unwrap().to_owned();
+            let slot = next[0].items.iter_mut().find(|item| item.id == id).unwrap();
+            *slot = serde_json::from_value(changed).unwrap();
+            assert!(shape(&base) != shape(&next), "{id}");
         }
     }
 
