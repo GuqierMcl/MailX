@@ -11,6 +11,12 @@
 
 本页说明桌面版的基本操作。已发布安装包以 [Releases](https://github.com/GuqierMcl/MailX/releases) 为准；验证方式见[验证指引](../../development/validation.md)，后续功能见[路线图](../../roadmap/README.md)。
 
+## 应用菜单
+
+macOS 使用屏幕顶部的菜单栏。Windows 点击标题栏最小化按钮左侧的下箭头。两端都有 MailX、文件、编辑、显示、邮件、窗口和帮助七组命令。在主窗口或独立写信窗口中，按 macOS 的 **⌘,** 或 Windows 的 **Ctrl+,** 都能打开「MailX → 设置」。
+
+菜单跟随当前窗口。写信时可从「文件 → 添加附件」选择文件，也可从「窗口」菜单切回已打开的草稿。「MailX → 退出 MailX」会等待草稿保存后退出应用。关闭主窗口时仍按已设置的关闭行为处理。
+
 ## 安装与添加账号
 
 1. 在 Releases 选择对应平台的安装包，按该版本安装说明打开。macOS 区分 Apple 芯片与 Intel；Windows 提供 x64 安装程序；Linux 提供 x64 AppImage、deb 和 rpm。macOS 安装包已签名并公证，可以直接打开；Windows 与 Linux 安装包尚未做代码签名。可用同一版本的 `SHA256SUMS.txt` 核对下载文件。

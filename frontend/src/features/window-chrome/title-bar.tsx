@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useCallback, useContext, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
+import { AppMenu } from '@/features/app-menu/app-menu'
 import { TitleBarSlotsContext, type TitleBarSide, type TitleBarSlotElements } from './title-bar-slots'
 import { useTranslucentCanvas, useWindowChrome } from './use-window-chrome'
 import type { WindowAction, WindowButton, WindowHost, WindowPlatform } from './window-host'
@@ -137,6 +138,7 @@ export function TitleBar({ host, title, children }: TitleBarProps) {
         <div ref={centerSlot} data-slot="title-bar-center" className="flex min-w-0 flex-1 items-center justify-center empty:hidden" />
       </div>
       <div ref={trailingSlot} data-slot="title-bar-trailing" className="flex shrink-0 items-center gap-1 px-2 empty:px-0" />
+      <AppMenu host={host} chrome={chrome ?? null} />
       {platform && chrome.trailing.length > 0 && (
         <WindowControls platform={platform} buttons={chrome.trailing} maximized={state?.maximized} onAction={perform} />
       )}

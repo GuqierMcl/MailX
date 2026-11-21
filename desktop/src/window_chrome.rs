@@ -133,6 +133,7 @@ pub(crate) struct WindowChrome {
 pub(crate) enum WindowAction {
     Minimize,
     ToggleMaximize,
+    ToggleFullscreen,
     Close,
     StartDragging,
     TitleBarDoubleClick,
@@ -241,6 +242,7 @@ pub(crate) fn perform(window: &WebviewWindow, action: WindowAction) -> tauri::Re
     match action {
         WindowAction::Minimize => window.minimize(),
         WindowAction::ToggleMaximize => toggle_maximize(window),
+        WindowAction::ToggleFullscreen => window.set_fullscreen(!window.is_fullscreen()?),
         WindowAction::Close => window.close(),
         WindowAction::StartDragging => window.start_dragging(),
         WindowAction::TitleBarDoubleClick => match title_bar_double_click() {

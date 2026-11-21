@@ -3,6 +3,7 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import type { ApiResult } from '@/generated/accounts'
 import { clientFailure, MailxClientError, type MailxClient } from '@/lib/mailx-client'
 import type { WindowPlatform } from '@/features/window-chrome/window-host'
+import type { CommandId } from '@/features/app-menu/model'
 
 export type LifecycleSnapshot = {
   revision: number
@@ -16,7 +17,7 @@ export type LifecycleSnapshot = {
   quitTimedOut: boolean
 }
 export type CloseAction = 'background' | 'quit' | 'cancel'
-export type DesktopAction = 'settings' | 'compose'
+export type DesktopAction = 'settings' | 'compose' | { menuCommand: CommandId }
 export type CloseChoice = { requestId: number; action: CloseAction; remember: boolean }
 
 /** Only the trusted main window owns application lifecycle controls. */

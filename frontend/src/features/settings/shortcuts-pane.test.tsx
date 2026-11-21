@@ -3,13 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { testClient } from '@/features/accounts/test-fixtures'
 import { SHORTCUTS } from '@/features/mail/shortcuts'
+import { useProvideSettingsShortcut } from '@/features/app-menu/commands'
 import { ShortcutsPane } from './shortcuts-pane'
+
+function WithSettingsShortcut({ available, children }: { available: boolean; children: React.ReactNode }) {
+  useProvideSettingsShortcut(available)
+  return children
+}
 
 describe('keyboard shortcut settings', () => {
   it('lists every shortcut by group and turns the single keys off and on', async () => {
     const client = testClient()
     const user = userEvent.setup()
-    const { container } = render(<ShortcutsPane client={client} />)
+    const { container } = render(<WithSettingsShortcut available><ShortcutsPane client={client} /></WithSettingsShortcut>)
     const toggle = await screen.findByRole('switch', { name: '单键快捷键' })
     await waitFor(() => expect(toggle).not.toBeDisabled())
     expect(toggle).toBeChecked()
@@ -35,5 +41,12 @@ describe('keyboard shortcut settings', () => {
     await user.click(toggle)
     await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: expect.objectContaining({ singleKeyShortcuts: true, startupView: 'inbox' }) }))
     await waitFor(() => expect(container.querySelector('[data-off]')).toBeNull())
+  })
+
+  it('leaves Settings out when no app menu handles its shortcut', async () => {
+    const { container } = render(<WithSettingsShortcut available={false}><ShortcutsPane client={testClient()} /></WithSettingsShortcut>)
+    await screen.findByRole('switch', { name: '单键快捷键' })
+    expect(container.querySelector('[data-shortcut="compose"]')).not.toBeNull()
+    expect(container.querySelector('[data-shortcut="settings"]')).toBeNull()
   })
 })

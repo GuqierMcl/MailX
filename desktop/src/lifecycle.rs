@@ -213,6 +213,11 @@ pub(crate) fn main_ready(app: &AppHandle) -> bool {
         .is_some_and(|state| state.lock().main_ready)
 }
 
+pub(crate) fn desktop_ready(app: &AppHandle) -> bool {
+    app.try_state::<LifecycleState>()
+        .is_some_and(|state| state.lock().desktop_ready)
+}
+
 pub(crate) fn tray_options(app: &AppHandle) -> (SupportedLocale, bool, bool) {
     let state = app.state::<LifecycleState>();
     let inner = state.lock();

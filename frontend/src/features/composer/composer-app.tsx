@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
+import { useAppMenuCommands } from '@/features/app-menu/commands'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Account } from '@/generated/accounts'
@@ -211,6 +212,13 @@ export function ComposerApp({ client, draftId, fresh = false, host }: ComposerAp
     setConfirmClose(false)
     setQuitSaveFailed(false)
   }), [client, setClosing])
+
+  useAppMenuCommands({
+    close: {
+      run: () => host?.perform('close'),
+      enabled: Boolean(host) && !closingNow && !confirmClose && !savePrompt && !quitSaveFailed,
+    },
+  })
 
   return (
     <div className="app-canvas flex h-svh flex-col overflow-hidden bg-sidebar text-foreground">

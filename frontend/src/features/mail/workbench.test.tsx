@@ -8,6 +8,7 @@ import { withTitleBar } from '@/test/title-bar'
 import { LifecycleProvider } from '@/features/lifecycle/lifecycle-provider'
 import { createPreviewLifecycleClient } from '@/features/lifecycle/lifecycle-client'
 import { Workbench } from './workbench'
+import { invokeAppMenuCommand } from '@/features/app-menu/commands'
 
 async function renderWorkbench() {
   render(withTitleBar(<Workbench client={createMockClient()} />))
@@ -16,6 +17,45 @@ async function renderWorkbench() {
 }
 
 describe('workbench', () => {
+  it('handles desktop menu forwarding after readiness and blocks it while a modal is open', async () => {
+    const client = createMockClient()
+    const lifecycle = createPreviewLifecycleClient('macos', client)
+    const subscribe = vi.spyOn(lifecycle, 'onDesktopAction')
+    const setReady = vi.spyOn(lifecycle, 'setDesktopReady')
+    render(<LifecycleProvider client={lifecycle}>{withTitleBar(<Workbench client={client} />)}</LifecycleProvider>)
+    await screen.findByRole('list', { name: '邮件列表' })
+    await waitFor(() => expect(setReady).toHaveBeenCalledWith(true))
+    const dispatch = subscribe.mock.calls[0][0]
+
+    act(() => dispatch('settings'))
+    const settings = await screen.findByRole('dialog', { name: '设置' })
+    act(() => dispatch({ menuCommand: 'accounts' }))
+    expect(settings).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '邮箱账号', hidden: true })).not.toBeInTheDocument()
+
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(settings).not.toBeInTheDocument())
+    act(() => dispatch({ menuCommand: 'accounts' }))
+    expect(await screen.findByRole('dialog', { name: '邮箱账号' })).toBeInTheDocument()
+  })
+
+  it('dispatches message commands to picked mail and disables commands with no target', async () => {
+    const client = createMockClient()
+    const setFlags = vi.spyOn(client, 'setFlags')
+    render(withTitleBar(<Workbench client={client} />))
+    const list = await screen.findByRole('list', { name: '邮件列表' })
+    expect(invokeAppMenuCommand('reply')).toBe(false)
+    expect(invokeAppMenuCommand('delete')).toBe(false)
+
+    await userEvent.click(screen.getByRole('button', { name: '选择' }))
+    expect(invokeAppMenuCommand('toggleStar')).toBe(false)
+    const row = within(list).getAllByRole('listitem')[0]
+    await userEvent.click(row)
+    expect(invokeAppMenuCommand('reply')).toBe(false)
+    await act(async () => { expect(invokeAppMenuCommand('toggleStar')).toBe(true) })
+    expect(setFlags).toHaveBeenCalledWith([expect.any(String)], 'starred', expect.any(Boolean))
+  })
+
   it('refreshes every account from beside the sidebar toggle, including with the sidebar folded', async () => {
     const accounts = [exampleAccount(), exampleAccount({ id: 'account-b', mailboxSourceId: 'source-b' })]
     const client = testClient(accounts)

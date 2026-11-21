@@ -67,6 +67,7 @@ import { useInlineComposer } from '@/features/outbox/use-inline-composer'
 import { InlineComposerPane } from '@/features/outbox/inline-composer'
 import { clearRemovedAccount } from './account-removal'
 import { useDesktopActions } from '@/features/lifecycle/use-desktop-actions'
+import { invokeAppMenuCommand, menuModalSelector, useAppMenuCommands } from '@/features/app-menu/commands'
 import { NowPage } from '@/features/now/now-page'
 import { AssistantChatProvider } from '@/features/ai/assistant-chat-provider'
 import { AssistantCapsule, AssistantIsland, type AssistantView } from '@/features/ai/assistant-island'
@@ -598,7 +599,11 @@ export function Workbench({ client }: { client: MailxClient }) {
   const composeNew = compose.compose
   useSettingsRequests(setSettings)
   useDesktopActions((action) => {
-    if (action === 'settings') setSettings({ section: 'general' })
+    if (typeof action === 'object') {
+      if (document.querySelector(menuModalSelector) || !invokeAppMenuCommand(action.menuCommand)) {
+        toast.info(t('appMenu:unavailable'))
+      }
+    } else if (action === 'settings') setSettings({ section: 'general' })
     else if (action === 'compose') void composeNew()
   })
   useEffect(() => {
@@ -682,7 +687,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   useEffect(() => {
     if (!assistantUsable) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== 'KeyJ' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.isComposing) return
+      if (event.code !== 'KeyJ' || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey ||
+        event.defaultPrevented || event.isComposing) return
       event.preventDefault()
       if (assistantShown) setAssistantOpen(false)
       else openAssistant()
@@ -736,6 +742,9 @@ export function Workbench({ client }: { client: MailxClient }) {
   const singleKeys = settingsQuery.data?.settings.general.singleKeyShortcuts ?? true
   const [helpOpen, setHelpOpen] = useState(false)
   const [reveal, setReveal] = useState<RevealRequest | null>(null)
+  const actionSummary = mailView && opened && !readerHidden && !inlineShown && body.email?.summary.id === opened.id ? body.email.summary : null
+  const selectionState = selectionAvailability(selection, selectionActions)
+  const pickedMessagesVisible = selecting && !listHidden
   const runShortcut = (id: SingleKeyShortcutId): boolean => {
     if (id === 'help') {
       setHelpOpen(true)
@@ -748,7 +757,7 @@ export function Workbench({ client }: { client: MailxClient }) {
     if (!mailView) return false
     if (selecting) {
       // Picking: the flags, archive and delete go to the picked messages, as in the header.
-      const state = selectionAvailability(selection, selectionActions)
+      const state = selectionState
       if (state.none) return false
       if (id === 'archive' && !state.archiveBlocked) selectionActions.onArchive()
       else if (id === 'delete' && state.deletable > 0) selectionActions.onDelete()
@@ -779,7 +788,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       return true
     }
     // The inline composer covers the message, so acting shortcuts have nothing on screen to act on.
-    const summary = opened && !readerHidden && !inlineShown && body.email?.summary.id === opened.id ? body.email.summary : null
+    const summary = actionSummary
     if (!summary) return false
     // After archive or delete, the next row opens (the previous one at the end of the list).
     const advance = () => {
@@ -811,6 +820,47 @@ export function Workbench({ client }: { client: MailxClient }) {
     }
   }
   useMailShortcuts(singleKeys, runShortcut)
+  const menuBlocked = Boolean(settings || accountsTarget || addingAccount || paletteOpen || helpOpen ||
+    deleteEmail.confirmation.open || removeLocalChoice)
+  const responseEnabled = !menuBlocked && !selecting && Boolean(actionSummary)
+  const flagsEnabled = !menuBlocked && (selecting
+    ? pickedMessagesVisible && !selectionState.none && selectionState.changeable > 0
+    : Boolean(actionSummary && !actionSummary.localOnly))
+  const markRead = selecting ? selectionState.anyUnread : !actionSummary?.isRead
+  const addStar = selecting ? selectionState.anyUnstarred : !actionSummary?.isStarred
+  useAppMenuCommands({
+    accounts: { run: () => setAccountsTarget({}), enabled: !menuBlocked },
+    compose: { run: () => composeNew(), enabled: !menuBlocked && accounts.length > 0 },
+    search: { run: () => setPaletteOpen(true), enabled: !menuBlocked && accounts.length > 0 },
+    selectAll: { run: selectionActions.onSelectAll, enabled: !menuBlocked && pickedMessagesVisible && !selectionActions.busy },
+    toggleReader: {
+      run: () => setReaderCollapsed(!readerCollapsed),
+      enabled: !menuBlocked && accounts.length > 0 && layoutReady && !nowPage && !singlePane,
+      checked: !nowPage && !readerHidden,
+    },
+    toggleAssistant: {
+      run: () => { if (assistantShown) setAssistantOpen(false); else openAssistant() },
+      enabled: !menuBlocked && assistantUsable && accounts.length > 0,
+      checked: assistantShown,
+    },
+    reply: { run: () => { runShortcut('reply') }, enabled: responseEnabled },
+    replyAll: { run: () => { runShortcut('replyAll') }, enabled: responseEnabled },
+    forward: { run: () => { runShortcut('forward') }, enabled: responseEnabled },
+    toggleRead: { run: () => { runShortcut('read') }, enabled: flagsEnabled, label: t(markRead ? 'mail:markRead' : 'mail:markUnread') },
+    toggleStar: { run: () => { runShortcut('star') }, enabled: flagsEnabled, label: t(addStar ? 'mail:star' : 'mail:unstar') },
+    archive: {
+      run: () => { runShortcut('archive') },
+      enabled: !menuBlocked && (selecting
+        ? pickedMessagesVisible && !selectionState.none && !selectionState.archiveBlocked
+        : Boolean(actionSummary && canArchive(actionSummary, folders))),
+      label: t((selecting ? selectionActions.archiveMode === 'unarchive' : actionSummary?.archived) ? 'mail:unarchive' : 'mail:archive'),
+    },
+    delete: {
+      run: () => { runShortcut('delete') },
+      enabled: !menuBlocked && (selecting ? pickedMessagesVisible && !selectionState.none && selectionState.deletable > 0 : Boolean(actionSummary)),
+      label: t(!selecting && actionSummary?.localOnly ? 'mail:removeLocalCopy' : 'mail:delete'),
+    },
+  })
 
   const refreshAccounts = () => void queryClient.invalidateQueries({ queryKey: mailKeys.all })
   const dialog = (
@@ -918,7 +968,8 @@ export function Workbench({ client }: { client: MailxClient }) {
         navLabel={t('mail:mailboxNavigation')}
         navWidth={navWidth}
         navCollapsed={navCollapsed}
-        navActions={<RefreshAllButton accounts={accounts} syncStates={currentSyncStates} onRefresh={(accountId) => client.refreshSync(accountId)} />}
+        menuBlocked={menuBlocked}
+        navActions={<RefreshAllButton accounts={accounts} syncStates={currentSyncStates} onRefresh={(accountId) => client.refreshSync(accountId)} menuBlocked={menuBlocked} />}
         onNavChange={saveLayout}
         nav={<MailSidebar {...sidebarProps} loading={treeLoading} onRefresh={(accountId) => client.refreshSync(accountId)} />}
         rail={<MailRail {...sidebarProps} />}
