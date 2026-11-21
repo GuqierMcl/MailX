@@ -1,9 +1,9 @@
-import { errorText } from '@/i18n/errors'
+import { errorDetail } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { ErrorNotice } from '@/components/error-notice'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Delayed } from '@/components/ui/delayed'
@@ -83,7 +83,7 @@ function Reader({ client, emailId, policy, dark, hasRemoteImages, banner, transl
         <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" onClick={load} disabled={update.isPending}>{update.isPending ? t('mail:savingEllipsis') : t('mail:loadImages')}</Button>
         <Button size="icon-sm" variant="ghost" className="size-6 shrink-0" aria-label={t('mail:closeRemoteImagesNotice')} onClick={() => setDismissed(true)} disabled={update.isPending}>×</Button>
       </div>}
-    {update.isError && <Alert variant="destructive"><AlertTitle>{t('mail:settingsSaveFailed')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
+    {update.isError && !dismissed && !granted && <ErrorNotice message={t('mail:settingsSaveFailed')} detail={errorDetail(update.error)} />}
     {/* Both documents stay mounted and share one cell, so each keeps its scroll position and nothing reloads on a switch. */}
     <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]">
       <div className={cn('col-start-1 row-start-1 flex min-h-0 flex-col', showTranslated && 'invisible')} inert={showTranslated}>
@@ -112,7 +112,7 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
 }) {
   useTranslation()
   const [documentToken, setDocumentToken] = useState<string | null>(null)
-  const [error, setError] = useState<ClientFailure | null>(null)
+  const [error, setError] = useState<{ operation: 'prepare' | 'link' | 'images'; cause: ClientFailure } | null>(null)
   const [imageStatuses, setImageStatuses] = useState<RemoteImageStatus[]>([])
   const [frameReady, setFrameReady] = useState(false)
   const [retrying, setRetrying] = useState(false)
@@ -125,15 +125,23 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
     const release = (value: string) => { void client.releaseBody(emailId, value).catch(() => undefined) }
     active.current = true
     const seen = new Set<string>()
+    let latestLinkRequest: string | null = null
     const stop = client.onLinkRequest((event) => {
       if (!live || !active.current || !loaded.current || document.visibilityState === 'hidden' || event.emailId !== emailId ||
         event.documentToken !== currentToken.current || !event.requestId || seen.has(event.requestId) ||
         !Number.isSafeInteger(event.index) || event.index < 0 || !/^(https?:|mailto:)/i.test(event.url)) return
       seen.add(event.requestId)
       const { emailId: id, index, documentToken, requestId } = event
-      void client.openLink({ emailId: id, index, documentToken, requestId }).catch((failure: unknown) => {
-        if (live && active.current) setError(clientFailure(failure))
-      })
+      latestLinkRequest = requestId
+      const isCurrent = () => live && active.current && currentToken.current === documentToken && latestLinkRequest === requestId
+      void client.openLink({ emailId: id, index, documentToken, requestId }).then(
+        () => {
+          if (isCurrent()) setError((current) => current?.operation === 'link' ? null : current)
+        },
+        (failure: unknown) => {
+          if (isCurrent()) setError({ operation: 'link', cause: clientFailure(failure) })
+        },
+      )
     })
     const preparation = draftRevision !== undefined
       ? client.prepareDraftBody(emailId, draftRevision)
@@ -144,8 +152,9 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
       setDocumentToken(prepared.documentToken)
     }).catch((failure: unknown) => {
       if (!live) return
-      setError(clientFailure(failure))
-      onPrepareFailed?.(clientFailure(failure))
+      const cause = clientFailure(failure)
+      setError({ operation: 'prepare', cause })
+      onPrepareFailed?.(cause)
     })
     return () => {
       live = false
@@ -178,9 +187,10 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
       loaded.current = false
       setFrameReady(false)
       setImageStatuses([])
+      setError(null)
       setDocumentToken(prepared.documentToken)
     } catch (failure) {
-      if (active.current && currentToken.current === previous) setError(clientFailure(failure))
+      if (active.current && currentToken.current === previous) setError({ operation: 'images', cause: clientFailure(failure) })
     } finally {
       if (active.current) setRetrying(false)
     }
@@ -211,15 +221,18 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
   const failedImages = imageStatuses.filter((status) => status.error !== null)
   const reasons = [...new Set(failedImages.map((status) => status.error).filter((reason): reason is ImageFetchError => reason !== null))]
 
+  if (error?.operation === 'prepare') {
+    return <ErrorNotice layout="centered" message={t('mail:bodyPreviewFailed')} detail={errorDetail(error.cause)}
+      actionLabel={t('mail:retry')} onAction={onReload} />
+  }
+
   return <div className="flex min-h-0 flex-1 flex-col gap-2">
-    {error && <Alert variant="destructive"><AlertTitle>{t('mail:bodyOrLinkFailed')}</AlertTitle><AlertDescription>{errorText(error)}</AlertDescription>
-      {!documentToken && <Button size="sm" variant="outline" onClick={onReload}>{t('mail:retry')}</Button>}
-    </Alert>}
+    {error && <ErrorNotice message={t(error.operation === 'link' ? 'mail:openBodyLinkFailed' : 'mail:retryImagesFailed')} detail={errorDetail(error.cause)} />}
     {failedImages.length > 0 && <div role="status" aria-label={t('mail:imageLoadingStatus')} className="flex shrink-0 items-center gap-3 rounded-md bg-muted px-3 py-2 text-xs">
       <span className="min-w-0 flex-1">{t('mail:imageFailureCount', { count: failedImages.length })} · {reasons.map((reason) => IMAGE_FAILURES[reason]).join('；')}</span>
       <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" disabled={retrying || cooldown || imageStatuses.some((status) => status.loading)} onClick={() => { void retryImages() }}>{t('mail:retryImages')}</Button>
     </div>}
-    {!documentToken ? !error && <BodySkeleton /> :
+    {!documentToken ? <BodySkeleton /> :
       <iframe key={documentToken} title={title ?? t('mail:htmlBody')} sandbox="" referrerPolicy="no-referrer"
         src={bodyDocumentUrl(emailId, documentToken, dark)} className="min-h-0 w-full flex-1 border-0 bg-white"
         onLoad={() => {

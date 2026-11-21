@@ -1,9 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
-import { errorText } from '@/i18n/errors'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
 import { Delayed } from '@/components/ui/delayed'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
@@ -12,7 +9,7 @@ import { sortAccountsForDisplay } from '@/features/accounts/account-order'
 import type { ComposeOpenMode } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
-import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
+import { SettingsGroup, SettingsLoadError, SettingsPage, SettingsRow, SettingsSaveError } from './settings-layout'
 import { useSettings, useUpdateCompose } from './settings-queries'
 
 /** Empty value: no fixed account, so a new mail follows the mailbox being viewed. */
@@ -35,10 +32,7 @@ export function ComposePane({ client }: { client: MailxClient }) {
   const update = useUpdateCompose(client)
   const accounts = useQuery({ queryKey: mailKeys.tree(), queryFn: () => loadMailTree(client), select: (tree) => tree.accounts })
   if (settings.isPending) return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5" /></div></Delayed>
-  if (settings.isError) return <SettingsPage>
-    <Alert variant="destructive"><AlertTitle>{t('settings:readFailed')}</AlertTitle><AlertDescription>{errorText(settings.error)}</AlertDescription></Alert>
-    <Button variant="outline" onClick={() => void settings.refetch()}>{t('settings:retry')}</Button>
-  </SettingsPage>
+  if (settings.isError) return <SettingsLoadError error={settings.error} onRetry={() => void settings.refetch()} disabled={settings.isFetching} />
 
   const compose = settings.data.settings.compose
   const list = sortAccountsForDisplay(accounts.data ?? [], settings.data.settings.layout.accountOrder)
@@ -47,7 +41,6 @@ export function ComposePane({ client }: { client: MailxClient }) {
   const accountItems: Record<string, string> = { [FOLLOW]: t('settings:followMailbox'), ...Object.fromEntries(list.map((account) => [account.id, `${account.displayName}（${account.emailAddress}）`])) }
 
   return <SettingsPage>
-    {update.isError && <Alert variant="destructive"><AlertTitle>{t('settings:saveFailedTitle')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
     <SettingsGroup title={t('settings:write')}>
       <SettingsRow label={t('settings:senderAccount')} htmlFor="compose.defaultAccount"
         description={t('settings:senderAccountDescription')}>
@@ -69,6 +62,7 @@ export function ComposePane({ client }: { client: MailxClient }) {
           </SelectContent>
         </Select>
       </SettingsRow>
+      <SettingsSaveError update={update} fields={['defaultAccountId', 'openMode']} />
     </SettingsGroup>
     <SettingsGroup title={t('settings:send')}>
       <SettingsRow label={t('settings:undo')} htmlFor="compose.undoSend"
@@ -81,6 +75,7 @@ export function ComposePane({ client }: { client: MailxClient }) {
           </SelectContent>
         </Select>
       </SettingsRow>
+      <SettingsSaveError update={update} fields={['undoSendSeconds']} />
     </SettingsGroup>
   </SettingsPage>
 }

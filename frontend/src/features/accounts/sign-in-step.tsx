@@ -3,6 +3,7 @@ import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { ErrorNotice } from '@/components/error-notice'
 import { Button } from '@/components/ui/button'
 import { FieldDescription, FieldSet } from '@/components/ui/field'
 import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
@@ -169,7 +170,7 @@ export function SignInStep({ client, provider, initialDraft: resume, initialErro
   const addressError = askingAddress && error?.code === 'oauthMailboxRefused' ? { ...error, field: 'emailAddress' } as ClientFailure : null
 
   return (
-    <SettingsPage footer={waiting ? <>
+    <SettingsPage footerNotice={error && !addressError && <ErrorNotice message={errorText(error)} />} footer={waiting ? <>
       <FieldDescription>{t('accounts:browserSignInNote')}</FieldDescription>
       <Button variant="outline" onClick={cancel}>{t('accounts:cancelSignIn')}</Button>
     </> : askingAddress ? <>
@@ -193,12 +194,6 @@ export function SignInStep({ client, provider, initialDraft: resume, initialErro
         <Alert role="status">
           <AlertTitle>{t('accounts:signInWaitingTitle')}</AlertTitle>
           <AlertDescription>{t('accounts:signInWaitingDescription')}</AlertDescription>
-        </Alert>
-      )}
-      {error && !addressError && (
-        <Alert variant="destructive">
-          <AlertTitle>{t('accounts:signInFailed')}</AlertTitle>
-          <AlertDescription>{errorText(error)}</AlertDescription>
         </Alert>
       )}
       {askingAddress && (

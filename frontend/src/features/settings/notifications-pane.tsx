@@ -1,11 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
-import { errorText } from '@/i18n/errors'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { PlayIcon } from '@hugeicons/core-free-icons'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Delayed } from '@/components/ui/delayed'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -18,7 +16,7 @@ import { useLifecycle } from '@/features/lifecycle/lifecycle-context'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { loadMailTree } from '@/features/mail/mail-tree'
-import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
+import { SettingsGroup, SettingsLoadError, SettingsPage, SettingsRow, SettingsSaveError } from './settings-layout'
 import { useSettings, useUpdateBadge, useUpdateNotifications } from './settings-queries'
 
 /** MailX plays these itself; the others belong to the system or are silent. */
@@ -46,10 +44,7 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
   // The mail tree already holds the accounts and refreshes when they change.
   const accounts = useQuery({ queryKey: mailKeys.tree(), queryFn: () => loadMailTree(client), select: (tree) => tree.accounts })
   if (settings.isPending) return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5" /></div></Delayed>
-  if (settings.isError) return <SettingsPage>
-    <Alert variant="destructive"><AlertTitle>{t('settings:readFailed')}</AlertTitle><AlertDescription>{errorText(settings.error)}</AlertDescription></Alert>
-    <Button variant="outline" onClick={() => void settings.refetch()}>{t('settings:retry')}</Button>
-  </SettingsPage>
+  if (settings.isError) return <SettingsLoadError error={settings.error} onRetry={() => void settings.refetch()} disabled={settings.isFetching} />
 
   const notifications = settings.data.settings.notifications
   const orderedAccounts = sortAccountsForDisplay(accounts.data ?? [], settings.data.settings.layout.accountOrder)
@@ -63,7 +58,6 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
   }
 
   return <SettingsPage>
-    {update.isError && <Alert variant="destructive"><AlertTitle>{t('settings:saveFailedTitle')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
     <SettingsGroup title={t('settings:newMail')}>
       <SettingsRow label={t('settings:notifyMe')} htmlFor="notifications.enabled">
         <Switch id="notifications.enabled" checked={notifications.enabled}
@@ -98,6 +92,7 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
       <SettingsRow label={t('settings:testNotification')} description={t('settings:testNotificationHint')}>
         <TestNotification client={client} disabled={off} />
       </SettingsRow>
+      <SettingsSaveError update={update} fields={['enabled', 'showPreview', 'whenFocused', 'sound']} />
     </SettingsGroup>
     {orderedAccounts.length > 0 && (
       <SettingsGroup title={t('settings:byAccount')}>
@@ -109,6 +104,7 @@ export function NotificationsPane({ client }: { client: MailxClient }) {
               onCheckedChange={(on) => setMuted(account.id, !on)} />
           </SettingsRow>
         ))}
+        <SettingsSaveError update={update} fields={['mutedAccounts']} />
       </SettingsGroup>
     )}
     {badgeAvailable && <BadgeSettingsGroups client={client} accounts={orderedAccounts} />}
@@ -137,11 +133,11 @@ function BadgeSettingsGroups({ client, accounts }: { client: MailxClient; accoun
     update.mutate({ excludedAccounts: [...next].sort() })
   }
   return <>
-    {update.isError && <Alert variant="destructive"><AlertTitle>{t('settings:saveFailedTitle')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
     <SettingsGroup title={t('settings:appBadge')}>
       <SettingsRow label={t('settings:appBadgeShow')} description={t('settings:appBadgeHint')} htmlFor="badge.enabled">
         <Switch id="badge.enabled" checked={badge.enabled} onCheckedChange={(enabled) => update.mutate({ enabled })} />
       </SettingsRow>
+      <SettingsSaveError update={update} fields={['enabled']} />
     </SettingsGroup>
     {accounts.length > 0 && (
       <SettingsGroup title={t('settings:appBadgeAccounts')}>
@@ -151,6 +147,7 @@ function BadgeSettingsGroups({ client, accounts }: { client: MailxClient; accoun
               onCheckedChange={(on) => setCounted(account.id, on)} />
           </SettingsRow>
         ))}
+        <SettingsSaveError update={update} fields={['excludedAccounts']} />
       </SettingsGroup>
     )}
   </>

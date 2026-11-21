@@ -5,7 +5,7 @@ export type UpdaterContextValue = {
   snapshot: UpdateSnapshot
   /** A check has finished in this run, so "up to date" is a fact, not a guess. */
   checked: boolean
-  /** Checks now and, when a version is found, opens the modal. Never a toast. */
+  /** Checks now, opening the update modal or confirming that MailX is up to date. */
   check(): Promise<void>
   openDialog(): void
 }

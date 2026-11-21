@@ -192,7 +192,7 @@ describe('synced inbox headers', () => {
     // Folder reloads are coalesced, so they land shortly after the event.
     await waitFor(() => expect(client.listFolders).toHaveBeenCalledTimes(2), { timeout: 3000 })
     expect(client.getEmail).toHaveBeenCalledTimes(1)
-    expect(await screen.findByText('正文获取失败')).toBeInTheDocument()
+    expect(await screen.findByText('正文暂时无法加载。')).toBeInTheDocument()
   })
 
   it('keeps the opened message when a refreshed list no longer contains it, and only drops the highlight', async () => {
@@ -307,7 +307,7 @@ describe('synced inbox headers', () => {
     expect(rows()[0].querySelector('p')).toBeEmptyDOMElement()
     await userEvent.click(rows()[0])
     expect(await screen.findByRole('heading', { name: '（无主题）' })).toBeInTheDocument()
-    expect(await screen.findByText('正文获取失败')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('正文暂时无法加载。')
     expect(screen.queryByRole('region', { name: '附件' })).not.toBeInTheDocument()
   })
 

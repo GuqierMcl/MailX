@@ -1,12 +1,11 @@
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
+import { ErrorNotice } from '@/components/error-notice'
 import { Switch } from '@/components/ui/switch'
 import { errorText } from '@/i18n/errors'
 import type { MailxClient } from '@/lib/mailx-client'
-import { SettingsGroup, SettingsRow } from './settings-layout'
+import { SettingsGroup, SettingsRow, SettingsSaveError } from './settings-layout'
 import { useSettings, useUpdateGeneral } from './settings-queries'
 
 const key = ['desktop', 'autostart'] as const
@@ -40,16 +39,14 @@ export function AutostartSettings({ client }: { client: MailxClient }) {
   const enabled = known && status.data.enabled
   const pending = change.isPending || status.isFetching
   return <SettingsGroup title={t('startup')}>
-    {(status.isError || change.isError || general.isError) && <Alert variant="destructive">
-      <AlertTitle>{t(status.isError ? 'autostartReadFailed' : 'autostartSaveFailed')}</AlertTitle>
-      <AlertDescription>{errorText(status.error ?? change.error ?? general.error)}</AlertDescription>
-      {status.isError && <Button variant="outline" size="sm" disabled={pending} onClick={() => void refetch()}>{t('autostartRetry')}</Button>}
-    </Alert>}
     <SettingsRow label={t('autostart')} description={t('autostartHint')} htmlFor="desktop.autostart">
       <Switch id="desktop.autostart" checked={enabled}
         disabled={!known || !status.data?.available || pending}
         onCheckedChange={(next) => change.mutate(next)} />
     </SettingsRow>
+    {(status.isError || change.isError) && <ErrorNotice message={t(status.isError ? 'autostartReadFailed' : 'autostartSaveFailed')}
+      detail={errorText(status.error ?? change.error)} actionLabel={status.isError ? t('autostartRetry') : undefined}
+      onAction={status.isError ? () => void refetch() : undefined} actionDisabled={pending} />}
     {status.isError && <p role="status" className="text-xs text-muted-foreground">{t('autostartUnknown')}</p>}
     {known && !status.data.available && <p className="text-xs text-muted-foreground">{t('autostartUnavailable')}</p>}
     <SettingsRow label={t('silentStart')} description={t('silentStartHint')} htmlFor="general.silentStart">
@@ -57,5 +54,6 @@ export function AutostartSettings({ client }: { client: MailxClient }) {
         disabled={!enabled || !status.data?.available || pending || !settings.data || general.isPending}
         onCheckedChange={(silentStart) => general.mutate({ silentStart })} />
     </SettingsRow>
+    <SettingsSaveError update={general} message={t('autostartSaveFailed')} />
   </SettingsGroup>
 }

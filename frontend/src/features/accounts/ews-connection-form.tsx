@@ -4,6 +4,7 @@ import type { Account, ConnectionInput, DraftConnectionVerification, EwsSettings
 import { t } from '@/i18n'
 import { errorText } from '@/i18n/errors'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { ErrorNotice } from '@/components/error-notice'
 import { Button } from '@/components/ui/button'
 import { FieldDescription, FieldSet } from '@/components/ui/field'
 import { SettingsGroup, SettingsPage } from '@/features/settings/settings-layout'
@@ -25,6 +26,8 @@ type Props = {
   onBack?(): void
   onReload?(): void
 }
+
+type FormFailure = { operation: 'discover' | 'test' | 'save'; failure: ClientFailure }
 
 function ewsDraft(account: Account | null): AccountDraft {
   const draft = initialDraft(account)
@@ -62,7 +65,8 @@ function ewsConnection(draft: AccountDraft, account: Account | null): Connection
 export function EwsConnectionForm({ client, account, initialDraft: resume, initialError = null, submitLabel, submittingLabel, onSubmit, onBusyChange, onDirtyChange, onBack, onReload }: Props) {
   useTranslation()
   const [draft, setDraft] = useState(() => resume ?? ewsDraft(account))
-  const [error, setError] = useState<ClientFailure | null>(initialError)
+  const [problem, setProblem] = useState<FormFailure | null>(initialError && { operation: 'save', failure: initialError })
+  const error = problem?.failure ?? null
   const [lookup, setLookup] = useState<EwsSettingsDiscovery | null>(null)
   const [finding, setFinding] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -89,7 +93,7 @@ export function EwsConnectionForm({ client, account, initialDraft: resume, initi
     setFinding(false)
     setReport(null)
     if (!keepGrant) setLookup(null)
-    setError(null)
+    setProblem(null)
     onBusyChange(false)
   }
   function change<K extends keyof AccountDraft>(key: K, value: AccountDraft[K]) {
@@ -109,6 +113,9 @@ export function EwsConnectionForm({ client, account, initialDraft: resume, initi
   function setManual(value: boolean) {
     change('ews', { url: draft.ews?.url ?? '', username: draft.ews?.username || draft.emailAddress.trim(), manual: value })
   }
+  function reportFailure(operation: FormFailure['operation'], cause: unknown) {
+    setProblem({ operation, failure: clientFailure(cause) })
+  }
   async function discover(grant?: EwsSettingsDiscovery) {
     if (submission.current) return
     let route
@@ -117,10 +124,10 @@ export function EwsConnectionForm({ client, account, initialDraft: resume, initi
       if (!/^[^\s@]+@[^\s@]+$/.test(emailAddress)) failure('emailAddress', t('accounts:invalidEmail'))
       route = draftToRoute(draft)
       if (grant && (!draft.sharedPassword.replace || !draft.sharedPassword.value)) failure('sharedPassword', t('accounts:passwordRequired'))
-    } catch (cause) { setError(clientFailure(cause)); return }
+    } catch (cause) { reportFailure('discover', cause); return }
     const mine = ++seq.current
     setFinding(true)
-    setError(null)
+    setProblem(null)
     onBusyChange(true)
     try {
       const result = await client.discoverEwsSettings({ emailAddress, route, targetGrant: grant?.targetGrant ?? null,
@@ -132,7 +139,7 @@ export function EwsConnectionForm({ client, account, initialDraft: resume, initi
         setDraft((current) => ({ ...current, ews: { ...result.endpoint!, manual: true } }))
       }
     } catch (cause) {
-      if (alive.current && mine === seq.current) setError(clientFailure(cause))
+      if (alive.current && mine === seq.current) reportFailure('discover', cause)
     } finally {
       if (alive.current && mine === seq.current) { setFinding(false); onBusyChange(false) }
     }
@@ -140,17 +147,17 @@ export function EwsConnectionForm({ client, account, initialDraft: resume, initi
   async function testLogin() {
     if (testing || saving) return
     let connection
-    try { connection = ewsConnection(draft, account) } catch (cause) { setError(clientFailure(cause)); return }
+    try { connection = ewsConnection(draft, account) } catch (cause) { reportFailure('test', cause); return }
     const controller = new AbortController()
     test.current = controller
     setTesting(true)
-    setError(null)
+    setProblem(null)
     setReport(null)
     try {
       const result = await client.verifyDraftConnection(connection, controller.signal)
       if (alive.current && test.current === controller && !controller.signal.aborted) setReport(result)
     } catch (cause) {
-      if (alive.current && test.current === controller && !controller.signal.aborted) setError(clientFailure(cause))
+      if (alive.current && test.current === controller && !controller.signal.aborted) reportFailure('test', cause)
     } finally {
       if (alive.current && test.current === controller) { test.current = null; setTesting(false) }
     }
@@ -159,19 +166,22 @@ export function EwsConnectionForm({ client, account, initialDraft: resume, initi
     if (submission.current) return
     if (!manual) { await discover(); return }
     let connection
-    try { connection = ewsConnection(draft, account) } catch (cause) { setError(clientFailure(cause)); return }
+    try { connection = ewsConnection(draft, account) } catch (cause) { reportFailure('save', cause); return }
     submission.current = true
+    setProblem(null)
     setSaving(true)
     onBusyChange(true)
     test.current?.abort()
     const submitted = draft
     setDraft(clearSecrets)
     try { await onSubmit(connection, submitted); onDirtyChange(false) }
-    catch (cause) { if (alive.current) setError(clientFailure(cause)) }
+    catch (cause) { if (alive.current) reportFailure('save', cause) }
     finally { submission.current = false; if (alive.current) { setSaving(false); onBusyChange(false) } }
   }
 
-  return <SettingsPage footer={<>
+  const notice = error && <ErrorNotice message={errorText(error)} actionLabel={t('accounts:reloadSettings')}
+    onAction={error.code === 'conflict' ? onReload : undefined} />
+  return <SettingsPage footerNotice={problem?.operation === 'save' && notice} footer={<>
     <FieldDescription>{saving ? t('accounts:savingSecurely') : t('accounts:credentialsNotDisplayed')}</FieldDescription>
     <div className="flex shrink-0 gap-2">
       {onBack && <Button variant="outline" disabled={saving} onClick={onBack}>{t('accounts:back')}</Button>}
@@ -179,10 +189,6 @@ export function EwsConnectionForm({ client, account, initialDraft: resume, initi
     </div>
   </>}>
     <Alert role="status"><AlertTitle>{t('accounts:ewsSetupTitle')}</AlertTitle><AlertDescription>{t('accounts:ewsSetupDescription')}</AlertDescription></Alert>
-    {error && <Alert variant="destructive"><AlertTitle>{t('accounts:notSaved')}</AlertTitle><AlertDescription>{errorText(error)}</AlertDescription>
-      {onReload && error.code === 'conflict' && <Button variant="outline" onClick={onReload}>{t('accounts:reloadSettings')}</Button>}
-    </Alert>}
-    {credential?.trust === 'needsConfirmation' && <Alert><AlertDescription>{t('accounts:ewsConnectionUntrusted')}</AlertDescription></Alert>}
     <FieldSet disabled={saving} aria-label={t('accounts:emailAccountSettings')} className="gap-6">
       <SettingsGroup title={t('accounts:emailAddress')}>
         <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder="you@company.com" inputMode="email" error={error} />
@@ -194,11 +200,13 @@ export function EwsConnectionForm({ client, account, initialDraft: resume, initi
       </SettingsGroup> : <SettingsGroup title={t('accounts:ewsSettingsTitle')}>
         <Button variant="outline" className="w-fit" disabled={finding || !client.available} onClick={() => void discover()}>{t(finding ? 'accounts:ewsFindingServer' : 'accounts:ewsFindServer')}</Button>
         <Button variant="ghost" className="w-fit" onClick={() => setManual(true)}>{t('accounts:ewsManualSetup')}</Button>
+        {problem?.operation === 'discover' && !lookup?.targetGrant && notice}
       </SettingsGroup>}
       {!manual && lookup?.targetGrant && <SettingsGroup title={t('accounts:ewsUsernameLabel')}>
         <TextField id="ews.username" label={t('accounts:ewsUsernameLabel')} value={draft.ews?.username || draft.emailAddress.trim()} onChange={(value) => server('username', value)} description={t('accounts:ewsUsernameHint')} error={error} />
       </SettingsGroup>}
       <SettingsGroup title={t('accounts:credentials')}>
+        {credential?.trust === 'needsConfirmation' && <FieldDescription role="status">{t('accounts:ewsConnectionUntrusted')}</FieldDescription>}
         <PasswordField id="sharedPassword" label={t('accounts:ewsPasswordLabel')} value={draft.sharedPassword} onChange={(value) => change('sharedPassword', value)} canKeep={!!credential?.passwordConfigured} error={error} />
       </SettingsGroup>
       <RouteFields draft={draft} change={change} error={error} oldProxyAuth={oldProxyAuth} />
@@ -211,10 +219,12 @@ export function EwsConnectionForm({ client, account, initialDraft: resume, initi
         <Button className="mt-3 w-fit" variant="outline" disabled={finding || !client.available} onClick={() => void discover(lookup)}>{t('accounts:ewsContinueDiscovery')}</Button>
       </>}
     </Alert>}
+    {problem?.operation === 'discover' && lookup?.targetGrant && notice}
     {manual && !account && <SettingsGroup title={t('accounts:testLogin')} description={t('accounts:draftVerificationHint')}>
       <div className="flex gap-2"><Button variant="outline" disabled={testing || saving || !client.available} onClick={() => void testLogin()}>{t(testing ? 'accounts:testingLogin' : 'accounts:testLogin')}</Button>
         {testing && <Button variant="ghost" onClick={() => { test.current?.abort(); test.current = null; setTesting(false) }}>{t('accounts:cancelLoginTest')}</Button>}</div>
       {report && <ConnectionVerificationReport report={report} client={client} providerId="exchange-self-hosted" />}
+      {problem?.operation === 'test' && notice}
     </SettingsGroup>}
   </SettingsPage>
 }

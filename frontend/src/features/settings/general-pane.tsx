@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { ErrorNotice } from '@/components/error-notice'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -8,7 +8,7 @@ import type { CloseBehavior, LanguagePreference, StartupView } from '@/generated
 import type { MailxClient } from '@/lib/mailx-client'
 import { errorText } from '@/i18n/errors'
 import { useLifecycle } from '@/features/lifecycle/lifecycle-context'
-import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
+import { SettingsGroup, SettingsPage, SettingsRow, SettingsSaveError } from './settings-layout'
 import { useSettings, useUpdateGeneral } from './settings-queries'
 import { AutostartSettings } from './autostart-settings'
 
@@ -34,10 +34,6 @@ export function GeneralPane({ client }: { client: MailxClient }) {
     try { await lifecycle.client.quit() } catch (cause) { setQuitError(cause) } finally { setQuitPending(false) }
   }
   return <SettingsPage>
-    {(settings.isError || update.isError) && <Alert variant="destructive">
-      <AlertTitle>{t(settings.isError ? 'readFailed' : 'saveFailedTitle')}</AlertTitle>
-      <AlertDescription>{errorText(settings.error ?? update.error)}</AlertDescription>
-    </Alert>}
     <SettingsGroup title={t('general')}>
       <SettingsRow label={t('language')} description={t('languageHint')} htmlFor="general.language">
         <Select value={settings.data?.settings.general.language ?? 'system'} items={items}
@@ -55,6 +51,9 @@ export function GeneralPane({ client }: { client: MailxClient }) {
           <SelectContent>{Object.entries(startupItems).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsRow>
+      {settings.isError && <ErrorNotice message={t('readFailed')} detail={errorText(settings.error)} actionLabel={t('retry')}
+        onAction={() => void settings.refetch()} actionDisabled={settings.isFetching} />}
+      <SettingsSaveError update={update} fields={['language', 'startupView']} />
     </SettingsGroup>
     <AutostartSettings client={client} />
     {snapshot && <SettingsGroup title={t('windowBehavior')}>
@@ -73,10 +72,11 @@ export function GeneralPane({ client }: { client: MailxClient }) {
           disabled={!settings.data || update.isPending || snapshot.quitting}
           onCheckedChange={(showMenuBarIcon) => update.mutate({ showMenuBarIcon })} />
       </SettingsRow>}
+      <SettingsSaveError update={update} fields={['closeBehavior', 'showMenuBarIcon']} />
       <SettingsRow label={t('quitMailx')} description={t('quitMailxHint')}>
         <Button variant="outline" size="sm" disabled={quitPending || snapshot.quitting} onClick={() => void quit()}>{t('quitMailx')}</Button>
       </SettingsRow>
-      {quitError !== null && <p role="alert" className="text-sm text-destructive">{errorText(quitError)}</p>}
+      {quitError !== null && <ErrorNotice message={errorText(quitError)} />}
     </SettingsGroup>}
   </SettingsPage>
 }
