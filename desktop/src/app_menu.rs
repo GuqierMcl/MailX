@@ -252,9 +252,16 @@ mod macos {
     }
 
     /// The installed AppKit menu. Replacing `NSApp.mainMenu` redraws the whole
-    /// menu bar, so state-only changes are applied to these handles instead.
+    /// menu bar, so it is kept: state changes go to the item handles and
+    /// structural changes refill only the affected top-level menu.
     struct Built {
-        shape: Vec<Group>,
+        groups: Vec<BuiltGroup>,
+    }
+
+    struct BuiltGroup {
+        id: String,
+        submenu: Submenu<Wry>,
+        shape: Vec<Item>,
         handles: Vec<Handle>,
     }
 
@@ -286,9 +293,9 @@ mod macos {
         item.id == "openWindows" || !item.items.is_empty()
     }
 
-    /// What needs a rebuild: everything except labels, enabled and checked
+    /// What needs a refill: everything except labels, enabled and checked
     /// state of the items MailX creates itself.
-    fn shape(groups: &[Group]) -> Vec<Group> {
+    fn shape(items: &[Item]) -> Vec<Item> {
         fn strip(items: &mut [Item]) {
             for item in items {
                 strip(&mut item.items);
@@ -301,12 +308,9 @@ mod macos {
                 item.checked = item.checked.map(|_| false);
             }
         }
-        let mut groups = groups.to_vec();
-        for group in &mut groups {
-            group.label.clear();
-            strip(&mut group.items);
-        }
-        groups
+        let mut items = items.to_vec();
+        strip(&mut items);
+        items
     }
 
     impl Menus {
@@ -409,44 +413,74 @@ mod macos {
             });
             return;
         }
-        let shape = shape(&groups);
-        let updated = match menus.built.as_ref() {
-            Some(built) if built.shape == shape => apply(&built.handles, &groups).is_ok(),
-            _ => false,
-        };
-        if updated {
+        let same_groups = menus.built.as_ref().is_some_and(|built| {
+            built.groups.iter().map(|group| &group.id).eq(groups.iter().map(|group| &group.id))
+        });
+        if same_groups
+            && let Some(built) = menus.built.as_mut()
+            && refill(app, built, &groups).is_ok()
+        {
             menus.displayed = Some(groups);
             return;
         }
-        if let Ok(handles) = rebuild(app, &groups) {
-            menus.built = Some(Built { shape, handles });
+        menus.built = None;
+        if let Ok(built) = rebuild(app, &groups) {
+            menus.built = Some(built);
             menus.displayed = Some(groups);
         }
     }
 
-    fn rebuild(app: &AppHandle, groups: &[Group]) -> tauri::Result<Vec<Handle>> {
+    fn rebuild(app: &AppHandle, groups: &[Group]) -> tauri::Result<Built> {
         let menu = Menu::new(app)?;
-        let mut handles = Vec::new();
+        let mut built = Vec::new();
         let mut help = None;
         for group in groups {
             let submenu = Submenu::new(app, &group.label, true)?;
-            handles.push(Handle::Submenu(submenu.clone()));
+            let mut handles = Vec::new();
             append_items(app, &submenu, &group.items, &mut handles)?;
             menu.append(&submenu)?;
             if group.id == "help" {
-                help = Some(submenu);
+                help = Some(submenu.clone());
             }
+            built.push(BuiltGroup {
+                id: group.id.clone(),
+                submenu,
+                shape: shape(&group.items),
+                handles,
+            });
         }
         app.set_menu(menu)?;
         if let Some(help) = help {
             help.set_as_help_menu_for_nsapp()?;
         }
-        Ok(handles)
+        Ok(Built { groups: built })
     }
 
-    /// Visits items in the order `rebuild` created their handles.
-    fn apply(handles: &[Handle], groups: &[Group]) -> tauri::Result<()> {
-        fn items(
+    fn refill(app: &AppHandle, built: &mut Built, groups: &[Group]) -> tauri::Result<()> {
+        for (slot, group) in built.groups.iter_mut().zip(groups) {
+            let submenu = &slot.submenu;
+            if submenu.text()? != group.label {
+                submenu.set_text(&group.label)?;
+            }
+            let shape = shape(&group.items);
+            if slot.shape == shape && apply(&slot.handles, &group.items).is_ok() {
+                continue;
+            }
+            // Refilling an existing top-level menu leaves the menu bar alone.
+            for item in submenu.items()? {
+                submenu.remove(&item)?;
+            }
+            let mut handles = Vec::new();
+            append_items(app, submenu, &group.items, &mut handles)?;
+            slot.shape = shape;
+            slot.handles = handles;
+        }
+        Ok(())
+    }
+
+    /// Visits items in the order `append_items` created their handles.
+    fn apply(handles: &[Handle], items: &[Item]) -> tauri::Result<()> {
+        fn visit(
             handles: &mut std::slice::Iter<'_, Handle>,
             list: &[Item],
         ) -> tauri::Result<()> {
@@ -460,7 +494,7 @@ mod macos {
                         if handle.is_enabled()? != item.enabled {
                             handle.set_enabled(item.enabled)?;
                         }
-                        items(handles, &item.items)?;
+                        visit(handles, &item.items)?;
                     }
                     (Some(Handle::Check(handle)), Some(checked)) => {
                         set_text(handle.text()?, &item.label, |text| handle.set_text(text))?;
@@ -490,12 +524,9 @@ mod macos {
             if current == next { Ok(()) } else { set(next) }
         }
         let mut handles = handles.iter();
-        for group in groups {
-            let Some(Handle::Submenu(handle)) = handles.next() else {
-                return Err(tauri::Error::WindowNotFound);
-            };
-            set_text(handle.text()?, &group.label, |text| handle.set_text(text))?;
-            items(&mut handles, &group.items)?;
+        visit(&mut handles, items)?;
+        if handles.next().is_some() {
+            return Err(tauri::Error::WindowNotFound);
         }
         Ok(())
     }
@@ -613,7 +644,7 @@ mod macos {
 
     #[cfg(test)]
     #[test]
-    fn only_structural_changes_rebuild_the_menu() {
+    fn only_structural_changes_refill_a_menu() {
         fn groups(value: serde_json::Value) -> Vec<Group> {
             serde_json::from_value(value).unwrap()
         }
@@ -633,7 +664,7 @@ mod macos {
                 {"id": "copy", "label": "Copy", "enabled": false}
             ]
         }]));
-        assert!(shape(&base) == shape(&state));
+        assert!(shape(&base[0].items) == shape(&state[0].items));
 
         for changed in [
             // A new accelerator, a plain item becoming a check item, a native
@@ -647,7 +678,7 @@ mod macos {
             let id = changed["id"].as_str().unwrap().to_owned();
             let slot = next[0].items.iter_mut().find(|item| item.id == id).unwrap();
             *slot = serde_json::from_value(changed).unwrap();
-            assert!(shape(&base) != shape(&next), "{id}");
+            assert!(shape(&base[0].items) != shape(&next[0].items), "{id}");
         }
     }
 
