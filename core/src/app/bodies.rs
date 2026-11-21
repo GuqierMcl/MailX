@@ -1,7 +1,7 @@
 //! Host-only body resources. None of these contents or identities is an IPC DTO.
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -10,7 +10,7 @@ use crate::net::images::ImageFetchError;
 use crate::{
     AppError, ErrorCode,
     accounts::AccountService,
-    mail::render::{self, InlineImage, SANITIZER_VERSION},
+    mail::render::{self, InlineImage, RemoteImageRole, RemoteImageSlot, SANITIZER_VERSION},
     storage::bodies::{BodyIdentity, StoredBlob},
 };
 
@@ -21,6 +21,7 @@ pub struct BodyBinding {
     pub(super) identity: BodyIdentity,
     pub(super) raw: StoredBlob,
     pub(super) sanitizer_version: u32,
+    remote_slots: Arc<OnceLock<Vec<RemoteImageSlot>>>,
     remote_images: Arc<Mutex<RemoteImages>>,
     remote_cancelled: tokio::sync::watch::Sender<bool>,
 }
@@ -45,6 +46,9 @@ struct RemoteImages {
 #[serde(rename_all = "camelCase")]
 pub struct RemoteImageStatus {
     pub index: usize,
+    /// First occurrence of this URL in the bound document.
+    pub group: usize,
+    pub role: RemoteImageRole,
     pub loading: bool,
     pub error: Option<ImageFetchError>,
 }
@@ -114,15 +118,55 @@ impl BodyBinding {
         Ok(())
     }
 
-    fn image_status(&self, status: RemoteImageStatus) -> Result<(), AppError> {
+    fn start_image(
+        &self,
+        index: usize,
+        group: usize,
+        role: RemoteImageRole,
+    ) -> Result<(), AppError> {
         let mut cache = self.remote_images.lock().map_err(|_| internal())?;
         if cache.released {
             return Err(missing());
         }
-        if status.loading || cache.statuses.contains_key(&status.index) {
-            cache.statuses.insert(status.index, status);
-        }
+        cache.statuses.insert(
+            index,
+            RemoteImageStatus {
+                index,
+                group,
+                role,
+                loading: true,
+                error: None,
+            },
+        );
         Ok(())
+    }
+
+    fn finish_image(&self, index: usize, error: Option<ImageFetchError>) {
+        if let Ok(mut cache) = self.remote_images.lock()
+            && let Some(status) = cache.statuses.get_mut(&index)
+        {
+            status.loading = false;
+            status.error = error;
+        }
+    }
+
+    fn remote_slots(&self, core: &MailxCore) -> Result<&[RemoteImageSlot], AppError> {
+        // Recheck identity even on a cached lookup. Parsing happens once per
+        // document, outside the account-service lock, only after an image request.
+        let html = {
+            let service = core.accounts()?;
+            check(&service, self)?;
+            if let Some(slots) = self.remote_slots.get() {
+                return Ok(slots);
+            }
+            service
+                .body_cache(&self.identity)?
+                .and_then(|body| body.rendered.sanitized_html)
+                .ok_or_else(missing)?
+        };
+        Ok(self
+            .remote_slots
+            .get_or_init(|| render::remote_image_slots(&html)))
     }
 }
 
@@ -186,6 +230,7 @@ fn read_links(
             identity,
             raw,
             sanitizer_version,
+            remote_slots: Arc::default(),
             remote_images: Arc::default(),
             remote_cancelled: tokio::sync::watch::channel(false).0,
         },
@@ -234,6 +279,7 @@ impl MailxCore {
                     identity,
                     raw: body.raw,
                     sanitizer_version: body.sanitizer_version,
+                    remote_slots: Arc::default(),
                     remote_images: Arc::default(),
                     remote_cancelled: tokio::sync::watch::channel(false).0,
                 },
@@ -321,11 +367,8 @@ impl MailxCore {
         impl Drop for DropGuard<'_> {
             fn drop(&mut self) {
                 if !self.finished {
-                    let _ = self.binding.image_status(RemoteImageStatus {
-                        index: self.index,
-                        loading: false,
-                        error: Some(ImageFetchError::Cancelled),
-                    });
+                    self.binding
+                        .finish_image(self.index, Some(ImageFetchError::Cancelled));
                 }
             }
         }
@@ -345,11 +388,7 @@ impl MailxCore {
             }
         };
         // Released bindings cannot regain status through a late completion.
-        let _ = binding.image_status(RemoteImageStatus {
-            index,
-            loading: false,
-            error: result.as_ref().err().copied(),
-        });
+        binding.finish_image(index, result.as_ref().err().copied());
         guard.finished = true;
         result
     }
@@ -409,6 +448,7 @@ impl MailxCore {
                 identity: binding.identity.clone(),
                 raw: binding.raw.clone(),
                 sanitizer_version: binding.sanitizer_version,
+                remote_slots: binding.remote_slots.clone(),
                 remote_images: Arc::new(Mutex::new(images)),
                 remote_cancelled: tokio::sync::watch::channel(false).0,
             })
@@ -424,29 +464,20 @@ impl MailxCore {
     ) -> Result<InlineImage, ImageFetchError> {
         let core = self.clone();
         let saved = binding.clone();
-        let url = tokio::task::spawn_blocking(move || {
-            let service = core.accounts()?;
-            check(&service, &saved)?;
-            let body = service.body_cache(&saved.identity)?.ok_or_else(missing)?;
-            render::remote_images(
-                body.rendered
-                    .sanitized_html
-                    .as_deref()
-                    .ok_or_else(missing)?,
-            )
-            .get(index)
-            .cloned()
-            .ok_or_else(missing)
+        let (url, group, role) = tokio::task::spawn_blocking(move || {
+            let slots = saved.remote_slots(&core)?;
+            let slot = slots.get(index).ok_or_else(missing)?;
+            let group = slots[..index]
+                .iter()
+                .position(|other| other.url == slot.url)
+                .unwrap_or(index);
+            Ok::<_, AppError>((slot.url.clone(), group, slot.role))
         })
         .await
         .map_err(unavailable)?
         .map_err(unavailable)?;
         binding
-            .image_status(RemoteImageStatus {
-                index,
-                loading: true,
-                error: None,
-            })
+            .start_image(index, group, role)
             .map_err(unavailable)?;
         let request = {
             let mut cache = binding.remote_images.lock().map_err(unavailable)?;

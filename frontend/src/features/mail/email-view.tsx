@@ -36,6 +36,7 @@ import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import type { MailxClient } from '@/lib/mailx-client'
 import { AttachmentList } from './attachment-list'
 import { BodyDocument, BodySkeleton } from './body-document'
+import { ImageDetailsSlot } from './image-status'
 import { displayName, formatFullTime } from './format'
 import { LocalOnlyMarker } from './local-only-marker'
 import { SenderAvatar } from './sender-avatar'
@@ -247,6 +248,7 @@ type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload'
 
 function EmailContent({ email, aiSummary, onAskAi, onOpenAiSettings, ...props }: ContentProps) {
   useTranslation()
+  const [imageDetailsSlot, setImageDetailsSlot] = useState<HTMLSpanElement | null>(null)
   const { summary, attachments } = email
   return (
     <article className="flex min-h-0 flex-1 animate-in flex-col overflow-hidden duration-150 fade-in-0">
@@ -264,6 +266,7 @@ function EmailContent({ email, aiSummary, onAskAi, onOpenAiSettings, ...props }:
               {email.cc.length > 0 && <div className="truncate text-xs text-muted-foreground">{t('mail:ccLabel')}{addressList(email.cc)}</div>}
             </div>
             {summary.localOnly && <LocalOnlyMarker />}
+            <span ref={setImageDetailsSlot} className="shrink-0 empty:hidden" />
             <time dateTime={summary.receivedAt} className="shrink-0 text-xs text-muted-foreground">
               {formatFullTime(summary.receivedAt)}
             </time>
@@ -273,7 +276,7 @@ function EmailContent({ email, aiSummary, onAskAi, onOpenAiSettings, ...props }:
         <div className="flex min-h-0 flex-1 flex-col gap-2 p-4 text-sm">
           {aiSummary && <SummaryCard summary={aiSummary} client={props.client} onAsk={onAskAi} onOpenSettings={onOpenAiSettings ?? (() => undefined)} />}
           <VerificationCodeBar emailId={summary.id} verification={summary.localOnly ? undefined : props.verification} />
-          <Body email={email} {...props} />
+          <ImageDetailsSlot.Provider value={imageDetailsSlot}><Body email={email} {...props} /></ImageDetailsSlot.Provider>
         </div>
         {attachments.some((attachment) => !attachment.isInline) && <AttachmentList client={props.client} emailId={summary.id} attachments={attachments} />}
     </article>

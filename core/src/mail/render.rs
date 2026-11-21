@@ -10,6 +10,7 @@ use mail_parser::{Message, MessageParser, MessagePart, MimeHeaders, PartType};
 
 mod css;
 mod html;
+mod image_layout;
 mod images;
 mod plain;
 mod quotes;
@@ -21,6 +22,8 @@ pub use quotes::fold_quotes;
 pub use html::{
     ResourceBinding, bind_numbered_resources, bind_resources, is_allowed_link, remote_images,
 };
+pub use image_layout::RemoteImageRole;
+pub(crate) use image_layout::{RemoteImageSlot, remote_image_slots};
 pub(crate) use images::remote_raster_format;
 pub use images::{
     InlineImage, MAX_REMOTE_IMAGE_OUTPUT_BYTES, decode_remote_raster, validate as validate_image,

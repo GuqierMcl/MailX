@@ -614,7 +614,13 @@ export type RemoteImagePolicy = "ask" | "automatic" | "never";
 
 export type ImageFetchError = "targetBlocked" | "proxyPolicyRequired" | "dns" | "connect" | "proxy" | "tls" | "httpStatus" | "notFound" | "unsupportedType" | "invalidImage" | "tooLarge" | "timeout" | "cancelled";
 
-export type RemoteImageStatus = { index: number, loading: boolean, error: ImageFetchError | null, };
+export type RemoteImageRole = "decorative" | "content" | "important";
+
+export type RemoteImageStatus = { index: number,
+/**
+ * First occurrence of this URL in the bound document.
+ */
+group: number, role: RemoteImageRole, loading: boolean, error: ImageFetchError | null, };
 
 export type SecuritySettings = { remoteImages: RemoteImagePolicy,
 /**

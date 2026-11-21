@@ -116,7 +116,7 @@ type EmailPage = {
 | `prepareBody(emailId, loadRemoteImages?, translation?)` | `emails_prepare_body`，`{ emailId, loadRemoteImages?: boolean, translation?: string }`；`translation` 是译文的目标语言，见[邮件翻译](#邮件翻译主窗口) | `{ documentToken }` |
 | `prepareDraftBody(draftId, expectedRevision)` | `drafts_prepare_body`，`{ draftId, expectedRevision }`（仅 main 窗口） | `{ documentToken }`，绑定当前已保存的草稿版本 |
 | `releaseBody(emailId, documentToken)` | `emails_release_body`，`{ emailId, documentToken }` | null；幂等释放本次阅读 |
-| `imageStatus(emailId, documentToken)` | `emails_image_status`，`{ emailId, documentToken }` | `RemoteImageStatus[]`：`{ index, loading, error }`，无原始 URL |
+| `imageStatus(emailId, documentToken)` | `emails_image_status`，`{ emailId, documentToken }` | `RemoteImageStatus[]`：`{ index, group, role, loading, error }`；仅含当前获准文档中已尝试的远程图片 |
 | `retryImages(emailId, documentToken)` | `emails_retry_images`，`{ emailId, documentToken }` | `{ documentToken }`，复用成功图片、清理失败状态、撤销旧令牌 |
 | `bodyLinks(emailId, documentToken)` | `emails_body_links`，`{ emailId, documentToken }` | `{ documentToken, links: [{ emailId, index, url }] }` |
 | `requestLink(identity)` | `links_request`，`{ emailId, index, documentToken }` | null；旧编号兼容入口，生产模式拒绝 |
@@ -145,7 +145,7 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 正文只包含 `/remote/<emailId>/<index>?token=…`，原始图片 URL 不交给 WebView。Rust 根据净化结果解析索引，按账号路由加载，成功图片在当前阅读内存（总量最多 64 MiB）及账号 / 来源 / 连接版本隔离的磁盘缓存中复用。读取始终校验当前身份与显示授权，关闭阅读或收紧策略取消等待/网络任务。支持 `<img src>` 的 http/https（含 // 地址），每封最多 32 个资源、输入最多 8 MiB、总等待 30 秒、至多 3 次重定向；远程格式和账号代理策略见[网络与安全](../architecture/network-security.md)。CSS URL、srcset、正文内联 SVG 等继续移除。详情缓存沿用 email(id) 前缀并增加来源 / revision / generation，下载结束刷新详情和已加载列表页并保留有效选中。
 
-图片状态与重试仅向可信主窗口开放，要求当前文档 token、邮件身份和当前图片许可同时有效。错误枚举为 `targetBlocked | proxyPolicyRequired | dns | connect | proxy | tls | httpStatus | unsupportedType | invalidImage | tooLarge | timeout | cancelled`，不携带源地址、响应文字或认证信息。重试继承当前阅读授权和成功图片内存，返回独立新绑定与令牌；旧令牌随后释放，失败资源可重新获取，成功资源不重新联网；尚在加载或冷却期内不能重试。未授权/失效文档不提供诊断。
+图片状态与重试仅向可信主窗口开放，要求当前文档 token、邮件身份和当前图片许可同时有效。`index` 为当前文档的资源序号，`group` 用首个相同资源的序号标识重复项，`role`（`decorative | content | important`）由宿主从已净化的正文推断，仅用于阅读反馈。状态不携带源地址、替代文本、响应文字或认证信息。错误枚举为 `targetBlocked | proxyPolicyRequired | dns | connect | proxy | tls | httpStatus | notFound | unsupportedType | invalidImage | tooLarge | timeout | cancelled`。重试继承当前阅读授权和成功图片内存，返回独立新绑定与令牌；旧令牌随后释放，失败资源可重新获取，成功资源不重新联网；尚在加载或冷却期内不能重试。未授权/失效文档不提供诊断。
 
 ## 3. 当前账号操作
 

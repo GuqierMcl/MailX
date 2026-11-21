@@ -193,13 +193,17 @@ pub fn remote_images(html: &str) -> Vec<String> {
             let Node::Element(element) = node.value() else {
                 return None;
             };
-            (element.name() == "img")
-                .then(|| element.attr(REMOTE_SLOT))
-                .flatten()
-                .and_then(remote_url)
+            remote_slot_url(element)
         })
         .take(MAX_REMOTE_IMAGES)
         .collect()
+}
+
+pub(super) fn remote_slot_url(element: &scraper::node::Element) -> Option<String> {
+    (element.name() == "img")
+        .then(|| element.attr(REMOTE_SLOT))
+        .flatten()
+        .and_then(remote_url)
 }
 
 pub(super) fn is_remote(value: &str) -> bool {

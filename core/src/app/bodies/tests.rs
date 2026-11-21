@@ -505,7 +505,10 @@ async fn downloaded_message_images_persist_across_readings_but_never_bypass_iden
 
 #[tokio::test]
 async fn image_diagnostics_are_bound_and_never_include_remote_details() {
-    let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://127.0.0.1/private?secret=private-marker\">";
+    let raw = b"Content-Type: text/html\r\n\r\n\
+        <img width=\"1\" height=\"1\" src=\"https://127.0.0.1/private?secret=private-marker\">\
+        <img width=\"610\" height=\"348\" alt=\"private-alt\" src=\"https://127.0.0.1/private?secret=private-marker\">\
+        <img src=\"https://127.0.0.1/unrequested\">";
     let (_directory, core, ids, db) = fixture(&[raw]);
     let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
     assert!(
@@ -522,17 +525,34 @@ async fn image_diagnostics_are_bound_and_never_include_remote_details() {
     // cache miss fails before any network plan can be opened.
     assert!(matches!(first, Err(ImageFetchError::Cancelled)));
     assert!(matches!(duplicate, Err(ImageFetchError::Cancelled)));
+    assert!(
+        core.body_remote_image_detailed(binding.clone(), 1)
+            .await
+            .is_err()
+    );
     let status = core.body_image_status(binding.clone()).await.unwrap();
     assert_eq!(
         status,
-        vec![RemoteImageStatus {
-            index: 0,
-            loading: false,
-            error: Some(ImageFetchError::Cancelled)
-        }]
+        vec![
+            RemoteImageStatus {
+                index: 0,
+                group: 0,
+                role: RemoteImageRole::Decorative,
+                loading: false,
+                error: Some(ImageFetchError::Cancelled),
+            },
+            RemoteImageStatus {
+                index: 1,
+                group: 0,
+                role: RemoteImageRole::Important,
+                loading: false,
+                error: Some(ImageFetchError::Cancelled),
+            },
+        ]
     );
     let serialized = serde_json::to_string(&status).unwrap();
     assert!(!serialized.contains("private-marker"));
+    assert!(!serialized.contains("private-alt"));
     assert!(!serialized.contains("127.0.0.1"));
     assert!(
         core.body_remote_image_detailed(binding.clone(), usize::MAX)
@@ -641,14 +661,7 @@ async fn a_released_binding_cannot_start_a_later_image_request_or_restore_status
         core.body_remote_image_detailed(late.clone(), 0).await,
         Err(ImageFetchError::Cancelled)
     ));
-    assert!(
-        late.image_status(RemoteImageStatus {
-            index: 0,
-            loading: true,
-            error: None
-        })
-        .is_err()
-    );
+    assert!(late.start_image(0, 0, RemoteImageRole::Content).is_err());
     assert!(late.remote_images.lock().unwrap().statuses.is_empty());
     let fresh = core.body_document(ids[0].clone()).await.unwrap().binding;
     assert!(!*fresh.remote_cancelled.borrow());
@@ -719,13 +732,7 @@ async fn image_retry_rejects_pending_released_and_stale_readings() {
     let raw = b"Content-Type: text/html\r\n\r\n<img src=\"https://images.example.invalid/pixel\">";
     let (_directory, core, ids, db) = fixture(&[raw]);
     let binding = core.body_document(ids[0].clone()).await.unwrap().binding;
-    binding
-        .image_status(RemoteImageStatus {
-            index: 0,
-            loading: true,
-            error: None,
-        })
-        .unwrap();
+    binding.start_image(0, 0, RemoteImageRole::Content).unwrap();
     assert!(core.body_retry_images(binding.clone()).await.is_err());
     binding.release_remote_images();
     assert_missing(core.body_retry_images(binding).await);
