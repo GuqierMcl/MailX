@@ -25,11 +25,16 @@ jobs:
   #   - release: only a version bump written by `version:bump` / `version:set`
   #              plus CHANGELOG.md, checked by the light release job below;
   #   - code:    everything else, the full suite.
-  # Pushes to main are always `code`, so a merged release PR is still fully
-  # checked before it is tagged (the Release workflow refuses untested tags).
+  # A push to main is `release` only when it lands such a bump on a commit whose
+  # CI result already passed: the code is then identical to a fully checked
+  # commit. Every other push to main is `code`. The Release workflow refuses
+  # tags whose CI result has not passed.
   changes:
     name: Detect code changes
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      checks: read
     outputs:
       kind: ${{ steps.filter.outputs.kind }}
       code: ${{ steps.filter.outputs.kind == 'code' }}
@@ -38,7 +43,6 @@ jobs:
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
-        if: github.event_name == 'pull_request'
         with:
           bun-version-file: package.json
       - id: filter
@@ -46,9 +50,33 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Pushes to main always run everything. Only pull requests may skip.
+          # A push to main may skip only as a release: the previous tip of main
+          # must already have a passing CI result, and everything pushed since
+          # must be a version bump of it. Anything else, including any error,
+          # runs everything. Documentation pushes are not skipped on main.
           if [ "$EVENT" != "pull_request" ]; then
+            # A new branch reports an all-zero `before`.
+            if [ "$EVENT" = "push" ] && [ -n "${BEFORE//0/}" ] &&
+              git merge-base --is-ancestor "$BEFORE" "$GITHUB_SHA"; then
+              # The latest attempts only, so a failed re-run counts as failed;
+              # all of them must have succeeded, and there must be at least one.
+              ci=$(gh api "repos/$GITHUB_REPOSITORY/commits/$BEFORE/check-runs?check_name=CI%20result&filter=latest" \
+                --jq '[.check_runs[] | select(.app.slug == "github-actions") | (.conclusion // .status)]
+                  | if length > 0 and all(. == "success") then "success" else (join(" ") | if . == "" then "none" else . end) end') || ci=""
+              echo "CI result on the previous main $BEFORE: ${ci:-none}"
+              if [ "$ci" = "success" ] &&
+                git worktree add --detach "$RUNNER_TEMP/base" "$BEFORE" &&
+                verdict=$(bun "$RUNNER_TEMP/base/scripts/check-release-pr.mjs" "$BEFORE" "$GITHUB_SHA"); then
+                echo "$verdict"
+                if [ "$(printf '%s\n' "$verdict" | tail -n 1)" = "release" ]; then
+                  echo "kind=release" >> "$GITHUB_OUTPUT"
+                  exit 0
+                fi
+              fi
+            fi
             echo "kind=code" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -84,7 +112,8 @@ jobs:
           echo "kind=code" >> "$GITHUB_OUTPUT"
 
   # A release PR changes nothing but versions and the changelog, which is what
-  # these checks cover. The full suite runs on main once the PR is merged.
+  # these checks cover. Merged onto a main whose CI passed, it gets the same
+  # light checks there; otherwise main runs the full suite.
   release:
     name: Release PR checks
     needs: changes

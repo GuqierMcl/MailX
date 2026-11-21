@@ -110,7 +110,7 @@ git diff --check
 
 ### 持续集成
 
-发版 PR（只改版本文件与 `CHANGELOG.md`，且与 `version:bump` 的输出一致）只运行版本与日志的轻量检查，全量检查在合并后的 `main` 上进行，发版工作流在构建前核对该提交的 `CI result` 已通过；规则见[发布流程](release.md#发版-pr-的-ci)。判定脚本另有单元测试。
+发版 PR（只改版本文件与 `CHANGELOG.md`，且与 `version:bump` 的输出一致）只运行版本与日志的轻量检查。合并到 `main` 时，若推送前的提交 `CI result` 已通过，合并提交同样只跑轻量检查，否则跑全量检查；发版工作流在构建前核对该提交的 `CI result` 已通过。验证这一规则时，确认推送前提交 CI 未完成或失败、推送含其他改动、判定出错时都回到全量检查；规则见[发布流程](release.md#发版-pr-的-ci)。判定脚本另有单元测试。
 
 CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS archive / security 镜像，兼容 runner 的 `mirror+file` 镜像表与直接 Ubuntu 源布局；不改动发行版、组件、签名密钥或第三方源。APT 保留下载重试与连接 / 读取超时，更新索引时的临时错误也必须使该次尝试失败。官方镜像在 runner 上无法访问时，步骤会恢复 runner 原有的镜像配置再试一次；仍失败时改用 ubuntu.com 以外的社区镜像（kernel.org 与 OCF Berkeley）。镜像只提供下载，索引仍由 APT 按 Ubuntu 签名密钥校验。每次尝试的更新限 3 分钟、安装限 5 分钟，整个步骤上限 20 分钟。修改镜像策略后用 `actionlint`（含 ShellCheck）与差异检查验证工作流，Ubuntu 安装与三平台结果以对应提交的 CI 为准。
 

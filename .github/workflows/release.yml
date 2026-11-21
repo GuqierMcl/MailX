@@ -56,10 +56,11 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not point into main. Merge the release PR first, then tag the merge commit."
             exit 1
           fi
-      # A release PR only gets light checks (versions and changelog); the full
-      # suite runs when it lands on main. Installers are built only from a commit
-      # whose CI on main passed, so a tag pushed too early fails here, before any
-      # build. Re-run this workflow once the CI result is green.
+      # A release commit on main gets light checks when the commit before it
+      # passed the full suite, and the full suite otherwise. Installers are built
+      # only from a commit whose CI on main passed, so a tag pushed too early
+      # fails here, before any build. Re-run this workflow once the CI result is
+      # green.
       - name: The tagged commit passed CI on main
         if: github.ref_type == 'tag'
         env:
