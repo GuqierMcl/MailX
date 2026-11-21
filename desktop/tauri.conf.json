@@ -34,6 +34,11 @@
     "createUpdaterArtifacts": true,
     "active": true,
     "targets": ["app", "dmg", "nsis", "deb", "rpm", "appimage"],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
+    },
     "externalBin": [
       "binaries/mailx-mcp"
     ],
