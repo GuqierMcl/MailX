@@ -252,9 +252,10 @@ mod macos {
     }
 
     /// The installed AppKit menu. Replacing `NSApp.mainMenu` redraws the whole
-    /// menu bar, so it is kept: state changes go to the item handles and
-    /// structural changes refill only the affected top-level menu.
+    /// menu bar, so it is kept: state changes go to the item handles and a
+    /// structural change swaps in a new copy of only the affected menu.
     struct Built {
+        menu: Menu<Wry>,
         groups: Vec<BuiltGroup>,
     }
 
@@ -433,47 +434,53 @@ mod macos {
     fn rebuild(app: &AppHandle, groups: &[Group]) -> tauri::Result<Built> {
         let menu = Menu::new(app)?;
         let mut built = Vec::new();
-        let mut help = None;
         for group in groups {
-            let submenu = Submenu::new(app, &group.label, true)?;
-            let mut handles = Vec::new();
-            append_items(app, &submenu, &group.items, &mut handles)?;
-            menu.append(&submenu)?;
-            if group.id == "help" {
-                help = Some(submenu.clone());
+            let slot = build_group(app, group)?;
+            menu.append(&slot.submenu)?;
+            built.push(slot);
+        }
+        app.set_menu(menu.clone())?;
+        for slot in &built {
+            if slot.id == "help" {
+                slot.submenu.set_as_help_menu_for_nsapp()?;
             }
-            built.push(BuiltGroup {
-                id: group.id.clone(),
-                submenu,
-                shape: shape(&group.items),
-                handles,
-            });
         }
-        app.set_menu(menu)?;
-        if let Some(help) = help {
-            help.set_as_help_menu_for_nsapp()?;
-        }
-        Ok(Built { groups: built })
+        Ok(Built {
+            menu,
+            groups: built,
+        })
+    }
+
+    fn build_group(app: &AppHandle, group: &Group) -> tauri::Result<BuiltGroup> {
+        let submenu = Submenu::new(app, &group.label, true)?;
+        let mut handles = Vec::new();
+        append_items(app, &submenu, &group.items, &mut handles)?;
+        Ok(BuiltGroup {
+            id: group.id.clone(),
+            submenu,
+            shape: shape(&group.items),
+            handles,
+        })
     }
 
     fn refill(app: &AppHandle, built: &mut Built, groups: &[Group]) -> tauri::Result<()> {
-        for (slot, group) in built.groups.iter_mut().zip(groups) {
-            let submenu = &slot.submenu;
-            if submenu.text()? != group.label {
-                submenu.set_text(&group.label)?;
-            }
-            let shape = shape(&group.items);
-            if slot.shape == shape && apply(&slot.handles, &group.items).is_ok() {
+        for (position, group) in groups.iter().enumerate() {
+            let slot = &built.groups[position];
+            if slot.shape == shape(&group.items) && apply(&slot.handles, &group.items).is_ok() {
+                if slot.submenu.text()? != group.label {
+                    slot.submenu.set_text(&group.label)?;
+                }
                 continue;
             }
-            // Refilling an existing top-level menu leaves the menu bar alone.
-            for item in submenu.items()? {
-                submenu.remove(&item)?;
+            // Removing items from a live submenu goes by index and can leave
+            // AppKit's copy behind, so the whole menu is replaced instead.
+            let next = build_group(app, group)?;
+            built.menu.insert(&next.submenu, position)?;
+            built.menu.remove(&slot.submenu)?;
+            if next.id == "help" {
+                next.submenu.set_as_help_menu_for_nsapp()?;
             }
-            let mut handles = Vec::new();
-            append_items(app, submenu, &group.items, &mut handles)?;
-            slot.shape = shape;
-            slot.handles = handles;
+            built.groups[position] = next;
         }
         Ok(())
     }
