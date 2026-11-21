@@ -233,12 +233,33 @@ jobs:
           app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)
           test -n "$app"
           bash scripts/check-macos-sdk.sh "$app"
+      # Tauri notarizes and staples the .app, then packs it into a .dmg that it
+      # only signs. People download the .dmg, so it gets a ticket of its own:
+      # without one, the first open has to ask Apple over the network.
+      - name: Notarize the disk image
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          dmg=$(find target/release/bundle/dmg -maxdepth 1 -name '*.dmg' | head -n 1)
+          test -n "$dmg"
+          xcrun notarytool submit "$dmg" \
+            --key "$RUNNER_TEMP/AuthKey.p8" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
+            --wait --timeout 40m --output-format json | tee "$RUNNER_TEMP/notarize-dmg.json"
+          status=$(bun -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).status)' "$RUNNER_TEMP/notarize-dmg.json")
+          if [ "$status" != "Accepted" ]; then
+            echo "::error::Apple did not accept the disk image (status: $status). Run 'xcrun notarytool log <id>' for the reasons."
+            exit 1
+          fi
+          xcrun stapler staple "$dmg"
       # A signature that only looks right is worse than none: without the
       # Developer ID authority, the hardened runtime and a secure timestamp,
       # Gatekeeper either refuses the app or stops accepting it once the
       # certificate expires. Without a stapled ticket the first launch needs
       # the network. Without a ticket on the .dmg, the artifact people actually
-      # download is what gets flagged.
+      # download is what gets flagged. Each check names itself when it fails.
       - name: Verify the macOS signature and notarization
         if: runner.os == 'macOS'
         shell: bash
@@ -247,20 +268,25 @@ jobs:
           dmg=$(find target/release/bundle/dmg -maxdepth 1 -name '*.dmg' | head -n 1)
           test -n "$app"
           test -n "$dmg"
-          codesign --verify --deep --strict --verbose=2 "$app"
+          fail() { echo "::error::$1"; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$app" || fail "The app signature does not verify."
           report=$(codesign --display --verbose=4 "$app" 2>&1)
           printf '%s\n' "$report"
-          grep -q '^Authority=Developer ID Application:' <<<"$report"
-          grep -Eq '^flags=.*runtime' <<<"$report"
-          grep -q '^Timestamp=' <<<"$report"
-          spctl --assess --type exec --verbose=4 "$app"
+          grep -q '^Authority=Developer ID Application:' <<<"$report" || fail "The app is not signed with a Developer ID Application certificate."
+          # codesign prints the flags inside the CodeDirectory line, for example
+          # "CodeDirectory v=20500 size=… flags=0x10000(runtime) hashes=…".
+          grep -Eq '^CodeDirectory .*flags=0x[0-9a-f]+\([^)]*runtime' <<<"$report" || fail "The app does not use the hardened runtime."
+          grep -q '^Timestamp=' <<<"$report" || fail "The app signature has no secure timestamp."
+          spctl --assess --type exec --verbose=4 "$app" || fail "Gatekeeper rejects the app."
           # The bundled MCP sidecar is a nested executable and must carry the
           # same signature as the app around it.
           sidecar=$(find "$app/Contents/MacOS" -maxdepth 1 -name 'mailx-mcp*' -type f | head -n 1)
-          test -n "$sidecar"
-          codesign --verify --strict --verbose=2 "$sidecar"
-          xcrun stapler validate "$app"
-          xcrun stapler validate "$dmg"
+          test -n "$sidecar" || fail "The MCP sidecar is missing from the app."
+          codesign --verify --strict --verbose=2 "$sidecar" || fail "The MCP sidecar signature does not verify."
+          codesign --verify --strict --verbose=2 "$dmg" || fail "The disk image signature does not verify."
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg" || fail "Gatekeeper rejects the disk image."
+          xcrun stapler validate "$app" || fail "The app has no stapled notarization ticket."
+          xcrun stapler validate "$dmg" || fail "The disk image has no stapled notarization ticket."
       - name: Collect and rename installers
         shell: bash
         run: |

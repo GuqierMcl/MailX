@@ -119,7 +119,7 @@ Linux 构建先运行 `bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEM
 
 ## 9. macOS 代码签名与公证
 
-macOS 安装包用 Apple Developer ID 签名并公证：Tauri 在构建时对 `.app`、随包的 `mailx-mcp` 和 `.dmg` 签名，再交给 Apple 公证并把票据装订（staple）到产物上。签名与更新器签名是两件事，见上一节；本文只说明操作系统这一层。
+macOS 安装包用 Apple Developer ID 签名并公证：Tauri 在构建时对 `.app`、随包的 `mailx-mcp` 和 `.dmg` 签名，并公证 `.app`、把票据装订（staple）到上面；Tauri 不公证 `.dmg`，所以工作流的 `Notarize the disk image` 步骤再用同一把 API 密钥公证 `.dmg` 并装订票据。用户下载的是 `.dmg`，它也带票据时，首次打开不需要联网向 Apple 查询。签名与更新器签名是两件事，见上一节；本文只说明操作系统这一层。
 
 - **凭据**只放在 GitHub **`release` 环境**的 secrets，只有 macOS 构建任务读取：
 
@@ -135,7 +135,7 @@ macOS 安装包用 Apple Developer ID 签名并公证：Tauri 在构建时对 `.
   工作流把 `.p8` 写到 runner 的临时目录并通过 `APPLE_API_KEY_PATH` 指定，文件权限为仅当前用户可读，公证结束后随 runner 销毁。
 
 - **证书有效期**：Developer ID Application 证书约 13 个月到期，到期前需要重新签发并替换前三个 secrets。过期不影响已经签名并公证的版本（签名带安全时间戳），Team ID 不变，用户侧不会感知；但必须在上一个证书过期前完成替换，否则构建会失败。
-- **构建后校验**：`release.yml` 的 `Verify the macOS signature and notarization` 步骤要求 `.app` 通过 `codesign --verify --strict`、带有 Developer ID 签名机构、hardened runtime 与时间戳、通过 `spctl --assess`，内嵌的 `mailx-mcp` 带有同样的签名，并且 `.app` 与 `.dmg` 的票据都能通过 `stapler validate`。任何一项不满足即失败，不发出未签名或公证失败的包。
+- **构建后校验**：`release.yml` 的 `Verify the macOS signature and notarization` 步骤要求 `.app` 通过 `codesign --verify --strict`、带有 Developer ID 签名机构、hardened runtime（`codesign` 把它写在 `CodeDirectory` 行内的 `flags=…(runtime)`）与时间戳、通过 `spctl --assess`，内嵌的 `mailx-mcp` 带有同样的签名，`.dmg` 的签名可验证且 Gatekeeper 接受，并且 `.app` 与 `.dmg` 的票据都能通过 `stapler validate`。任何一项不满足即失败，并在日志里写明是哪一项，不发出未签名或公证失败的包。
 - **公证等待时间**：公证要排在 Apple 的队列里，耗时不受本仓库控制。首次签名构建在构建约 15 分钟后，又在公证上等了 45 分钟以上，因此构建作业的 `timeout-minutes` 是 90 而不是原先的 60。作业在上限处被取消时，日志的最后一条通常是 `Notarizing …`，这时应确认 Apple 公证服务状态后重跑，而不是当成签名失败处理。
 未签名阶段的安装版每次构建都被钥匙串当作新的应用。第一个签名版本仍会让老用户遇到一次钥匙串授权（旧条目由未签名身份创建），选择“始终允许”后，之后的签名版本沿用同一身份，不再询问。发版说明与用户指南要保留这条提示，直到确认老用户都已升级。
 - **验证**：签名与公证只能在真实 macOS 上确认，验证方法与通过标准见[验证指引](validation.md)。
