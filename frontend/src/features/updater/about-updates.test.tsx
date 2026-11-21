@@ -1,7 +1,8 @@
-import { render, screen, within } from '@/test/render'
+import { act, render, screen, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { testClient } from '@/features/accounts/test-fixtures'
+import { Toaster } from '@/components/ui/toast'
 import { SettingsDialog } from '@/features/settings/settings-dialog'
 import { UpdaterProvider } from './updater-provider'
 import type { UpdateSnapshot } from './types'
@@ -9,8 +10,10 @@ import type { UpdateSnapshot } from './types'
 function renderAbout(update: UpdateSnapshot) {
   const client = testClient()
   client.getUpdateState.mockResolvedValue(update)
-  render(<UpdaterProvider client={client}><SettingsDialog client={client} target={{ section: 'about' }} onClose={() => undefined} /></UpdaterProvider>)
-  return { client, dialog: screen.getByRole('dialog', { name: '设置' }) }
+  const state: { emit: (next: UpdateSnapshot) => void } = { emit: () => undefined }
+  client.onUpdateState.mockImplementation((listener) => { state.emit = listener; return () => undefined })
+  render(<><Toaster /><UpdaterProvider client={client}><SettingsDialog client={client} target={{ section: 'about' }} onClose={() => undefined} /></UpdaterProvider></>)
+  return { client, dialog: screen.getByRole('dialog', { name: '设置' }), emit: state.emit }
 }
 
 describe('the About page', () => {
@@ -39,11 +42,27 @@ describe('the About page', () => {
     expect(client.updateSettings).not.toHaveBeenCalled()
   })
 
-  it('says so when a manual check finds nothing', async () => {
-    const { client, dialog } = renderAbout({ canInstall: true, phase: 'idle' })
-    client.checkForUpdates.mockResolvedValue({ canInstall: true, phase: 'idle' })
-    await userEvent.click(within(dialog).getByRole('button', { name: '检查更新' }))
+  it.each([false, true])('shows one up-to-date toast after a manual check (with host events: %s)', async (withEvents) => {
+    const idle = { canInstall: true, phase: 'idle' } as const
+    const checking = { canInstall: true, phase: 'checking' } as const
+    const { client, dialog, emit } = renderAbout(idle)
+    const toastText = { selector: '[data-slot="toast"] *' }
+    act(() => {
+      emit(checking)
+      emit(idle)
+    })
     expect(await within(dialog).findByText('已是最新版本')).toBeInTheDocument()
+    expect(screen.queryByText('已是最新版本', toastText)).not.toBeInTheDocument()
+
+    client.checkForUpdates.mockImplementation(async () => {
+      if (withEvents) {
+        emit(checking)
+        emit(idle)
+      }
+      return idle
+    })
+    await userEvent.click(within(dialog).getByRole('button', { name: '检查更新' }))
+    expect(await screen.findAllByText('已是最新版本', toastText)).toHaveLength(1)
   })
 
   it('links to the update when one is found', async () => {

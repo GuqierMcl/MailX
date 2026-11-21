@@ -75,6 +75,8 @@ The HTTPS certificate must be trusted by the operating system. Basic, Kerberos-o
 
 ## Manage accounts
 
+If account settings cannot load, select **Retry loading** in the center of the account pane. Connection or sign-in errors appear in the form, alongside any steps needed to recover.
+
 Open **Accounts** in the sidebar to manage a mailbox. The header shows the account's name, address and when it last synced. If a mailbox has a problem, its list entry has the same small exclamation mark as the sidebar's Accounts entry, red when sync has stopped and amber when MailX will retry on its own. A brief network drop does not show it at once: a retryable failure stays quiet until it has lasted half a minute, and clears by itself when sync recovers. A stopped sync, credentials that need confirming, or a sign-in that has to be renewed are shown in the header; the buttons to fix them are at the bottom of the page.
 
 The name, sender name, provider icon and identification color save as you change them. Pick a preset color, none, or the rainbow swatch at the end to choose any color from the system color picker. **Remove account**, in red, sits at the bottom left; **Verify connection** and **Edit connection** (or **Sign in again** for browser sign-in accounts) sit at the bottom right and stay in view while you scroll. Verifying checks the saved sign-in without sending mail: the connection method line says whether both sides passed, and if one did not, the connection details open with the reason under that server. Passing means sign-in works, not that delivery has been tested. The details (servers, credentials, network route) are folded otherwise.
@@ -91,7 +93,7 @@ Automatic sync runs quietly: account rows keep their unread counts without a loa
 
 When the sync warning says some message statuses could not be updated, MailX keeps the last known read and starred status for the affected messages. Other mail continues syncing, and MailX checks the missing statuses again on a later sync.
 
-Opening a message downloads and caches its body, so cached content can be read offline later. In the Unread view, a message you open stays in the list after it is marked read, until you switch mailbox, filter or search. Search looks at message headers, previews, cached bodies and attachment names on this computer; bodies that were never downloaded are not fully searchable, and attachment contents are not searched. Results do not represent everything on the server.
+Opening a message downloads and caches its body, so cached content can be read offline later. If a message body or draft preview cannot be displayed, select **Retry** in the center of the body area. In the Unread view, a message you open stays in the list after it is marked read, until you switch mailbox, filter or search. Search looks at message headers, previews, cached bodies and attachment names on this computer; bodies that were never downloaded are not fully searchable, and attachment contents are not searched. Results do not represent everything on the server.
 
 Choose **Mail layout** under **Settings → Appearance → Message list**. **Split view** is the default and shows the list and reader side by side. Drag the handle to adjust their widths. In **Single pane**, opening a message gives the reader the whole mail area beside the sidebar. Use the back button or press Esc to return to where you were in the list. MailX remembers your layout on this computer.
 
@@ -296,6 +298,7 @@ Closing the main window can keep MailX in the background or quit; it asks each t
 
 Manage updates in **Settings → About**. MailX checks GitHub shortly after launch and periodically while running, even if you turn off automatic updates.
 
+- **Check for updates.** Select **Check for updates** to check now. If MailX is already up to date, a brief notification confirms it.
 - **Automatic updates (default):** When the download finishes, select **Restart now** or keep working and let the update install when you quit MailX fully. Hiding the window does not install the update, and MailX never restarts on its own. **Cancel download** pauses automatic downloads for that version until you relaunch, download manually, or turn automatic updates off and back on.
 - **Manual updates:** With automatic updates off, select **Update now** to review the release notes, then **Download update** to start downloading. Turning off automatic updates stops automatic downloads and unschedules their installation on quit; updates you chose to download still install on quit.
 - **Installation result:** After a successful update, the main window shows the installed version once. **Release notes** opens that version's GitHub release in your browser. If installation did not complete, you can retry or download the installer from GitHub.

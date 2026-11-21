@@ -3,12 +3,14 @@ import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { Button } from '@/components/ui/button'
 import type { MailxClient } from '@/lib/mailx-client'
+import { cn } from '@/lib/utils'
 import { providerCredentialText, providerOf } from './providers'
 
-export function ProviderAuthHelp({ client, providerId, reason = 'authentication' }: {
+export function ProviderAuthHelp({ client, providerId, reason = 'authentication', className }: {
   client: MailxClient
   providerId: string | null
   reason?: 'authentication' | 'providerPolicy'
+  className?: string
 }) {
   useTranslation()
   const [failed, setFailed] = useState(false)
@@ -16,7 +18,7 @@ export function ProviderAuthHelp({ client, providerId, reason = 'authentication'
   const message = reason === 'providerPolicy' ? setup?.providerPolicyHelp : setup?.authenticationHelp
   if (!providerId || !message) return null
   return (
-    <div className="flex flex-col items-start gap-1 text-sm">
+    <div className={cn('flex flex-col items-start gap-1 text-sm', className)}>
       <p className="text-muted-foreground">{message}</p>
       <Button variant="link" className="h-auto px-0" onClick={() => {
         setFailed(false)

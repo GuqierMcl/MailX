@@ -5,6 +5,11 @@ import messages from '../../../locales/zh-CN/errors.json'
 export type ErrorContext = 'account' | { emailAddress?: string }
 
 export function errorText(error: unknown, context?: ErrorContext): string {
+  return errorDetail(error, context) ?? t('errors:internal')
+}
+
+/** A supplementary reason for a notice that already names the failed operation. */
+export function errorDetail(error: unknown, context?: ErrorContext): string | undefined {
   const failure: unknown = error instanceof MailxClientError ? error.failure : error
   if (failure && typeof failure === 'object' && 'code' in failure && typeof failure.code === 'string') {
     const code = failure.code as keyof typeof messages
@@ -25,7 +30,6 @@ export function errorText(error: unknown, context?: ErrorContext): string {
     }
     if (context === 'account' && code === 'notFound') return t('errors:accountNotFound')
     // Only controlled catalog entries can be shown, never raw IPC/OS error text.
-    if (Object.prototype.hasOwnProperty.call(messages, code)) return t(`errors:${code}`)
+    if (code !== 'internal' && Object.prototype.hasOwnProperty.call(messages, code)) return t(`errors:${code}`)
   }
-  return t('errors:internal')
 }

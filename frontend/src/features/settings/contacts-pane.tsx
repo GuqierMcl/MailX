@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { UserMultiple02Icon } from '@hugeicons/core-free-icons'
 import type { ContactAggregation } from '@/generated/accounts'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Delayed } from '@/components/ui/delayed'
@@ -15,7 +14,7 @@ import { toast } from '@/components/ui/toast'
 import { avatarHue, formatListTime, initials } from '@/features/mail/format'
 import type { MailxClient } from '@/lib/mailx-client'
 import { contactKeys, mailKeys } from '@/lib/query-client'
-import { SettingsGroup, SettingsPage } from './settings-layout'
+import { SettingsGroup, SettingsLoadError, SettingsPage } from './settings-layout'
 
 /** Contact preferences. For now: whose mail the inbox collects into one row. */
 export function ContactsPane({ client }: { client: MailxClient }) {
@@ -33,10 +32,7 @@ export function ContactsPane({ client }: { client: MailxClient }) {
   })
 
   if (rules.isPending) return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5" /></div></Delayed>
-  if (rules.isError) return <SettingsPage>
-    <Alert variant="destructive"><AlertTitle>{t('settings:contactsLoadFailed')}</AlertTitle><AlertDescription>{errorText(rules.error)}</AlertDescription></Alert>
-    <Button variant="outline" onClick={() => void rules.refetch()}>{t('settings:retry')}</Button>
-  </SettingsPage>
+  if (rules.isError) return <SettingsLoadError message={t('settings:contactsLoadFailed')} error={rules.error} onRetry={() => void rules.refetch()} disabled={rules.isFetching} />
 
   return <SettingsPage>
     <SettingsGroup title={t('settings:contactsGroupedTitle')} description={rules.data.length > 0 ? t('settings:contactsGroupedDescription') : undefined}>

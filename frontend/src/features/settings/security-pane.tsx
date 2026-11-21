@@ -1,8 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
-import { errorText } from '@/i18n/errors'
 import { useState } from 'react'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Delayed } from '@/components/ui/delayed'
@@ -10,7 +8,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import type { RemoteImagePolicy } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
-import { SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
+import { SettingsGroup, SettingsLoadError, SettingsPage, SettingsRow, SettingsSaveError } from './settings-layout'
 import { useSettings, useUpdateSecurity } from './settings-queries'
 
 
@@ -21,12 +19,8 @@ export function SecurityPane({ client }: { client: MailxClient }) {
   const settings = useSettings(client)
   const update = useUpdateSecurity(client)
   if (settings.isPending) return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5" /></div></Delayed>
-  if (settings.isError) return <SettingsPage>
-    <Alert variant="destructive"><AlertTitle>{t('settings:readFailed')}</AlertTitle><AlertDescription>{errorText(settings.error)}</AlertDescription></Alert>
-    <Button variant="outline" onClick={() => void settings.refetch()}>{t('settings:retry')}</Button>
-  </SettingsPage>
+  if (settings.isError) return <SettingsLoadError error={settings.error} onRetry={() => void settings.refetch()} disabled={settings.isFetching} />
   return <SettingsPage>
-    {update.isError && <Alert variant="destructive"><AlertTitle>{t('settings:saveFailedTitle')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
     <SettingsGroup title={t('settings:images')}>
       <SettingsRow label={t('settings:remoteImages')} htmlFor="security.remoteImages" description={t('settings:remoteImagesDescription')}>
         <Select value={settings.data.settings.security.remoteImages} items={POLICIES} disabled={update.isPending}
@@ -43,6 +37,7 @@ export function SecurityPane({ client }: { client: MailxClient }) {
       <SettingsRow label={t('settings:savedImages')}>
         <ClearImageCache client={client} />
       </SettingsRow>
+      <SettingsSaveError update={update} />
     </SettingsGroup>
   </SettingsPage>
 }

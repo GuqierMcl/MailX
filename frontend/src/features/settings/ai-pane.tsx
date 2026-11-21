@@ -5,7 +5,7 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { ArrowDown01Icon, Delete02Icon, Edit02Icon } from '@hugeicons/core-free-icons'
 import { t } from '@/i18n'
 import { errorText } from '@/i18n/errors'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { ErrorNotice } from '@/components/error-notice'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -23,9 +23,10 @@ import { AssistantGroup } from './assistant-group'
 import { useAiCatalog, useAiState } from './ai-queries'
 import { ModelList } from './ai-model-picker'
 import { ProxyPasswordFields, ProxyRows } from './proxy-rows'
-import { SettingsDisclosure, SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
+import { SettingsDisclosure, SettingsGroup, SettingsLoadError, SettingsPage, SettingsRow } from './settings-layout'
 
 type Dialog = { kind: 'add' } | { kind: 'edit'; connection: AiConnectionState }
+type SaveArea = 'providers' | 'model' | 'route'
 
 const hostOf = (baseUrl: string) => {
   try { return new URL(baseUrl).host } catch { return baseUrl }
@@ -39,22 +40,18 @@ export function AiPane({ client, assistantChat = false }: { client: MailxClient;
   const catalog = useAiCatalog(client)
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const [removing, setRemoving] = useState<AiConnectionState | null>(null)
-  const [failure, setFailure] = useState<string | null>(null)
+  const [failure, setFailure] = useState<{ area: SaveArea; text: string } | null>(null)
   const publish = (next: AiState) => queryClient.setQueryData(aiKeys.state(), next)
-  const attempt = (run: Promise<AiState>) => {
+  const attempt = (area: SaveArea, run: Promise<AiState>) => {
     setFailure(null)
-    return run.then(publish, (error: unknown) => setFailure(errorText(error)))
+    return run.then(publish, (error: unknown) => setFailure({ area, text: errorText(error) }))
   }
   if (state.isPending) return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5" /></div></Delayed>
-  if (state.isError) return <SettingsPage>
-    <Alert variant="destructive"><AlertTitle>{t('settings:aiReadFailed')}</AlertTitle><AlertDescription>{errorText(state.error)}</AlertDescription></Alert>
-    <Button variant="outline" onClick={() => void state.refetch()}>{t('settings:retry')}</Button>
-  </SettingsPage>
+  if (state.isError) return <SettingsLoadError message={t('settings:aiReadFailed')} error={state.error} onRetry={() => void state.refetch()} disabled={state.isFetching} />
   const ai = state.data
   const localIds = new Set(catalog.data?.providers.filter((provider) => provider.local).map((provider) => provider.id))
   const addButton = <Button variant="outline" size="sm" onClick={() => setDialog({ kind: 'add' })}>{t('settings:aiAdd')}</Button>
   return <SettingsPage>
-    {failure && <Alert variant="destructive"><AlertTitle>{t('settings:saveFailedTitle')}</AlertTitle><AlertDescription>{failure}</AlertDescription></Alert>}
     <SettingsGroup title={t('settings:aiProviders')}>
       {ai.connections.length === 0 ? <div className="flex flex-col items-start gap-3">
         <p className="text-sm text-muted-foreground">{t('settings:aiEmpty')}</p>
@@ -80,17 +77,20 @@ export function AiPane({ client, assistantChat = false }: { client: MailxClient;
         </ul>
         <div>{addButton}</div>
       </>}
+      {failure?.area === 'providers' && <ErrorNotice message={t('settings:saveFailedTitle')} detail={failure.text} />}
     </SettingsGroup>
     <SettingsGroup title={t('settings:aiDefaultModel')}>
-      <DefaultModelRow client={client} ai={ai} onPick={(model) => attempt(client.aiSetDefaultModel(model))} />
+      <DefaultModelRow client={client} ai={ai} onPick={(model) => attempt('model', client.aiSetDefaultModel(model))} />
+      {failure?.area === 'model' && <ErrorNotice message={t('settings:saveFailedTitle')} detail={failure.text} />}
     </SettingsGroup>
     <AssistantGroup client={client} ai={ai} chat={assistantChat} />
     <SettingsDisclosure title={t('settings:aiAdvanced')}
       summary={ai.route.kind === 'proxy' ? t('settings:translationAdvancedProxy', { host: ai.route.host, port: ai.route.port }) : t('settings:translationNetworkDirect')}>
       <ProxyRows idPrefix="ai" route={ai.route} networkDescription={t('settings:aiNetworkDescription')}
-        onRouteChange={(route) => void attempt(client.aiSetRoute(route))}
+        onRouteChange={(route) => void attempt('route', client.aiSetRoute(route))}
         password={(hasUsername) => <ProxyPasswordFields id="ai.proxyPassword" hasUsername={hasUsername} configured={ai.proxyPasswordSet}
           onSave={(value) => client.aiSetProxyPassword(value).then(publish)} onRemove={() => client.aiRemoveProxyPassword().then(publish)} />} />
+      {failure?.area === 'route' && <ErrorNotice message={t('settings:saveFailedTitle')} detail={failure.text} />}
     </SettingsDisclosure>
     {dialog && <AiProviderDialog client={client} state={ai} editing={dialog.kind === 'edit' ? dialog.connection : null} onState={publish} onClose={() => setDialog(null)} />}
     <AlertDialog open={removing !== null} onOpenChange={(open) => !open && setRemoving(null)}>
@@ -101,7 +101,7 @@ export function AiPane({ client, assistantChat = false }: { client: MailxClient;
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t('settings:aiCancel')}</AlertDialogCancel>
-          <AlertDialogAction onClick={() => { if (removing) void attempt(client.aiRemoveConnection(removing.id)); setRemoving(null) }}>{t('settings:aiRemoveConfirm')}</AlertDialogAction>
+          <AlertDialogAction onClick={() => { if (removing) void attempt('providers', client.aiRemoveConnection(removing.id)); setRemoving(null) }}>{t('settings:aiRemoveConfirm')}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

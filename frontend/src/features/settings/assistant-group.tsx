@@ -5,7 +5,6 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { ArrowDown01Icon, Cancel01Icon } from '@hugeicons/core-free-icons'
 import { t } from '@/i18n'
 import { errorText } from '@/i18n/errors'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { CommandGroup, CommandItem } from '@/components/ui/command'
@@ -20,7 +19,7 @@ import type { AiModelRef, AiState, AssistantMode, AssistantSendMode, AssistantSe
 import type { MailxClient } from '@/lib/mailx-client'
 import { assistantKeys, mailKeys, settingsKeys } from '@/lib/query-client'
 import { ModelList } from './ai-model-picker'
-import { SettingsGroup, SettingsRow } from './settings-layout'
+import { SettingsGroup, SettingsRow, SettingsSaveError } from './settings-layout'
 import { useSettings, useUpdateAssistant } from './settings-queries'
 
 /** What the core accepts for `assistant.instructions`. */
@@ -48,24 +47,31 @@ export function AssistantGroup({ client, ai, chat = false }: { client: MailxClie
   if (!assistant) return null
   const off = !assistant.enabled
   return <SettingsGroup title={t('settings:assistant')}>
-    {update.isError && <Alert variant="destructive"><AlertTitle>{t('settings:saveFailedTitle')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
     <SettingsRow label={t('settings:assistantEnabled')} description={t('settings:assistantEnabledDescription')} htmlFor="assistant.enabled">
       <Switch id="assistant.enabled" checked={assistant.enabled} onCheckedChange={(enabled) => update.mutate({ enabled })} />
     </SettingsRow>
+    <SettingsSaveError update={update} fields={['enabled']} />
     <ModelRow client={client} ai={ai} assistant={assistant} off={off} update={update} />
+    <SettingsSaveError update={update} fields={['model']} />
     <ConsentRow client={client} ai={ai} assistant={assistant} off={off} />
     <AccountsRow client={client} assistant={assistant} off={off} update={update} />
+    <SettingsSaveError update={update} fields={['excludedAccounts']} />
     <SummaryRows client={client} assistant={assistant} off={off} update={update} />
+    <SettingsSaveError update={update} fields={['summary']} />
     {/* Only the chat uses these. */}
     {chat && <>
       <ModeRow id="assistant.organize" label={t('settings:assistantOrganize')} description={t('settings:assistantOrganizeDescription')}
         value={assistant.organize} off={off} onChange={(organize) => update.mutate({ organize })} />
       <ModeRow id="assistant.aiDrafts" label={t('settings:assistantAiDrafts')} description={t('settings:assistantAiDraftsDescription')}
         value={assistant.aiDrafts} off={off} onChange={(aiDrafts) => update.mutate({ aiDrafts })} />
+      <SettingsSaveError update={update} fields={['organize', 'aiDrafts']} />
       <SendRow assistant={assistant} off={off} update={update} />
+      <SettingsSaveError update={update} fields={['send']} />
       <InstructionsRow key={assistant.instructions} assistant={assistant} off={off} update={update} />
+      <SettingsSaveError update={update} fields={['instructions']} />
       <HistoryRow client={client} assistant={assistant} off={off} update={update} />
     </>}
+    <SettingsSaveError update={update} fields={['saveHistory', 'readHtml']} />
   </SettingsGroup>
 }
 

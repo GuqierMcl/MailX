@@ -1,13 +1,10 @@
-import { errorText } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import type { Account } from '@/generated/accounts'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
 import { Delayed } from '@/components/ui/delayed'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import { SettingsPage } from '@/features/settings/settings-layout'
+import { SettingsLoadError, SettingsPage } from '@/features/settings/settings-layout'
 import type { MailxClient } from '@/lib/mailx-client'
 import { ConnectionForm } from './connection-form'
 import { EwsConnectionForm } from './ews-connection-form'
@@ -44,13 +41,8 @@ export function ConnectionDialog({ client, accountId, onClose, onSaved }: Connec
           </header>
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             {error ? (
-              <SettingsPage>
-                <Alert variant="destructive">
-                  <AlertTitle>{t('accounts:loadAccountFailed')}</AlertTitle>
-                  <AlertDescription>{errorText(error)}</AlertDescription>
-                  <Button variant="outline" className="mt-3 w-fit" onClick={() => void reload()}>{t('accounts:retryLoad')}</Button>
-                </Alert>
-              </SettingsPage>
+              <SettingsLoadError message={t('accounts:loadAccountFailed')} error={error}
+                actionLabel={t('accounts:retryLoad')} onRetry={() => void reload()} />
             ) : !account ? (
               <SettingsPage>
                 <Delayed>

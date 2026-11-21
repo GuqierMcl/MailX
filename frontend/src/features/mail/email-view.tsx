@@ -15,7 +15,7 @@ import {
   StarIcon,
 } from '@hugeicons/core-free-icons'
 import type { BodyFailureCode, EmailDetail, EmailSummary, MailAddress } from '@/generated/accounts'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { IconButton } from '@/components/icon-button'
+import { ErrorNotice } from '@/components/error-notice'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -293,12 +294,12 @@ function Body({ email, providerId, client, downloading, onDownload, translation 
   useTranslation()
   const { body, summary, bodyFailure } = email
   if (downloading || (!body && (summary.bodyState === 'missing' || summary.bodyState === 'fetching'))) return <BodySkeleton />
-  if (!body) return <Alert variant="destructive">
-    <AlertTitle>{t('mail:bodyFetchFailed')}</AlertTitle>
-    <AlertDescription>{bodyFailure ? BODY_FAILURE[bodyFailure] : t('mail:retryBodyHint')}</AlertDescription>
-    {bodyFailure === 'providerPolicy' && <ProviderAuthHelp client={client} providerId={providerId ?? null} reason="providerPolicy" />}
-    <Button className="mt-2" variant="outline" size="sm" onClick={onDownload}>{t('mail:retry')}</Button>
-  </Alert>
+  if (!body) return (
+    <ErrorNotice layout="centered" message={bodyFailure ? BODY_FAILURE[bodyFailure] : t('mail:bodyFetchFailed')}
+      actionLabel={t('mail:retry')} onAction={onDownload}>
+      {bodyFailure === 'providerPolicy' && <ProviderAuthHelp className="max-w-sm shrink-0 items-center" client={client} providerId={providerId ?? null} reason="providerPolicy" />}
+    </ErrorNotice>
+  )
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     {body.truncated && <Alert><AlertDescription>{t('mail:bodyTruncated')}</AlertDescription></Alert>}
     {body.hasHtml

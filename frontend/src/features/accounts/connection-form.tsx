@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Account, AuthenticationMode, ConnectionInput, DraftConnectionVerification, TlsMode } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { ErrorNotice } from '@/components/error-notice'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSet } from '@/components/ui/field'
@@ -373,8 +374,13 @@ export function ConnectionForm({
 
   if (oauth) return <SettingsPage><Alert role="status"><AlertTitle>{t('accounts:signedInThroughBrowser')}</AlertTitle><AlertDescription>{t('accounts:oauthConnectionUnavailable')}</AlertDescription></Alert></SettingsPage>
 
+  const reload = error && ['conflict', 'transport', 'idempotencyConflict'].includes(error.code) ? onReload : undefined
+  const failureNotice = error && (
+    <ErrorNotice message={errorText(error, errorContext)} detail={testError ? undefined : t('accounts:passwordsCleared')}
+      actionLabel={reload && t('accounts:reloadSettings')} onAction={reload} />
+  )
   return (
-    <SettingsPage footer={<>
+    <SettingsPage footerNotice={!testError && failureNotice} footer={<>
       <FieldDescription>{saving ? t('accounts:savingSecurely') : t('accounts:credentialsNotDisplayed')}</FieldDescription>
       <div className="flex shrink-0 gap-2">
         {onBack && <Button variant="outline" onClick={() => { resetTest(); onBack() }} disabled={saving}>{t('accounts:back')}</Button>}
@@ -390,15 +396,10 @@ export function ConnectionForm({
           }}>{credentialText.help}</Button>}
           {helpFailed && <FieldDescription role="alert">{t('accounts:helpOpenFailed')}</FieldDescription>}
         </Alert>
-        {needsTrust && <Alert variant="destructive"><AlertTitle>{t('accounts:credentialsNeedConfirmation')}</AlertTitle><AlertDescription>{t('accounts:confirmChangedCredentials')}</AlertDescription></Alert>}
-        {error && (
-          <Alert variant="destructive">
-            <AlertTitle>{testError ? t('accounts:loginTestFailed') : error.code === 'conflict' ? t('accounts:configurationChanged') : t('accounts:notSaved')}</AlertTitle>
-            <AlertDescription>{errorText(error, errorContext)}  {!testError && t('accounts:passwordsCleared')}</AlertDescription>
-            {onReload && (error.code === 'conflict' || error.code === 'transport' || error.code === 'idempotencyConflict') &&
-              <Button variant="outline" className="mt-3 w-fit" onClick={onReload}>{t('accounts:reloadSettings')}</Button>}
-          </Alert>
-        )}
+        {needsTrust && <div role="status" className="space-y-1">
+          <p className="text-sm font-medium">{t('accounts:credentialsNeedConfirmation')}</p>
+          <p className="text-sm text-muted-foreground">{t('accounts:confirmChangedCredentials')}</p>
+        </div>}
         <FieldSet disabled={saving} aria-label={t('accounts:emailAccountSettings')} aria-busy={saving} className="gap-6">
           <SettingsGroup title={t('accounts:emailAddress')} description={setup?.emailHint ?? t('accounts:emailAddressDescription')}>
             <TextField id="emailAddress" label={t('accounts:emailAddress')} value={draft.emailAddress} onChange={(value) => change('emailAddress', value)} placeholder={setup?.emailPlaceholder ?? "you@example.com"} inputMode="email" error={error} errorContext={errorContext} />
@@ -440,6 +441,7 @@ export function ConnectionForm({
               setLoginTest({ kind: 'cancelled', scopeKey: verificationResetKey })
             }}>{t('accounts:cancelLoginTest')}</Button>}
           </div>
+          {testError && failureNotice}
           <div role="status" aria-live="polite" className="text-sm">
             {currentTest.kind === 'cancelled' && <p className="text-muted-foreground">{t('accounts:verificationCancelled')}</p>}
             {currentTest.kind === 'ready' && <ConnectionVerificationReport report={currentTest.report} client={verificationClient} providerId={provider.id} />}

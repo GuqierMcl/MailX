@@ -244,7 +244,7 @@ describe('connection form', () => {
     await user.click(screen.getByRole('switch', { name: '替换收发密码' }))
     fireEvent.change(screen.getByLabelText('收发密码'), { target: { value: 'new-synthetic-secret' } })
     await user.click(screen.getByRole('button', { name: '保存更改' }))
-    expect(await screen.findByText('配置已在其他位置更新')).toBeInTheDocument()
+    expect(await screen.findByText('配置已被修改，请重新加载后重试。')).toBeInTheDocument()
     expect(screen.getByLabelText('收发密码')).toHaveValue('')
     expect(screen.getByLabelText('IMAP 主机')).toHaveValue('imap.changed.example')
     await user.click(screen.getByRole('button', { name: '重新加载配置' }))
@@ -281,7 +281,7 @@ describe('connection form', () => {
     )
     expect(screen.getByLabelText('邮箱地址')).toHaveValue('me@example.com')
     expect(screen.getByLabelText('IMAP 主机')).toHaveAttribute('aria-invalid', 'true')
-    expect(screen.getByText('请填写主机名或 IP 地址，不要包含协议、路径、用户名或密码。')).toBeInTheDocument()
+    expect(screen.getByLabelText('IMAP 主机')).toHaveAccessibleDescription('请填写主机名或 IP 地址，不要包含协议、路径、用户名或密码。')
   })
 
   it('revokes the image proxy switch on endpoint edits and allows an explicit new selection', async () => {

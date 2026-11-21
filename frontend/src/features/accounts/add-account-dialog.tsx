@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useEffect, useRef, useState } from 'react'
 import type { Account, ConnectionInput } from '@/generated/accounts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { ErrorNotice } from '@/components/error-notice'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { FieldDescription } from '@/components/ui/field'
@@ -284,7 +285,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
             )}
             {step.kind === 'profile' && (
               <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-                <SettingsPage footer={<>
+                <SettingsPage footerNotice={saveError && <ErrorNotice message={errorText(saveError)} />} footer={<>
                   <FieldDescription>{saving ? t('accounts:savingSecurely') : t('accounts:mailboxAddress', { address: step.signedIn?.emailAddress ?? step.connection?.emailAddress ?? '' })}</FieldDescription>
                   <div className="flex shrink-0 gap-2">
                     <Button variant="outline" onClick={back} disabled={saving}>{t('accounts:back')}</Button>
@@ -295,12 +296,6 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
                     <AlertTitle>{t('accounts:nameMailbox')}</AlertTitle>
                     <AlertDescription>{t('accounts:nameMailboxDescription')}</AlertDescription>
                   </Alert>
-                  {saveError && (
-                    <Alert variant="destructive">
-                      <AlertTitle>{t('accounts:notSaved')}</AlertTitle>
-                      <AlertDescription>{errorText(saveError)}</AlertDescription>
-                    </Alert>
-                  )}
                   <ProfileFields
                     displayName={displayName}
                     color={color}

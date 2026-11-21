@@ -78,8 +78,7 @@ describe('body failure guidance', () => {
     const client = testClient([account])
     render(<TooltipProvider><EmailView client={client} email={email} providerId={providerId} loading={false} error={null} downloading={false}
       onDownload={onDownload} onFlag={vi.fn()} onClose={vi.fn()} onRespond={vi.fn()} /></TooltipProvider>)
-    expect(screen.getByText('正文获取失败')).toBeInTheDocument()
-    expect(screen.getByText(expectedHint)).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent(expectedHint)
     if (bodyFailure === 'providerPolicy') expect(screen.queryByText(/邮箱登录失败/)).not.toBeInTheDocument()
     expect(onDownload).not.toHaveBeenCalled()
     if (bodyFailure === 'providerPolicy' && providerId) {

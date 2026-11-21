@@ -2,9 +2,9 @@ import { errorText } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ErrorNotice } from '@/components/error-notice'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { FieldDescription } from '@/components/ui/field'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { StartupStatus } from '@/generated/startup'
@@ -144,19 +144,14 @@ function TransportFailureScreen({ failure, onRetry }: { failure: QueryFailure, o
   useTranslation()
   return (
     <StartupShell>
-      <CardHeader>
+      <CardHeader className="text-center">
         <CardTitle>{t('common:startupStatusFailed')}</CardTitle>
         <CardDescription>{t('common:startupStatusMissing')}</CardDescription>
       </CardHeader>
       <CardContent>
-        <Alert variant="destructive">
-          <AlertTitle>{errorText(failure)}</AlertTitle>
-          <AlertDescription>{t('common:startupStatusRetryHint')}</AlertDescription>
-        </Alert>
+        <ErrorNotice layout="centered" message={errorText(failure)} detail={t('common:startupStatusRetryHint')}
+          actionLabel={t('common:queryAgain')} onAction={onRetry} />
       </CardContent>
-      <CardFooter>
-        <Button type="button" onClick={onRetry}>{t('common:queryAgain')}</Button>
-      </CardFooter>
     </StartupShell>
   )
 }
@@ -165,23 +160,15 @@ function StartupFailureScreen({ status, retrying, onRetry }: { status: Extract<S
   useTranslation()
   return (
     <StartupShell>
-      <CardHeader>
+      <CardHeader className="text-center">
         <CardTitle>{t('common:notReady')}</CardTitle>
         <CardDescription>{t('common:notReadyDescription')}</CardDescription>
       </CardHeader>
       <CardContent>
-        <Alert variant="destructive">
-          <AlertTitle>{errorText(status.error)}</AlertTitle>
-          <AlertDescription>{t('common:initializationRetryHint')}</AlertDescription>
-        </Alert>
+        <ErrorNotice layout="centered" message={errorText(status.error)} detail={t('common:initializationRetryHint')}
+          actionLabel={retrying ? t('common:retrying') : t('common:retryInitialization')}
+          onAction={status.canRetry ? onRetry : undefined} actionDisabled={retrying} />
       </CardContent>
-      {status.canRetry && (
-        <CardFooter>
-          <Button type="button" onClick={onRetry} disabled={retrying}>
-            {retrying ? t('common:retrying') : t('common:retryInitialization')}
-          </Button>
-        </CardFooter>
-      )}
     </StartupShell>
   )
 }

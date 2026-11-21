@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Add01Icon, Mail01Icon } from '@hugeicons/core-free-icons'
 import type { Account, AccountRemoval, AccountSyncState } from '@/generated/accounts'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Delayed } from '@/components/ui/delayed'
 import { toast } from '@/components/ui/toast'
@@ -20,7 +19,7 @@ import {
   SidebarProvider,
 } from '@/components/ui/sidebar'
 import { Skeleton } from '@/components/ui/skeleton'
-import { SettingsGroup, SettingsPage, SettingsRow } from '@/features/settings/settings-layout'
+import { SettingsGroup, SettingsLoadError, SettingsPage, SettingsRow } from '@/features/settings/settings-layout'
 import { useSettings, useUpdateLayout } from '@/features/settings/settings-queries'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { sortAccountsForDisplay } from './account-order'
@@ -219,13 +218,8 @@ function AccountDetail({ client, accountId, sync, onSaved, onEditConnection, onR
   // With nothing to show, the failure stays on the page with its retry.
   if (error) {
     return (
-      <SettingsPage>
-        <Alert variant="destructive">
-          <AlertTitle>{t('accounts:loadAccountFailed')}</AlertTitle>
-          <AlertDescription>{errorText(error)}</AlertDescription>
-          <Button variant="outline" className="mt-3 w-fit" onClick={() => void reload()}>{t('accounts:retryLoad')}</Button>
-        </Alert>
-      </SettingsPage>
+      <SettingsLoadError message={t('accounts:loadAccountFailed')} error={error}
+        actionLabel={t('accounts:retryLoad')} onRetry={() => void reload()} />
     )
   }
   if (!account) {

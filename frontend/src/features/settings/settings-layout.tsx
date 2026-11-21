@@ -1,4 +1,7 @@
 import { useState, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
+import { ErrorNotice } from '@/components/error-notice'
+import { errorDetail } from '@/i18n/errors'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { ArrowRight01Icon } from '@hugeicons/core-free-icons'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -10,17 +13,37 @@ import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldLeg
  */
 
 /** Scrollable body of one settings page; `footer` sticks to the bottom edge. */
-export function SettingsPage({ children, footer }: { children: ReactNode; footer?: ReactNode }) {
+export function SettingsPage({ children, footer, footerNotice }: { children: ReactNode; footer?: ReactNode; footerNotice?: ReactNode }) {
   return (
     <div className="flex min-h-full flex-col">
       <div className="flex flex-col gap-6 px-6 pt-1 pb-6">{children}</div>
       {footer && (
-        <footer className="sticky bottom-0 mt-auto flex items-center justify-between gap-4 border-t bg-background px-6 py-3">
+        <footer className="sticky bottom-0 mt-auto flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t bg-background px-6 py-3">
+          {footerNotice && <div className="w-full min-w-0">{footerNotice}</div>}
           {footer}
         </footer>
       )}
     </div>
   )
+}
+
+export function SettingsLoadError({ error, onRetry, message, actionLabel, disabled }: {
+  error: unknown; onRetry: () => void; message?: string; actionLabel?: string; disabled?: boolean
+}) {
+  const { t } = useTranslation('settings')
+  return <ErrorNotice layout="centered" message={message ?? t('readFailed')} detail={errorDetail(error)}
+    actionLabel={actionLabel ?? t('retry')} onAction={onRetry} actionDisabled={disabled} />
+}
+
+/** Show a failed write beside the group that edited those settings. */
+export function SettingsSaveError<T extends object>({ update, fields, message }: {
+  update: { isError: boolean; error: unknown; variables?: T }
+  fields?: readonly (keyof T)[]
+  message?: string
+}) {
+  const { t } = useTranslation('settings')
+  if (!update.isError || (fields && !fields.some((field) => Object.hasOwn(update.variables ?? {}, field)))) return null
+  return <ErrorNotice message={message ?? t('saveFailedTitle')} detail={errorDetail(update.error)} />
 }
 
 /** A titled group of related settings; consecutive groups are separated by a rule. */

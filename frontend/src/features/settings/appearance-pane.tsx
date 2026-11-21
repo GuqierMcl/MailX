@@ -1,6 +1,5 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
-import { errorText } from '@/i18n/errors'
 import { useEffect, useState, type KeyboardEvent } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
 import { ComputerIcon, Moon02Icon, Sun03Icon, Tick02Icon } from '@hugeicons/core-free-icons'
@@ -18,7 +17,7 @@ import { Spinner } from '@/components/ui/spinner'
 import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ReadingMode, ThemeMode } from '@/generated/accounts'
 import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, DEFAULT_MAIL_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
-import { SettingsPage, SettingsRow, SettingsGroup } from './settings-layout'
+import { SettingsGroup, SettingsLoadError, SettingsPage, SettingsRow, SettingsSaveError } from './settings-layout'
 import { useSettings, useUpdateAppearance, useUpdateLayout } from './settings-queries'
 
 
@@ -45,24 +44,13 @@ export function AppearancePane({ client }: { client: MailxClient }) {
   if (settings.isPending) {
     return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5 text-muted-foreground" /></div></Delayed>
   }
-  if (settings.isError) {
-    return (
-      <SettingsPage>
-        <Alert variant="destructive">
-          <AlertTitle>{t('settings:readFailed')}</AlertTitle>
-          <AlertDescription>{errorText(settings.error)}</AlertDescription>
-        </Alert>
-        <Button variant="outline" className="self-start" onClick={() => void settings.refetch()}>{t('settings:retry')}</Button>
-      </SettingsPage>
-    )
-  }
+  if (settings.isError) return <SettingsLoadError error={settings.error} onRetry={() => void settings.refetch()} disabled={settings.isFetching} />
 
   const { appearance, layout } = settings.data.settings
-  const change = (patch: Partial<AppearanceSettings>) => update.mutate({ ...appearance, ...patch })
+  const change = (patch: Partial<AppearanceSettings>) => update.mutate(patch)
   const appearanceFailure = update.error ? clientFailure(update.error) : null
   const fontRejected = appearanceFailure?.field === 'appearance.interfaceFont'
   const mailFontRejected = appearanceFailure?.field === 'appearance.mailFont'
-  const failure = updateLayout.error ?? (fontRejected || mailFontRejected ? null : appearanceFailure)
 
   return (
     <SettingsPage>
@@ -70,12 +58,6 @@ export function AppearancePane({ client }: { client: MailxClient }) {
         <Alert>
           <AlertTitle>{t('settings:recoveredTitle')}</AlertTitle>
           <AlertDescription>{t('settings:recoveredDescription')}</AlertDescription>
-        </Alert>
-      )}
-      {failure && (
-        <Alert variant="destructive">
-          <AlertTitle>{t('settings:saveFailed')}</AlertTitle>
-          <AlertDescription>{errorText(failure)}</AlertDescription>
         </Alert>
       )}
 
@@ -95,6 +77,7 @@ export function AppearancePane({ client }: { client: MailxClient }) {
         <SettingsRow label={t('settings:accent')}>
           <AccentChoice value={appearance.accentColor} onChange={(accentColor) => change({ accentColor })} />
         </SettingsRow>
+        <SettingsSaveError update={update} fields={['theme', 'mailTheme', 'accentColor']} message={t('settings:saveFailed')} />
       </SettingsGroup>
 
       <SettingsGroup title={t('settings:text')}>
@@ -124,6 +107,7 @@ export function AppearancePane({ client }: { client: MailxClient }) {
             </SelectContent>
           </Select>
         </SettingsRow>
+        {!fontRejected && !mailFontRejected && <SettingsSaveError update={update} fields={['interfaceFont', 'mailFont', 'fontSize']} message={t('settings:saveFailed')} />}
       </SettingsGroup>
 
       <SettingsGroup title={t('settings:mailList')}>
@@ -154,6 +138,8 @@ export function AppearancePane({ client }: { client: MailxClient }) {
             </SelectContent>
           </Select>
         </SettingsRow>
+        <SettingsSaveError update={update} fields={['previewLines', 'mailboxLabel']} message={t('settings:saveFailed')} />
+        <SettingsSaveError update={updateLayout} message={t('settings:saveFailed')} />
       </SettingsGroup>
     </SettingsPage>
   )

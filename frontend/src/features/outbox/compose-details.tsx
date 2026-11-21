@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Delete02Icon, File01Icon, MailUpload01Icon, PencilEdit02Icon } from '@hugeicons/core-free-icons'
 import type { Account, MailAddress, OutboxItem } from '@/generated/accounts'
+import { ErrorNotice } from '@/components/error-notice'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   AlertDialog,
@@ -235,13 +236,12 @@ export function OutboxDetail({ client, item, accounts, onEdit }: OutboxDetailPro
         )}
         {item.state === 'sending' && <Alert role="status"><AlertDescription>{t('composer:detail.connecting')}</AlertDescription></Alert>}
         {item.state === 'failed' && (
-          <Alert variant="destructive" role="alert">
-            <AlertTitle>{t('composer:detail.notSent')}</AlertTitle>
-            <AlertDescription>
+          <ErrorNotice message={t('composer:detail.notSent')} detail={(
+            <div className="grid gap-1">
               <p>{errorSummary(error)}</p>
-              {error?.text && error.reason !== 'unknown' && <p className="mt-1 opacity-80">{t('composer:detail.serverReply', { code: error.smtpCode ? `（${error.smtpCode}）` : '', text: error.text })}</p>}
+              {error?.text && error.reason !== 'unknown' && <p>{t('composer:detail.serverReply', { code: error.smtpCode ? `（${error.smtpCode}）` : '', text: error.text })}</p>}
               {error && error.rejected.length > 0 && (
-                <ul aria-label={t('composer:detail.rejectedRecipients')} className="mt-2 grid gap-1">
+                <ul aria-label={t('composer:detail.rejectedRecipients')} className="grid gap-1">
                   {error.rejected.map((entry) => (
                     <li key={entry.address} className="break-words">
                       <span className="font-medium">{entry.address}</span>（{entry.code}）{entry.text}
@@ -249,9 +249,9 @@ export function OutboxDetail({ client, item, accounts, onEdit }: OutboxDetailPro
                   ))}
                 </ul>
               )}
-              <p className="mt-2">{t('composer:detail.editRetryDescription')}</p>
-            </AlertDescription>
-          </Alert>
+              <p>{t('composer:detail.editRetryDescription')}</p>
+            </div>
+          )} />
         )}
         {item.state === 'unknown' && (
           <Alert role="alert">

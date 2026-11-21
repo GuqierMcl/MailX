@@ -41,12 +41,15 @@ export function UpdaterProvider({ client, children }: { client: MailxClient; chi
     latest.current = next
     setSnapshot(next)
     if (previous.phase === 'checking' && next.phase !== 'checking') setChecked(true)
-    if (manualAnswer) setChecked(true)
-    // The host may have started or finished an automatic download before the
-    // check returns. Every result with a version can answer a manual check.
-    if (manualAnswer && updateVersion(next)) {
-      openRef.current = true
-      setOpen(true)
+    if (manualAnswer) {
+      setChecked(true)
+      if (next.phase === 'idle') {
+        toast.success(t('updater:statusLatest'))
+      } else if (updateVersion(next)) {
+        // The host may have already started or finished an automatic download.
+        openRef.current = true
+        setOpen(true)
+      }
     }
     for (const notice of announcements(previous, next, manualAnswer || suppressNotice)) {
       const show = shouldAnnounce(notice, announced.current, openRef.current)

@@ -31,6 +31,35 @@ async function frame() {
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('isolated body, inline links and image policy', () => {
+  it('lets the reader retry a failed document and replaces the notice with its body', async () => {
+    const { client } = setup()
+    client.prepareBody.mockRejectedValueOnce(new Error('prepare failed'))
+    render(<BodyDocument client={client} emailId="one" />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('暂时无法显示邮件正文。')
+    await userEvent.click(screen.getByRole('button', { name: '重试' }))
+    await frame()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(client.prepareBody).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the document readable after a link fails and clears the notice when a link opens', async () => {
+    const { client, emit } = setup()
+    let resolveFirst!: () => void
+    client.openLink.mockReturnValueOnce(new Promise<void>((resolve) => { resolveFirst = resolve }))
+    client.openLink.mockRejectedValueOnce(new Error('open failed'))
+    render(<BodyDocument client={client} emailId="one" />)
+    const body = await frame()
+    emit('token-1', 'slow-request')
+    emit('token-1')
+    expect(await screen.findByRole('alert')).toHaveTextContent('无法打开此链接。')
+    await act(async () => resolveFirst())
+    expect(screen.getByRole('alert')).toHaveTextContent('无法打开此链接。')
+    expect(screen.getByTitle('邮件 HTML 正文')).toBe(body)
+    emit('token-1', 'next-request')
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    expect(client.prepareBody).toHaveBeenCalledTimes(1)
+  })
+
   it('shows safe image failures and retries while preserving this reading grant', async () => {
     const { client } = setup()
     client.imageStatus.mockResolvedValue([{ index: 0, loading: false, error: 'proxyPolicyRequired' }])

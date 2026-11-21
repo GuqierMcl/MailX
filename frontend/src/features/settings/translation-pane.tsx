@@ -5,7 +5,6 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
 import { t } from '@/i18n'
 import { errorText } from '@/i18n/errors'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Delayed } from '@/components/ui/delayed'
 import { CommandGroup, CommandItem } from '@/components/ui/command'
@@ -21,7 +20,7 @@ import { aiKeys, translationKeys } from '@/lib/query-client'
 import { ModelList } from './ai-model-picker'
 import { translationTarget, useAiState } from './ai-queries'
 import { ProxyPasswordFields, ProxyRows, StoredSecretRow } from './proxy-rows'
-import { SettingsDisclosure, SettingsGroup, SettingsPage, SettingsRow } from './settings-layout'
+import { SettingsDisclosure, SettingsGroup, SettingsLoadError, SettingsPage, SettingsRow, SettingsSaveError } from './settings-layout'
 import { useSettings, useUpdateTranslation } from './settings-queries'
 
 /** What the core accepts for the Microsoft resource region. */
@@ -36,13 +35,9 @@ export function TranslationPane({ client, onNavigate }: { client: MailxClient; o
   const settings = useSettings(client)
   const update = useUpdateTranslation(client)
   if (settings.isPending) return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5" /></div></Delayed>
-  if (settings.isError) return <SettingsPage>
-    <Alert variant="destructive"><AlertTitle>{t('settings:readFailed')}</AlertTitle><AlertDescription>{errorText(settings.error)}</AlertDescription></Alert>
-    <Button variant="outline" onClick={() => void settings.refetch()}>{t('settings:retry')}</Button>
-  </SettingsPage>
+  if (settings.isError) return <SettingsLoadError error={settings.error} onRetry={() => void settings.refetch()} disabled={settings.isFetching} />
   const translation = settings.data.settings.translation
   return <SettingsPage>
-    {update.isError && <Alert variant="destructive"><AlertTitle>{t('settings:saveFailedTitle')}</AlertTitle><AlertDescription>{errorText(update.error)}</AlertDescription></Alert>}
     <ServiceGroup client={client} translation={translation} update={update} onNavigate={onNavigate} />
     <TranslateGroup translation={translation} update={update} />
     <ForeignGroup translation={translation} update={update} />
@@ -92,6 +87,7 @@ function ServiceGroup({ client, translation, update, onNavigate }: { client: Mai
       {provider === 'microsoft' && <RegionRow region={translation.microsoftRegion} update={update} />}
     </>}
     {provider && <TestRow key={`${provider}:${configured}`} client={client} configured={keyless || configured} keyless={keyless} />}
+    <SettingsSaveError update={update} fields={['provider', 'microsoftRegion']} />
   </SettingsGroup>
 }
 
@@ -190,6 +186,7 @@ function AdvancedGroup({ client, translation, update }: { client: MailxClient; t
   return <SettingsDisclosure title={t('settings:translationAdvanced')} summary={summary}>
     <ProxyRows idPrefix="translation" route={route} networkDescription={t('settings:translationNetworkDescription')}
       onRouteChange={(next) => update.mutate({ route: next })} password={(hasUsername) => <ProxyPasswordRow client={client} hasUsername={hasUsername} />} />
+    <SettingsSaveError update={update} fields={['route']} />
   </SettingsDisclosure>
 }
 
@@ -217,6 +214,7 @@ function TranslateGroup({ translation, update }: { translation: TranslationSetti
     <SettingsRow label={t('settings:translationQuotes')} htmlFor="translation.quotes">
       <Switch id="translation.quotes" checked={translation.includeQuotes} onCheckedChange={(includeQuotes) => update.mutate({ includeQuotes })} />
     </SettingsRow>
+    <SettingsSaveError update={update} fields={['targetLanguage', 'includeQuotes']} />
   </SettingsGroup>
 }
 
@@ -237,6 +235,7 @@ function ForeignGroup({ translation, update }: { translation: TranslationSetting
       codes={neverSuggest} taken={alwaysTranslate} onChange={(code, add) => edit('neverSuggest', code, add)} />
     <LanguageList id="translation.always" label={t('settings:translationAlways')} description={t('settings:translationAlwaysDescription')}
       codes={alwaysTranslate} taken={neverSuggest} onChange={(code, add) => edit('alwaysTranslate', code, add)} />
+    <SettingsSaveError update={update} fields={['suggest', 'neverSuggest', 'alwaysTranslate']} />
   </SettingsGroup>
 }
 
