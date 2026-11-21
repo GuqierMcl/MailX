@@ -415,7 +415,11 @@ mod macos {
             return;
         }
         let same_groups = menus.built.as_ref().is_some_and(|built| {
-            built.groups.iter().map(|group| &group.id).eq(groups.iter().map(|group| &group.id))
+            built
+                .groups
+                .iter()
+                .map(|group| &group.id)
+                .eq(groups.iter().map(|group| &group.id))
         });
         if same_groups
             && let Some(built) = menus.built.as_mut()
@@ -487,10 +491,7 @@ mod macos {
 
     /// Visits items in the order `append_items` created their handles.
     fn apply(handles: &[Handle], items: &[Item]) -> tauri::Result<()> {
-        fn visit(
-            handles: &mut std::slice::Iter<'_, Handle>,
-            list: &[Item],
-        ) -> tauri::Result<()> {
+        fn visit(handles: &mut std::slice::Iter<'_, Handle>, list: &[Item]) -> tauri::Result<()> {
             for item in list {
                 if item.id == "separator" || predefined(item) {
                     continue;
