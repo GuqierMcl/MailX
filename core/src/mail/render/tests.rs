@@ -644,6 +644,74 @@ fn animated_png_and_declared_decoding_bombs_are_rejected() {
 }
 
 #[test]
+fn cached_image_layout_matches_protocol_slots_and_classifies_visible_content() {
+    use RemoteImageRole::*;
+    let html = html::sanitize(r#"
+        <p>This promotion includes several distinct offers in its readable body.</p>
+        <img src="https://example.com/repeated" width="1" height="1">
+        <img src="https://example.com/repeated" width="610" height="348" alt="Game artwork">
+        <img src="https://example.com/logo" width="615" height="88">
+        <img src="https://example.com/thumb" width="288" height="160">
+        <img src="https://example.com/qr" alt="Scan QR code" width="44" height="44">
+        <img src="https://example.com/unknown" width="100%" height="auto">
+        <img src="https://example.com/spacer" style="width:8px;height:8px">
+        <div style="display:none"><img src="https://example.com/hidden" width="610" height="348"></div>
+        <div style="visibility:hidden"><img src="https://example.com/visible" width="610" height="348" style="visibility:visible"></div>
+        <img src="https://example.com/zero" width="610" height="348" style="opacity:0!important;opacity:1">
+        <img src="cid:inline">
+        <img data-mailx-remote="https://example.com/forged">
+    "#).html;
+    let slots = remote_image_slots(&html);
+    assert_eq!(
+        remote_images(&html),
+        slots.iter().map(|s| s.url.as_str()).collect::<Vec<_>>()
+    );
+    assert_eq!(slots[0].url, slots[1].url);
+    assert_eq!(
+        slots.iter().map(|s| s.role).collect::<Vec<_>>(),
+        [
+            Decorative, Important, Content, Content, Important, Content, Decorative, Decorative,
+            Important, Decorative
+        ]
+    );
+}
+
+#[test]
+fn sole_poster_uses_visible_text_distinct_sources_and_pixel_dimensions() {
+    use RemoteImageRole::*;
+    let poster = r#"<img src="https://example.com/poster" width="200" height="300">"#;
+    let roles = |body: &str| {
+        remote_image_slots(&html::sanitize(body).html)
+            .into_iter()
+            .map(|slot| slot.role)
+            .collect::<Vec<_>>()
+    };
+    let hidden = r#"<div style="opacity:0">Some promotional text long enough to make the message look readable on its own</div>"#;
+    assert_eq!(
+        roles(&format!("{hidden}{poster}{poster}")),
+        [Important, Important]
+    );
+    assert_eq!(
+        roles(&format!("<img src='cid:another'>{poster}")),
+        [Content]
+    );
+    assert_eq!(roles(&format!("{}{poster}", "字".repeat(40))), [Content]);
+    assert_eq!(roles(&format!("{}{poster}", "字".repeat(39))), [Important]);
+    assert_eq!(
+        roles(r#"<img src="https://example.com/unknown" height="-2" width="auto">"#),
+        [Content]
+    );
+    assert_eq!(
+        roles(r#"<img src="https://example.com/unknown" alt="Event invitation">"#),
+        [Important]
+    );
+    assert_eq!(
+        roles(r#"<img src="https://example.com/qr" alt="请扫描二维码" width="44">"#),
+        [Important]
+    );
+}
+
+#[test]
 fn remote_images_are_inert_until_host_binding_and_forged_slots_are_removed() {
     let rendered = rendered_html(
         r#"<img src="https://example.com/pixel"><img data-mailx-remote="https://evil.invalid/forged"><a title="misleading" href="https://example.com/real">link</a>"#,

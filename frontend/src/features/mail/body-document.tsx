@@ -8,11 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Delayed } from '@/components/ui/delayed'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { ImageFetchError, RemoteImagePolicy, RemoteImageStatus } from '@/generated/accounts'
+import type { RemoteImagePolicy, RemoteImageStatus } from '@/generated/accounts'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { useUpdateSecurity } from '@/features/settings/settings-queries'
 import { cn } from '@/lib/utils'
 import { useBodyEnvironment } from './use-body-environment'
+import { ImageFailures } from './image-failures'
 
 const DevelopmentBody = import.meta.env.DEV && !isTauri()
   ? lazy(() => import('./development-body')) : null
@@ -88,12 +89,12 @@ function Reader({ client, emailId, policy, dark, hasRemoteImages, banner, transl
     <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]">
       <div className={cn('col-start-1 row-start-1 flex min-h-0 flex-col', showTranslated && 'invisible')} inert={showTranslated}>
         {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody /></Suspense> :
-          <BodySession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages} dark={dark} onReload={onReload} />}
+          <BodySession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages} showing={!showTranslated} dark={dark} onReload={onReload} />}
       </div>
       {translationMounted && <div className={cn('col-start-1 row-start-1 flex min-h-0 flex-col', !showTranslated && 'invisible')} inert={!showTranslated}>
         {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody translated /></Suspense> :
           <BodySession key={`${allowImages}:${translationKey}`} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages}
-            dark={dark} translation={translated.target} title={t('mail:htmlBodyTranslated')} onReload={onReload}
+            dark={dark} showing={showTranslated} translation={translated.target} title={t('mail:htmlBodyTranslated')} onReload={onReload}
             onPrepareFailed={(failure) => { setFailedKey(translationKey); translated.onFailed(failure) }} />}
       </div>}
     </div>
@@ -101,10 +102,11 @@ function Reader({ client, emailId, policy, dark, hasRemoteImages, banner, transl
 }
 
 /** The host binds this read-only session to either a saved draft revision or an email. */
-export function BodySession({ client, emailId, allowImages = false, hasRemoteImages = false, dark, draftRevision, translation, title, onPrepareFailed, onReload }: {
+export function BodySession({ client, emailId, allowImages = false, hasRemoteImages = false, showing = true, dark, draftRevision, translation, title, onPrepareFailed, onReload }: {
   client: MailxClient; emailId: string; allowImages?: boolean; hasRemoteImages?: boolean; dark: boolean; draftRevision?: number
   /** Target language of the translated variant of the email body; the original when absent. */
   translation?: string
+  showing?: boolean
   title?: string
   /** Called when the document could not be prepared (the failure also shows in place). */
   onPrepareFailed?: (failure: ClientFailure) => void
@@ -114,6 +116,9 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
   const [documentToken, setDocumentToken] = useState<string | null>(null)
   const [error, setError] = useState<{ operation: 'prepare' | 'link' | 'images'; cause: ClientFailure } | null>(null)
   const [imageStatuses, setImageStatuses] = useState<RemoteImageStatus[]>([])
+  const [imagesSettled, setImagesSettled] = useState(false)
+  const [inspection, setInspection] = useState(0)
+  const observation = useRef<{ token: string; inspection: number; deadline: number } | null>(null)
   const [frameReady, setFrameReady] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [cooldown, setCooldown] = useState(false)
@@ -187,6 +192,7 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
       loaded.current = false
       setFrameReady(false)
       setImageStatuses([])
+      setImagesSettled(false)
       setError(null)
       setDocumentToken(prepared.documentToken)
     } catch (failure) {
@@ -197,29 +203,33 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
   }
 
   useEffect(() => {
-    if (!documentToken || !allowImages || !hasRemoteImages) return
+    if (!documentToken || !allowImages || !hasRemoteImages || !showing) return
     let live = true
     let timer: ReturnType<typeof setTimeout> | undefined
-    const deadline = Date.now() + 35_000
+    if (observation.current?.token !== documentToken || observation.current.inspection !== inspection) {
+      observation.current = { token: documentToken, inspection, deadline: Date.now() + 35_000 }
+    }
+    const { deadline } = observation.current
+    // A late iframe load or IPC reply must not keep already confirmed failures hidden.
+    const cutoff = setTimeout(() => setImagesSettled(true), Math.max(0, deadline - Date.now()))
     const poll = async () => {
       try {
         const statuses = await client.imageStatus(emailId, documentToken)
         if (!live) return
         setImageStatuses(statuses)
-        if ((!frameReady || statuses.some((status) => status.loading)) && Date.now() < deadline) {
+        const waiting = !frameReady || statuses.some((status) => status.loading)
+        setImagesSettled(!waiting || Date.now() >= deadline)
+        if (waiting && Date.now() < deadline) {
           timer = setTimeout(() => { void poll() }, 1000)
-        }
+        } else clearTimeout(cutoff)
       } catch {
         // A released/stale document has no readable diagnostics. Never display
         // raw IPC errors, or continue querying a binding after it was revoked.
       }
     }
     void poll()
-    return () => { live = false; if (timer) clearTimeout(timer) }
-  }, [client, emailId, documentToken, allowImages, hasRemoteImages, frameReady])
-
-  const failedImages = imageStatuses.filter((status) => status.error !== null)
-  const reasons = [...new Set(failedImages.map((status) => status.error).filter((reason): reason is ImageFetchError => reason !== null))]
+    return () => { live = false; clearTimeout(cutoff); if (timer) clearTimeout(timer) }
+  }, [client, emailId, documentToken, allowImages, hasRemoteImages, frameReady, showing, inspection])
 
   if (error?.operation === 'prepare') {
     return <ErrorNotice layout="centered" message={t('mail:bodyPreviewFailed')} detail={errorDetail(error.cause)}
@@ -228,10 +238,9 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
 
   return <div className="flex min-h-0 flex-1 flex-col gap-2">
     {error && <ErrorNotice message={t(error.operation === 'link' ? 'mail:openBodyLinkFailed' : 'mail:retryImagesFailed')} detail={errorDetail(error.cause)} />}
-    {failedImages.length > 0 && <div role="status" aria-label={t('mail:imageLoadingStatus')} className="flex shrink-0 items-center gap-3 rounded-md bg-muted px-3 py-2 text-xs">
-      <span className="min-w-0 flex-1">{t('mail:imageFailureCount', { count: failedImages.length })} · {reasons.map((reason) => IMAGE_FAILURES[reason]).join('；')}</span>
-      <Button size="sm" variant="outline" className="h-6 shrink-0 text-xs" disabled={retrying || cooldown || imageStatuses.some((status) => status.loading)} onClick={() => { void retryImages() }}>{t('mail:retryImages')}</Button>
-    </div>}
+    <ImageFailures statuses={imageStatuses} showing={showing} settled={imagesSettled}
+      disabled={retrying || cooldown || imageStatuses.some((status) => status.loading)} onRetry={() => { void retryImages() }}
+      onInspect={() => setInspection((value) => value + 1)} />
     {!documentToken ? <BodySkeleton /> :
       <iframe key={documentToken} title={title ?? t('mail:htmlBody')} sandbox="" referrerPolicy="no-referrer"
         src={bodyDocumentUrl(emailId, documentToken, dark)} className="min-h-0 w-full flex-1 border-0 bg-white"
@@ -240,22 +249,6 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
           else { loaded.current = true; setFrameReady(true) }
         }} />}
   </div>
-}
-
-const IMAGE_FAILURES: Record<ImageFetchError, string> = {
-  get targetBlocked() { return t('mail:imageAddressRestricted') },
-  get proxyPolicyRequired() { return t('mail:allowImageDomainResolution') },
-  get dns() { return t('mail:imageDnsFailed') },
-  get connect() { return t('mail:networkConnectionFailed') },
-  get proxy() { return t('mail:proxyConnectionFailed') },
-  get tls() { return t('mail:imageCertificateFailed') },
-  get httpStatus() { return t('mail:imageServerNoImage') },
-  get notFound() { return t('mail:imageServerNoImage') },
-  get unsupportedType() { return t('mail:unsupportedImageFormat') },
-  get invalidImage() { return t('mail:imageDecodeFailed') },
-  get tooLarge() { return t('mail:imageTooLarge') },
-  get timeout() { return t('mail:imageTimedOut') },
-  get cancelled() { return t('mail:imageExpired') },
 }
 
 export function BodySkeleton() {

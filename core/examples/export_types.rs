@@ -116,6 +116,7 @@ fn main() {
         AppearanceSettings,
         RemoteImagePolicy,
         ImageFetchError,
+        mailx_core::mail::render::RemoteImageRole,
         RemoteImageStatus,
         SecuritySettings,
         ReadingMode,

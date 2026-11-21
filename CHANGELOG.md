@@ -12,6 +12,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### ✨ Optimization
+
+- Show an image warning in the reader when a key image or a substantial share of content images fails, and keep other failures available in image status. / 阅读区仅在关键图片或大批正文配图加载失败时提示，其他失败可在图片状态中查看。 ([#176](https://github.com/GuqierMcl/MailX/pull/176))
+
 ## [0.5.0] - 2026-11-21
 
 ### ✨ Optimization

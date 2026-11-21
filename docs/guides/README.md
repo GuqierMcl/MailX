@@ -117,6 +117,8 @@ Keyboard shortcuts work in the main window when you are not typing in a field: J
 
 Remote images ask first by default, and attachments can be saved as local files. MailX does not encrypt the mail cache or attachments as a whole; on a shared computer rely on the operating system account and disk protection.
 
+Once images are allowed, the reader shows a notice if an important image such as a cover fails, or if at least three different content images fail and they account for half or more of the content images checked. Missing tracking pixels and spacers stay out of this count. To inspect an individual failure or retry loading images, open the image status control beside the message time.
+
 ## Translate messages
 
 MailX can translate the message you are reading, keeping its layout: paragraphs, lists, tables, bold text, links and inline images stay where they were. The subject is translated too. Translation works out of the box with Microsoft Translate, which needs no sign-up and no key. It uses an online translation service, not an AI assistant, and it is not built into MailX; if you have connected an AI model (see AI below), you can also choose that. If you want something steadier, you can switch to a service with a key of your own. This feature is new and has only been checked with automated tests, a few test sentences and a preview with sample data, not yet by hand on every system.

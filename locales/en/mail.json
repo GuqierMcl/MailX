@@ -16,6 +16,8 @@
   "openBodyLinkFailed": "The link could not be opened.",
   "retryImagesFailed": "The images could not be reloaded.",
   "imageLoadingStatus": "Image loading status",
+  "imagesUnavailable": "Some message images couldn’t be displayed.",
+  "dismissImageFailure": "Dismiss image notice",
   "retryImages": "Retry images",
   "htmlBody": "Message HTML body",
   "imageAddressRestricted": "Image address is restricted",

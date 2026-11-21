@@ -157,6 +157,7 @@ CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS arc
 - `core/src/imap/body/`：EXAMINE 与 BODY.PEEK，只接受完整匹配完成响应；超限 literal 在预分配前拒绝，累计 payload 与控制数据预算，截断 / 重复 / 错误 UID / 超时拒绝。
 - `core/src/storage/bodies/` 与 `core/src/sync/bodies/`：blob 原子保存与复用、事务失败、启动恢复与孤立文件清理、离线缓存读取与净化版本重建、同邮件单飞、每账号串行、来源 / revision / UIDVALIDITY / 删除保护。
 - `desktop/src/body_protocol/`：两种平台 URL、响应头、当前邮件资源范围、跨邮件拒绝、文档令牌、一次性链接请求、失效身份重检与远程图片策略。
+- 图片失败提示用合成邮件验证：仅 1×1 或隐藏图失败时正文保持安静，封面或有明确用途的二维码失败时提供恢复入口。检查重复资源、未知尺寸、三张及半数阈值两侧、成功与失败混合、加载中及采样截止。分别在原文与译文检查键盘查看详情、手动重试及成功后恢复；尚未授权和离开邮件后的旧会话不能产生提示。
 - 前端 `workbench-headers`、`use-email-body`、`body-document`、`mailx-client` 等测试：每页 100 条与加载更多、选中保留与取消、迟到响应、分页失败重试、空状态、格式自动选择、外链确认与一次性打开、IPC 不传任意 URL。
 
 真实账号验收只读执行，检查：

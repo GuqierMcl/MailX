@@ -5,8 +5,9 @@ import { testClient } from '@/features/accounts/test-fixtures'
 import type { BodyLinkRequest } from '@/lib/mailx-client'
 import { DEFAULT_APPEARANCE } from '@/lib/appearance'
 import { BodyDocument } from './body-document'
+import { ImageDetailsSlot, summarizeImageFailures } from './image-status'
 import { EmailView } from './email-view'
-import type { EmailDetail } from '@/generated/accounts'
+import type { EmailDetail, RemoteImageStatus } from '@/generated/accounts'
 import { DEFAULT_BADGE, DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 
@@ -29,6 +30,31 @@ async function frame() {
   return frame
 }
 afterEach(() => { vi.restoreAllMocks() })
+
+describe('reader image failure severity', () => {
+  const group = (index: number, failed = true): RemoteImageStatus => ({
+    index, group: index, role: 'content', loading: false, error: failed ? 'connect' : null,
+  })
+
+  it.each([
+    [2, 2, false], [3, 6, true], [3, 7, false],
+  ] as const)('summarizes %i failed of %i completed image groups', (failed, total, severe) => {
+    const statuses = Array.from({ length: total }, (_, index) => group(index, index < failed))
+    expect(summarizeImageFailures(statuses)).toMatchObject({ failed, severe })
+  })
+
+  it('counts duplicate addresses once, excludes decorative images, and waits for in-flight groups', () => {
+    const statuses: RemoteImageStatus[] = [
+      group(0), { ...group(1), group: 0 }, group(2), { ...group(3), role: 'decorative' },
+      { ...group(4), loading: true, error: null },
+    ]
+    expect(summarizeImageFailures(statuses)).toMatchObject({ failed: 3, severe: false })
+    statuses.push({ ...group(5), group: 0, role: 'important' })
+    expect(summarizeImageFailures(statuses)).toMatchObject({ failed: 3, severe: true })
+    statuses.push({ ...group(6, false), group: 0 })
+    expect(summarizeImageFailures(statuses)).toMatchObject({ failed: 2, severe: false })
+  })
+})
 
 describe('isolated body, inline links and image policy', () => {
   it('lets the reader retry a failed document and replaces the notice with its body', async () => {
@@ -60,17 +86,21 @@ describe('isolated body, inline links and image policy', () => {
     expect(client.prepareBody).toHaveBeenCalledTimes(1)
   })
 
-  it('shows safe image failures and retries while preserving this reading grant', async () => {
+  it('keeps a decorative failure quiet and allows inspection and retry with the existing grant', async () => {
     const { client } = setup()
-    client.imageStatus.mockResolvedValue([{ index: 0, loading: false, error: 'proxyPolicyRequired' }])
-    render(<BodyDocument client={client} emailId="one" hasRemoteImages />)
+    const pixel = { index: 0, group: 0, role: 'decorative', loading: false } as const
+    client.imageStatus.mockResolvedValue([{ ...pixel, error: 'proxyPolicyRequired' }])
+    render(<ImageDetailsSlot.Provider value={document.body}><BodyDocument client={client} emailId="one" hasRemoteImages /></ImageDetailsSlot.Provider>)
     await frame()
     expect(client.imageStatus).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: '加载图片' }))
     await frame()
-    expect(await screen.findByLabelText('图片加载状态')).toHaveTextContent('1 张图片未能加载')
-    expect(screen.getByLabelText('图片加载状态')).toHaveTextContent('账号代理设置')
-    client.imageStatus.mockResolvedValue([{ index: 0, loading: false, error: null }])
+    await userEvent.click(await screen.findByRole('button', { name: '图片加载状态' }))
+    const details = await screen.findByRole('dialog', { name: '图片加载状态' })
+    expect(details).toHaveTextContent('1 张图片未能加载')
+    expect(details).toHaveTextContent('账号代理设置')
+    expect(screen.queryByText('部分邮件图片未能显示。')).not.toBeInTheDocument()
+    client.imageStatus.mockResolvedValue([{ ...pixel, error: null }])
     await userEvent.click(screen.getByRole('button', { name: '重试图片' }))
     await waitFor(() => expect(screen.getByTitle('邮件 HTML 正文')).toHaveAttribute('src', 'mailx-body://localhost/document/one?token=retry-document'))
     await frame()
@@ -86,19 +116,75 @@ describe('isolated body, inline links and image policy', () => {
     const { client } = setup()
     const initial = await client.getSettings()
     client.getSettings.mockResolvedValue({ ...initial, settings: { ...initial.settings, security: { remoteImages: 'automatic', senderAvatars: false } } })
-    let finish!: (value: { index: number; loading: boolean; error: 'tls' }[]) => void
+    let finish!: (value: RemoteImageStatus[]) => void
     client.imageStatus.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
     const { rerender } = render(<BodyDocument client={client} emailId="one" hasRemoteImages />)
     await waitFor(() => expect(client.imageStatus).toHaveBeenCalled())
     rerender(<BodyDocument client={client} emailId="two" />)
     await frame()
-    await act(async () => { finish([{ index: 0, loading: false, error: 'tls' }]) })
+    await act(async () => { finish([{ index: 0, group: 0, role: 'important', loading: false, error: 'tls' }]) })
+    expect(screen.queryByText('部分邮件图片未能显示。')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('图片加载状态')).not.toBeInTheDocument()
+  })
+
+  it('announces confirmed failures at the observation deadline without retrying pending resources', async () => {
+    const { client } = setup()
+    client.imageStatus.mockResolvedValue([
+      { index: 0, group: 0, role: 'important', loading: false, error: 'tls' },
+      { index: 1, group: 1, role: 'content', loading: true, error: null },
+    ])
+    render(<BodyDocument client={client} emailId="one" hasRemoteImages />)
+    await frame()
+    await userEvent.click(screen.getByRole('button', { name: '加载图片' }))
+    await screen.findByTitle('邮件 HTML 正文')
+    vi.useFakeTimers()
+    try {
+      fireEvent.load(screen.getByTitle('邮件 HTML 正文'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect(screen.queryByText('部分邮件图片未能显示。')).not.toBeInTheDocument()
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+      expect(screen.getByRole('status')).toHaveTextContent('部分邮件图片未能显示。')
+      expect(screen.getByRole('button', { name: '重试图片' })).toBeDisabled()
+      fireEvent.click(screen.getByRole('button', { name: '关闭图片加载提示' }))
+      expect(screen.queryByText('部分邮件图片未能显示。')).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('inspects and retries only the visible document, and quiets a banner after partial recovery', async () => {
+    const { client } = setup()
+    const initial = await client.getSettings()
+    client.getSettings.mockResolvedValue({ ...initial, settings: { ...initial.settings, security: { remoteImages: 'automatic', senderAvatars: false } } })
+    client.prepareBody.mockImplementation(async (_id, _allowImages, language) => ({ documentToken: language ? 'translated' : 'original' }))
+    const small: RemoteImageStatus = { index: 1, group: 1, role: 'decorative', error: 'unsupportedType', loading: false }
+    const cover: RemoteImageStatus = { index: 0, group: 0, role: 'important', error: 'tls', loading: false }
+    client.imageStatus.mockImplementation(async (_id, token) => token === 'original' ? [small] :
+      [{ ...cover, error: token === 'retry-document' ? null : cover.error }, small])
+    const documentView = (showing: boolean) => <ImageDetailsSlot.Provider value={document.body}>
+      <BodyDocument client={client} emailId="one" hasRemoteImages translated={{ target: 'en', version: 1, showing, onFailed: vi.fn() }} />
+    </ImageDetailsSlot.Provider>
+    const view = render(documentView(false))
+    await frame()
+    await screen.findByRole('button', { name: '图片加载状态' })
+    expect(screen.queryByText('部分邮件图片未能显示。')).not.toBeInTheDocument()
+    view.rerender(documentView(true))
+    fireEvent.load(await screen.findByTitle('邮件 HTML 正文（译文）'))
+    await screen.findByText('部分邮件图片未能显示。')
+    expect(screen.getAllByRole('button', { name: '图片加载状态' })).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: '重试图片' }))
+    expect(client.retryImages).toHaveBeenCalledExactlyOnceWith('one', 'translated')
+    await waitFor(() => expect(screen.getByTitle('邮件 HTML 正文（译文）')).toHaveAttribute('src', 'mailx-body://localhost/document/one?token=retry-document'))
+    fireEvent.load(screen.getByTitle('邮件 HTML 正文（译文）'))
+    await userEvent.click(await screen.findByRole('button', { name: '图片加载状态' }))
+    expect(await screen.findByRole('dialog', { name: '图片加载状态' })).toHaveTextContent('1 张图片未能加载')
+    expect(screen.queryByText('部分邮件图片未能显示。')).not.toBeInTheDocument()
+    expect(screen.getByTitle('邮件 HTML 正文')).toHaveAttribute('src', 'mailx-body://localhost/document/one?token=original')
   })
 
   it('releases a retry token that arrives after the reader closed', async () => {
     const { client } = setup()
-    client.imageStatus.mockResolvedValue([{ index: 0, loading: false, error: 'connect' }])
+    client.imageStatus.mockResolvedValue([{ index: 0, group: 0, role: 'important', loading: false, error: 'connect' }])
     let finish!: (value: { documentToken: string }) => void
     client.retryImages.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
     const { unmount } = render(<BodyDocument client={client} emailId="one" hasRemoteImages />)

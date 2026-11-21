@@ -16,6 +16,8 @@
   "openBodyLinkFailed": "无法打开此链接。",
   "retryImagesFailed": "未能重新加载图片。",
   "imageLoadingStatus": "图片加载状态",
+  "imagesUnavailable": "部分邮件图片未能显示。",
+  "dismissImageFailure": "关闭图片加载提示",
   "retryImages": "重试图片",
   "htmlBody": "邮件 HTML 正文",
   "imageAddressRestricted": "图片地址受限",
