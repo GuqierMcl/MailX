@@ -221,7 +221,8 @@ describe('single-key mail shortcuts', () => {
     const dialog = within(await screen.findByRole('dialog', { name: '键盘快捷键' }))
     for (const name of ['浏览', '处理', '回复']) expect(dialog.getByRole('heading', { name })).toBeInTheDocument()
     const listed = dialog.getAllByRole('listitem').map((item) => item.getAttribute('data-shortcut'))
-    expect(listed).toEqual(SHORTCUTS.map((item) => item.id))
+    // No app menu handles Cmd/Ctrl+, here, so Settings is not listed.
+    expect(listed).toEqual(SHORTCUTS.filter((item) => item.id !== 'settings').map((item) => item.id))
     // Keys do not reach the mail while it is open.
     await user.keyboard('j')
     expect(screen.queryByRole('heading', { name: '邮件 a' })).not.toBeInTheDocument()

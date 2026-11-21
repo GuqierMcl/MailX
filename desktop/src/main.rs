@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_menu;
 mod assistant;
 mod attachment_save;
 mod autostart;
@@ -104,6 +105,7 @@ fn main() {
     } else {
         builder.plugin(window_chrome::browser_defaults_plugin())
     };
+    let builder = app_menu::register(builder);
     body_protocol::register(builder)
         .setup(move |app| {
             // A second process has already forwarded actions to the live instance.
@@ -411,6 +413,10 @@ fn main() {
             commands::window_get_chrome,
             commands::window_perform,
             commands::window_set_theme,
+            app_menu::app_menu_update,
+            app_menu::app_menu_windows,
+            app_menu::app_menu_focus_window,
+            app_menu::app_menu_main_action,
             compose::drafts_create,
             compose::drafts_create_from,
             compose::drafts_list,

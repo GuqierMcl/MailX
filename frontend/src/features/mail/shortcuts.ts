@@ -18,7 +18,7 @@ export type SingleKeyShortcutId =
   | 'reply' | 'replyAll' | 'forward'
 
 /** Shortcuts with a modifier, or Esc: listed only, each is handled by its own component. */
-type FixedShortcutId = 'searchModifier' | 'close' | 'sidebar' | 'assistant' | 'selectAll' | 'compose'
+type FixedShortcutId = 'searchModifier' | 'close' | 'sidebar' | 'assistant' | 'selectAll' | 'compose' | 'settings'
 
 export type ShortcutDefinition = {
   id: SingleKeyShortcutId | FixedShortcutId
@@ -44,6 +44,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   { id: 'search', keys: [['/']], group: 'browse', labelKey: 'mail:shortcutSearch', singleKey: true, match: ['/'] },
   { id: 'searchModifier', keys: [[MOD_KEY, 'K']], group: 'browse', labelKey: 'mail:shortcutPalette', singleKey: false },
   { id: 'sidebar', keys: [[MOD_KEY, 'B']], group: 'browse', labelKey: 'mail:shortcutSidebar', singleKey: false },
+  { id: 'settings', keys: [[MOD_KEY, ',']], group: 'browse', labelKey: 'mail:openSettings', singleKey: false },
   { id: 'assistant', keys: [[MOD_KEY, 'J']], group: 'browse', labelKey: 'mail:shortcutAssistant', singleKey: false },
   { id: 'help', keys: [['?']], group: 'browse', labelKey: 'mail:shortcutHelp', singleKey: true, match: ['?'] },
   { id: 'archive', keys: [['E']], group: 'act', labelKey: 'mail:shortcutArchive', singleKey: true, match: ['e'] },

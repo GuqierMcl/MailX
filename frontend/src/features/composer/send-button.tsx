@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
+import { useAppMenuCommands } from '@/features/app-menu/commands'
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -140,6 +141,17 @@ export function SendButton({ subjectEmpty, disabled, onPrepare, onConfirm, reset
 
   const confirming = stage === 'confirm' || stage === 'sending'
   const label = stage === 'sending' ? t('composer:send.sending') : confirming ? (subjectEmpty ? t('composer:send.confirmEmptySubject') : t('composer:send.confirm')) : t('composer:send.send')
+  useAppMenuCommands({
+    send: {
+      run: () => {
+        if (document.querySelector('[aria-modal="true"]')) return
+        button.current?.focus()
+        return press()
+      },
+      enabled: !disabled && stage !== 'checking' && stage !== 'sending',
+      label,
+    },
+  })
   return (
     <>
       <Button

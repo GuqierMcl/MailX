@@ -2,6 +2,7 @@ import { Fragment, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { useSettingsShortcutAvailable } from '@/features/app-menu/commands'
 import { SHORTCUT_GROUPS, SHORTCUTS } from './shortcuts'
 
 /** One key cap. */
@@ -33,13 +34,15 @@ function ShortcutKeys({ keys }: { keys: string[][] }) {
  */
 export function ShortcutList({ singleKeyOff = false, className }: { singleKeyOff?: boolean; className?: string }) {
   useTranslation()
+  // Cmd/Ctrl+, is handled by the app menu, which not every platform has.
+  const settingsShortcut = useSettingsShortcutAvailable()
   return (
     <div className={cn('flex flex-col gap-5', className)}>
       {SHORTCUT_GROUPS.map((group) => (
         <section key={group.id} aria-labelledby={`shortcut-group-${group.id}`} className="flex flex-col gap-1.5">
           <h3 id={`shortcut-group-${group.id}`} className="text-xs font-medium text-muted-foreground">{t(group.labelKey)}</h3>
           <ul className="flex flex-col gap-1">
-            {SHORTCUTS.filter((item) => item.group === group.id).map((item) => {
+            {SHORTCUTS.filter((item) => item.group === group.id && (item.id !== 'settings' || settingsShortcut)).map((item) => {
               const off = singleKeyOff && item.singleKey
               return (
                 <li

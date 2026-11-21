@@ -1,8 +1,14 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import * as tauri from '@tauri-apps/api/core'
+import * as menuDesktop from '@/features/app-menu/desktop'
 import { i18n } from '@/i18n'
+import { useAppMenuCommands } from '@/features/app-menu/commands'
 import { TitleBar, TitleBarActions, TitleBarSlotsProvider } from './title-bar'
-import { previewPlatformFromUrl, type WindowChrome, type WindowHost, type WindowState } from './window-host'
+import { createPreviewWindowHost, previewPlatformFromUrl, type WindowChrome, type WindowHost, type WindowState } from './window-host'
+
+vi.mock('@tauri-apps/api/core', { spy: true })
 
 const normal: WindowState = { maximized: false, fullscreen: false, focused: true }
 
@@ -32,6 +38,123 @@ async function renderTitleBar(host: WindowHost) {
 }
 
 describe('TitleBar', () => {
+  it('opens the Windows application menu from the keyboard and runs a submenu command', async () => {
+    const { host, perform } = fakeHost({ platform: 'windows', trailing: ['minimize', 'maximize', 'close'] })
+    const user = userEvent.setup()
+    await renderTitleBar(host)
+
+    const trigger = screen.getByRole('button', { name: '应用菜单' })
+    expect(trigger.nextElementSibling?.firstElementChild).toHaveAttribute('data-window-button', 'minimize')
+    trigger.focus()
+    await user.keyboard('{Enter}')
+    const view = await screen.findByRole('menuitem', { name: '显示' })
+    view.focus()
+    await user.keyboard('{ArrowRight}')
+    const fullscreen = await screen.findByRole('menuitem', { name: '进入全屏' })
+    fullscreen.focus()
+    await user.keyboard('{Enter}')
+    expect(perform).toHaveBeenCalledWith('toggleFullscreen')
+  })
+
+  it('uses the focused editor for edit actions and returns focus to it', async () => {
+    const { host } = fakeHost({ platform: 'windows' })
+    const user = userEvent.setup()
+    const execCommand = vi.fn(() => true)
+    const original = Object.getOwnPropertyDescriptor(document, 'execCommand')
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand })
+    try {
+      render(<><TitleBar host={host} /><input aria-label="主题" defaultValue="Draft" /></>)
+      const editor = screen.getByRole('textbox', { name: '主题' }) as HTMLInputElement
+      const trigger = await screen.findByRole('button', { name: '应用菜单' })
+      await user.click(editor)
+      editor.setSelectionRange(0, 5)
+      await user.click(trigger)
+      await user.click(await screen.findByRole('menuitem', { name: '编辑' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: /复制/ }))
+      await vi.waitFor(() => expect(execCommand).toHaveBeenCalledWith('copy'))
+      await vi.waitFor(() => expect(editor).toHaveFocus())
+    } finally {
+      if (original) Object.defineProperty(document, 'execCommand', original)
+      else Reflect.deleteProperty(document, 'execCommand')
+    }
+  })
+
+  it('executes the latest registered settings action with Ctrl+, in Windows preview', async () => {
+    const host = createPreviewWindowHost('windows')
+    const previous = vi.fn()
+    const current = vi.fn()
+    function Commands({ open, enabled = true }: { open: () => void; enabled?: boolean }) {
+      useAppMenuCommands({ settings: { run: open, enabled } })
+      return <TitleBar host={host} />
+    }
+    const { rerender } = render(<Commands open={previous} />)
+    await screen.findByRole('button', { name: '应用菜单' })
+    rerender(<Commands open={current} />)
+    expect(fireEvent.keyDown(window, { key: ',', metaKey: true })).toBe(true)
+    expect(fireEvent.keyDown(window, { key: ',', ctrlKey: true, metaKey: true })).toBe(true)
+    expect(fireEvent.keyDown(window, { key: ',', ctrlKey: true })).toBe(false)
+    rerender(<Commands open={current} enabled={false} />)
+    expect(fireEvent.keyDown(window, { key: ',', ctrlKey: true })).toBe(true)
+    expect(current).toHaveBeenCalledOnce()
+    expect(previous).not.toHaveBeenCalled()
+  })
+
+  it('keeps browser shortcuts available on a page without a desktop host or platform preview', () => {
+    const run = vi.fn()
+    function Commands() {
+      useAppMenuCommands({ settings: { run } })
+      return <TitleBar host={null} />
+    }
+    render(<Commands />)
+    expect(fireEvent.keyDown(window, { key: ',', ctrlKey: true })).toBe(true)
+    expect(fireEvent.keyDown(window, { key: ',', metaKey: true })).toBe(true)
+    expect(run).not.toHaveBeenCalled()
+  })
+
+  it('leaves Ctrl+Q, Ctrl+W and Ctrl+M in a Windows text field to the platform', async () => {
+    const { host, perform } = fakeHost({ platform: 'windows' })
+    const quit = vi.fn()
+    function Commands() {
+      useAppMenuCommands({ quit: { run: quit } })
+      return <><TitleBar host={host} /><input aria-label="主题" /></>
+    }
+    const desktop = vi.spyOn(tauri, 'isTauri').mockReturnValue(true)
+    const windows = vi.spyOn(menuDesktop, 'listMenuWindows').mockResolvedValue([])
+    const events = vi.spyOn(menuDesktop, 'listenToMenuEvent').mockReturnValue(() => {})
+    try {
+      render(<Commands />)
+      await screen.findByRole('button', { name: '应用菜单' })
+      const input = screen.getByRole('textbox', { name: '主题' })
+      input.focus()
+      for (const key of ['q', 'w', 'm']) {
+        expect(fireEvent.keyDown(input, { key, code: `Key${key.toUpperCase()}`, ctrlKey: true })).toBe(true)
+      }
+      expect(quit).not.toHaveBeenCalled()
+      expect(perform).not.toHaveBeenCalled()
+    } finally {
+      events.mockRestore()
+      windows.mockRestore()
+      desktop.mockRestore()
+    }
+  })
+
+  it('keeps an open dialog in control of the keyboard', async () => {
+    const host = createPreviewWindowHost('macos')
+    const open = vi.fn()
+    function Commands({ modal }: { modal: boolean }) {
+      useAppMenuCommands({ settings: { run: open } })
+      return <><TitleBar host={host} />{modal && <div role="dialog" data-open="" />}</>
+    }
+    const { rerender } = render(<Commands modal />)
+    await vi.waitFor(() => expect(screen.getByRole('banner')).toHaveAttribute('data-platform', 'macos'))
+    expect(fireEvent.keyDown(window, { key: ',', metaKey: true })).toBe(true)
+    expect(open).not.toHaveBeenCalled()
+    rerender(<Commands modal={false} />)
+    expect(fireEvent.keyDown(window, { key: ',', ctrlKey: true })).toBe(true)
+    expect(fireEvent.keyDown(window, { key: ',', metaKey: true })).toBe(false)
+    expect(open).toHaveBeenCalledOnce()
+  })
+
   it('draws Windows caption buttons and follows window state', async () => {
     const { host, perform, emit } = fakeHost({ platform: 'windows', trailing: ['minimize', 'maximize', 'close'] })
     const header = await renderTitleBar(host)
@@ -131,8 +254,8 @@ describe('TitleBarActions', () => {
     expect(leading).toContainElement(await screen.findByRole('button', { name: '折叠' }))
     expect(trailing).toContainElement(screen.getByRole('button', { name: '更多' }))
     expect(header.querySelector('[data-slot="title-bar-center"]')).toContainElement(screen.getByRole('textbox', { name: '搜索' }))
-    // The trailing actions sit directly before the window controls.
-    expect(trailing.nextElementSibling).toHaveAttribute('data-slot', 'window-controls')
+    expect(trailing.nextElementSibling).toHaveAttribute('data-app-menu-trigger')
+    expect(trailing.nextElementSibling?.nextElementSibling).toHaveAttribute('data-slot', 'window-controls')
 
     fireEvent.mouseDown(screen.getByRole('button', { name: '折叠' }), { button: 0, detail: 1 })
     expect(perform).not.toHaveBeenCalled()

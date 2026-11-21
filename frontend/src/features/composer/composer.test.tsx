@@ -7,6 +7,7 @@ import type { Account, Draft } from '@/generated/accounts'
 import { MailxClientError } from '@/lib/mailx-client'
 import { MOD_KEY } from '@/features/mail/shortcuts'
 import { Composer } from './composer'
+import { invokeAppMenuCommand } from '@/features/app-menu/commands'
 import { AUTOSAVE_DELAY_MS, SAVING_INDICATOR_DELAY_MS } from './use-draft-editor'
 
 
@@ -362,6 +363,15 @@ describe('save status', () => {
 
 describe('attachments', () => {
   const file = { id: 'a1', fileName: '报表.pdf', mediaType: 'application/pdf', size: 2048, origin: 'user' as const, inline: false, contentId: null }
+
+  it('dispatches the attachment menu action through the draft revision and host picker', async () => {
+    const { client } = setup()
+    await body()
+    client.addAttachments.mockResolvedValue(draft({ revision: 2, attachments: [file] }))
+    await act(async () => { expect(invokeAppMenuCommand('attach')).toBe(true) })
+    expect(client.addAttachments).toHaveBeenCalledWith(DRAFT_ID, 1)
+    expect(await screen.findByText(file.fileName)).toBeInTheDocument()
+  })
 
   it('attaches through the host picker at the saved revision and lists the file', async () => {
     const { client } = setup()

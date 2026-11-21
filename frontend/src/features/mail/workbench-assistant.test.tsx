@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor, within } from '@/test/render'
+import { act, fireEvent, render, screen, waitFor, within } from '@/test/render'
+import { invokeAppMenuCommand } from '@/features/app-menu/commands'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMockClient } from '@/lib/mock-client'
@@ -28,6 +29,22 @@ async function openFirstEmail() {
 }
 
 describe('the assistant beside the mail', () => {
+  it('uses the assistant shortcut from its input after menu opening and respects IME and handled keys', async () => {
+    render(withTitleBar(<Workbench client={await withAssistant()} />))
+    await capsule()
+    act(() => { expect(invokeAppMenuCommand('toggleAssistant')).toBe(true) })
+    const input = within(await island()).getByRole('textbox')
+    await waitFor(() => expect(input).toHaveFocus())
+    const shortcut = { code: 'KeyJ', key: 'j', metaKey: true }
+    fireEvent.keyDown(input, { ...shortcut, isComposing: true })
+    expect(input).toBeInTheDocument()
+    input.addEventListener('keydown', (event) => event.preventDefault(), { once: true })
+    fireEvent.keyDown(input, shortcut)
+    expect(input).toBeInTheDocument()
+    fireEvent.keyDown(input, shortcut)
+    expect(input).not.toBeInTheDocument()
+  })
+
   it('has no capsule without a usable model', async () => {
     render(withTitleBar(<Workbench client={createMockClient()} />))
     await screen.findByRole('list', { name: '邮件列表' })

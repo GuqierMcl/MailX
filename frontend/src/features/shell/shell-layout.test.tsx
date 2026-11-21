@@ -12,6 +12,7 @@ const setup = ({ navWidth = NAV_DEFAULT, navCollapsed = false }: Saved = {}) => 
   const view = (saved: Required<Saved>) => withTitleBar(
     <ShellLayout navLabel="导航" nav={<p>菜单</p>} rail={<p>图标</p>} navWidth={saved.navWidth} navCollapsed={saved.navCollapsed} onNavChange={onNavChange}>
       <p>内容</p>
+      <input aria-label="编辑内容" />
     </ShellLayout>,
   )
   const { rerender } = render(view({ navWidth, navCollapsed }))
@@ -81,6 +82,18 @@ describe('nav rail resizing', () => {
 })
 
 describe('icon rail', () => {
+  it('handles the sidebar shortcut from text inputs unless composing or already handled', () => {
+    const { onNavChange } = setup()
+    const input = screen.getByRole('textbox', { name: '编辑内容' })
+    input.focus()
+    fireEvent.keyDown(input, { key: 'b', metaKey: true, isComposing: true })
+    input.addEventListener('keydown', (event) => event.preventDefault(), { once: true })
+    fireEvent.keyDown(input, { key: 'b', metaKey: true })
+    expect(onNavChange).not.toHaveBeenCalled()
+    fireEvent.keyDown(input, { key: 'b', metaKey: true })
+    expect(onNavChange).toHaveBeenCalledExactlyOnceWith({ navCollapsed: true })
+    expect(input).toHaveFocus()
+  })
   it('folds to the rail instead of hiding, and saves the choice', () => {
     const { onNavChange } = setup()
     expect(screen.getByText('菜单')).toBeInTheDocument()

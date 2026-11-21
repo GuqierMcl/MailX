@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { TitleBarActions } from '@/features/window-chrome/title-bar'
+import { useAppMenuCommands } from '@/features/app-menu/commands'
 import { Island } from './island'
 import { NAV_RAIL_WINDOW } from './layout-defaults'
 import { NAV_RAIL } from './nav-width'
@@ -16,6 +17,7 @@ type ShellLayoutProps = {
   navWidth: number
   /** The saved choice to fold the sidebar to its rail. */
   navCollapsed: boolean
+  menuBlocked?: boolean
   /** Page actions beside the sidebar toggle in the title bar. */
   navActions?: ReactNode
   /** Called when the user settles on a width or folds the sidebar; the caller persists it. */
@@ -59,7 +61,7 @@ function useWindowWidth() {
  * user's choice is saved; a narrow window shows the rail on its own, and opening
  * the sidebar there lasts only until the window widens, leaving the choice as it was.
  */
-export function ShellLayout({ navLabel, nav, rail, navWidth, navCollapsed, navActions, onNavChange, aside, asideRoom, children }: ShellLayoutProps) {
+export function ShellLayout({ navLabel, nav, rail, navWidth, navCollapsed, menuBlocked, navActions, onNavChange, aside, asideRoom, children }: ShellLayoutProps) {
   const narrow = useNarrowWindow()
   const windowWidth = useWindowWidth()
   const [narrowOpen, setNarrowOpen] = useState(false)
@@ -92,19 +94,22 @@ export function ShellLayout({ navLabel, nav, rail, navWidth, navCollapsed, navAc
     if (next !== chosenFolded) onNavChange({ navCollapsed: next })
   }, [narrow, navCollapsed, chosenFolded, onNavChange])
   const toggleNav = useCallback(() => setFolded(!settledFolded), [setFolded, settledFolded])
+  useAppMenuCommands({ toggleSidebar: { run: toggleNav, enabled: !resizing && !menuBlocked, checked: !folded } })
 
   const controls = useMemo(() => ({ navOpen: !folded, toggleNav }), [folded, toggleNav])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'b' && (event.metaKey || event.ctrlKey)) {
+      if (menuBlocked || resizing || event.defaultPrevented || event.isComposing ||
+        event.altKey || event.shiftKey) return
+      if (event.key.toLowerCase() === 'b' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault()
         toggleNav()
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [toggleNav])
+  }, [menuBlocked, resizing, toggleNav])
 
   const resize = ({ width: next, folded: nextFolded }: NavSize) => {
     setWidthDraft({ from: navWidth, value: next })

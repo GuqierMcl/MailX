@@ -1,4 +1,5 @@
 import { i18n } from '@/i18n'
+import { invokeAppMenuCommand } from '@/features/app-menu/commands'
 import { createRef } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -24,6 +25,21 @@ afterEach(() => {
 })
 
 describe('two-step send button', () => {
+  it('dispatches the menu action through both guarded send stages', async () => {
+    const { button, onPrepare, onConfirm } = setup()
+    const sendFromMenu = async () => {
+      await act(async () => { expect(invokeAppMenuCommand('send')).toBe(true) })
+    }
+    await sendFromMenu()
+    expect(button).toHaveAttribute('data-stage', 'confirm')
+    expect(onPrepare).toHaveBeenCalledTimes(1)
+    await sendFromMenu()
+    expect(onConfirm).not.toHaveBeenCalled()
+    await act(async () => { vi.advanceTimersByTime(CONFIRM_GUARD_MS + 1) })
+    await sendFromMenu()
+    expect(onConfirm).toHaveBeenCalledWith(7)
+  })
+
   it('first press validates and asks again; the second press queues at the saved revision', async () => {
     const { button, press, onPrepare, onConfirm } = setup()
     expect(button).toHaveTextContent('发送')

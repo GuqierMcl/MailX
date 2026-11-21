@@ -32,6 +32,7 @@ import { mergeRecipients, type Recipient } from './address-parse'
 import { RecipientField, type RecipientDragData, type RecipientDropData, type RecipientFieldHandle, type RecipientRow } from './recipient-field'
 import { RowToggle } from './row-toggle'
 import { SendButton, type SendButtonHandle } from './send-button'
+import { useAppMenuCommands } from '@/features/app-menu/commands'
 import { draftMentionsAttachment, foldsReplyQuote } from './reply-quote'
 import { AttachmentBar } from './attachment-bar'
 import type { MailBodyEditorHandle } from './mail-body-editor'
@@ -248,6 +249,10 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
+
+  const canAttach = Boolean(fields) && !editor.gone && !editor.problem && !editor.readOnly && !busy && !editor.attaching && !confirmDiscard
+  const attach = () => runAttachment(addAttachments)
+  useAppMenuCommands({ attach: { run: attach, enabled: canAttach } })
 
   if (editor.gone) {
     return (
@@ -517,9 +522,9 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
       <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3">
         <IconButton
           type="button"
-          disabled={readOnly || busy || editor.attaching}
+          disabled={!canAttach}
           label={t('composer:attachment.add')}
-          onClick={() => void runAttachment(addAttachments)}
+          onClick={() => void attach()}
         >
           <HugeiconsIcon icon={Attachment01Icon} aria-hidden="true" />
         </IconButton>
@@ -551,7 +556,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
           {t('composer:action.discard')}</Button>
         <SendButton
           subjectEmpty={!fields.subject.trim()}
-          disabled={readOnly || busy}
+          disabled={readOnly || busy || editor.attaching || confirmDiscard}
           resetToken={editor.changeToken}
           onPrepare={prepare}
           onConfirm={send}

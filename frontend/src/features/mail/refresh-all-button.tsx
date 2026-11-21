@@ -7,17 +7,21 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import type { Account, AccountSyncState } from '@/generated/accounts'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { t } from '@/i18n'
+import { useAppMenuCommands } from '@/features/app-menu/commands'
 import { useManualSyncAll } from './use-manual-sync'
 
-export function RefreshAllButton({ accounts, syncStates, onRefresh }: {
+export function RefreshAllButton({ accounts, syncStates, onRefresh, menuBlocked }: {
   accounts: readonly Pick<Account, 'id' | 'mailboxSourceId'>[]
   syncStates: Record<string, AccountSyncState>
   onRefresh: (accountId: string) => Promise<void>
+  menuBlocked?: boolean
 }) {
   useTranslation()
   const { refreshing, refresh } = useManualSyncAll(accounts, syncStates, onRefresh)
   const turning = useDelayedFlag(refreshing, 400, 700)
   const busy = refreshing || turning
+  const enabled = !busy && accounts.length > 0
+  useAppMenuCommands({ refresh: { run: refresh, enabled: enabled && !menuBlocked } })
   const label = busy ? t('mail:syncingAllAccounts') : t('mail:syncAllAccounts')
   return (
     <Tooltip>
@@ -27,9 +31,9 @@ export function RefreshAllButton({ accounts, syncStates, onRefresh }: {
             variant="ghost"
             size="icon-sm"
             aria-label={label}
-            aria-disabled={busy || accounts.length === 0}
+            aria-disabled={!enabled}
             aria-busy={busy}
-            onClick={() => { if (!busy && accounts.length > 0) refresh() }}
+            onClick={() => { if (enabled) refresh() }}
           >
             <HugeiconsIcon
               icon={RefreshIcon}

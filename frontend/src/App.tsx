@@ -25,6 +25,7 @@ import { preloadMailBodyEditor } from '@/features/composer/mail-body-editor-load
 import { SettingsSync } from '@/i18n/settings-sync'
 import { createDesktopLifecycleClient, createPreviewLifecycleClient } from '@/features/lifecycle/lifecycle-client'
 import { LifecycleProvider } from '@/features/lifecycle/lifecycle-provider'
+import { ApplicationMenuActions, PreferencesMenuActions } from '@/features/settings/application-menu-actions'
 
 // A plain browser in development gets synthetic data so the UI can be designed without the desktop host.
 // `?composer=<id>` previews a composer window: that tab's own mock has no such draft, so it
@@ -86,6 +87,7 @@ function App() {
       {/* One global toast outlet; everything short that needs saying goes through `toast`. */}
       <Toaster />
       <LifecycleProvider client={lifecycle}>
+        <ApplicationMenuActions client={client} />
         <TitleBarSlotsProvider>
           <div className="app-canvas flex h-svh flex-col overflow-hidden bg-sidebar text-foreground">
             <TitleBar host={windowHost} />
@@ -95,6 +97,7 @@ function App() {
               {/* The island's shadow extends upward onto the title-bar canvas. */}
               <div className="relative min-h-0 flex-1">
                 <StartupGate client={client}>
+                  <PreferencesMenuActions />
                   <InstalledUpdateNotice client={client} host={windowHost} />
                 </StartupGate>
               </div>

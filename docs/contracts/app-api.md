@@ -195,12 +195,21 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 | 命令与参数 | 结果 |
 | --- | --- |
 | `window_get_chrome`，无参数 | `{ platform, leading, trailing, state, translucent }`：平台、标题内容前后要绘制的按钮、`{ maximized, fullscreen, focused }`、窗口背后是否有系统材质（目前仅 macOS 为 true） |
-| `window_perform`，`{ action }` | `action` 为 `minimize` / `toggleMaximize` / `close` / `startDragging` / `titleBarDoubleClick` |
+| `window_perform`，`{ action }` | `action` 为 `minimize` / `toggleMaximize` / `toggleFullscreen` / `close` / `startDragging` / `titleBarDoubleClick` |
 | `window_set_theme`，`{ theme }` | `theme` 为 `system` / `light` / `dark`；只作用于调用窗口，使窗口材质与应用主题一致 |
 
 状态变化通过 `mailx://window-state` 事件推送，定向到变化所属的窗口（main 或各写信窗口）。`titleBarDoubleClick` 由宿主按系统偏好执行：macOS 读取“连按窗口标题栏”设置，Linux 读取 GtkSettings 的 `gtk-titlebar-double-click`，Windows 切换最大化。Linux 按钮布局来自 `gtk-decoration-layout`；macOS 保留系统红绿灯。这两个命令对 main 和写信窗口都开放，且只作用于调用它的窗口；写信窗口的双击偏好与 Linux 按钮布局与 main 完全相同。
 
 ### 写信窗口与发送命令（发信步骤 4a）
+
+桌面应用菜单只向受信的 main 和 composer 提供以下宿主命令。邮件与草稿操作在目标窗口内继续调用各自已有的接口。
+
+| 命令 | 作用 |
+| --- | --- |
+| `app_menu_update { groups }` | 发布调用窗口的本地化菜单、快捷键及可用状态；macOS 在窗口切换时选用前台窗口的菜单。 |
+| `app_menu_windows` | 返回受信窗口的 `{ label, title, focused }[]`。收到 `mailx://app-menu-windows-changed` 后重新读取。 |
+| `app_menu_focus_window { label }` | 显示、还原并聚焦指定的受信窗口。 |
+| `app_menu_main_action { id }` | 仅接受设置、关于、更新、账号、指南、快捷键、三个主题、新建邮件及退出的固定动作。跨窗口转发须等主窗口订阅完成并报告 ready，提前调用返回 `coreNotReady`。退出直接进入现有的草稿保存流程。 |
 
 窗口分两类：`main` 与 `composer-<uuid>`（后缀必须是小写连字符格式的 UUID，`composer-x`、大写、无连字符、带花括号都被拒绝）。每个命令先过 Tauri capability（`capabilities/main.json`、`capabilities/composer.json`），再过宿主侧的 `window_access` 白名单；两者页面来源检查一样严格（打包内页面或调试构建的 `localhost:5173`，URL 不得带用户名或密码，路径与查询不限）。任何拒绝都是同一个脱敏的 `validation`（字段 `caller`）。传给核心的主体由窗口类别决定，请求里没有任何主体字段：main 为 `Caller::MainWindow`，composer 为 `Caller::Composer`。
 
@@ -1116,7 +1125,7 @@ type AccountRemoval = { accountId: string; draftIds: string[]; credentialsPendin
 
 `general.closeBehavior` 为 `ask`（默认）、`background`、`quit`；`general.showMenuBarIcon` 默认 true，仅 macOS 使用。旧文件自动补默认值，已经保存的 `false` 仍保留，设置仅影响下一次关窗。macOS 的 background 依靠 Dock 恢复，无须菜单栏图标；Windows/Linux 需要托盘入口，Linux 还检查 AppIndicator 运行库与当前桌面宿主。运行库加载失败时主窗口仍可使用，`backgroundAvailable` 为 false。已记住 background 但当前不可用时重新询问，保留原偏好，不静默退出。
 
-托盘工作台动作 `mailx://desktop-action` 载荷为 `"settings"` 或 `"compose"`；只有工作台完成监听并报告 ready 后启用菜单项。打开窗口、立即同步和退出由 Rust 宿主执行。普通最小化保留平台原生行为，关窗隐藏不暂停收发任务。
+`mailx://desktop-action` 定向发送给主工作台。托盘动作载荷为 `"settings"` 或 `"compose"`，应用菜单跨窗口转发的载荷为 `{ menuCommand: id }`，两者复用同一订阅和 ready 确认。主窗口收到转发后按当前界面状态执行命令，操作不可用时给出提示。托盘的打开窗口、立即同步和退出由 Rust 宿主执行。普通最小化保留平台原生行为，关窗隐藏不暂停收发任务。
 
 
 ### MCP 整理工具的本地状态事件（2026-11-03）

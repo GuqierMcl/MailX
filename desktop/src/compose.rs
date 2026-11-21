@@ -449,10 +449,24 @@ pub(crate) async fn drafts_update(
         window_access::check_draft(kind, "drafts_update", &args.request.id)?;
         Ok(args)
     });
-    Ok(respond(match args {
+    let result = match args {
         Ok(args) => state.run(move |core| core.draft_update(args.request)).await,
         Err(error) => Err(error),
-    }))
+    };
+    if let Ok(draft) = &result {
+        let window = window
+            .app_handle()
+            .get_webview_window(&format!("composer-{}", draft.id));
+        if let Some(window) = window {
+            let title = composer_title(window.app_handle(), &draft.subject);
+            if window.title().is_ok_and(|current| current != title)
+                && window.set_title(&title).is_ok()
+            {
+                crate::app_menu::windows_changed(window.app_handle());
+            }
+        }
+    }
+    Ok(respond(result))
 }
 
 #[tauri::command]
@@ -712,19 +726,19 @@ async fn open_checked_draft(
         return Err(AppError::new(ErrorCode::Conflict));
     }
     let text = id.hyphenated().to_string();
-    state
+    let subject = state
         .run(move |core| {
             let draft = core.get_draft(&text)?;
             if expected_account.is_some_and(|account| account != draft.account_id) {
                 return Err(AppError::new(ErrorCode::NotFound));
             }
-            Ok(())
+            Ok(draft.subject)
         })
         .await?;
     if is_quitting(app) {
         return Err(AppError::new(ErrorCode::Conflict));
     }
-    open_composer(app, &id, fresh).map_err(|_| AppError::new(ErrorCode::Internal))
+    open_composer(app, &id, fresh, &subject).map_err(|_| AppError::new(ErrorCode::Internal))
 }
 
 /// Closes the calling composer window. The frontend has already flushed the
@@ -812,7 +826,24 @@ fn composer_url(draft_id: &uuid::Uuid, fresh: bool) -> String {
     if fresh { format!("{url}&fresh=1") } else { url }
 }
 
-fn open_composer(app: &AppHandle, draft_id: &uuid::Uuid, fresh: bool) -> tauri::Result<()> {
+fn composer_title(app: &AppHandle, subject: &str) -> String {
+    let subject = subject.trim();
+    if !subject.is_empty() {
+        return subject.to_owned();
+    }
+    app.try_state::<DesktopState>()
+        .and_then(|state| state.notification_settings().map(|(_, locale)| locale))
+        .unwrap_or_else(crate::locale::system_locale)
+        .new_mail_title()
+        .to_owned()
+}
+
+fn open_composer(
+    app: &AppHandle,
+    draft_id: &uuid::Uuid,
+    fresh: bool,
+    subject: &str,
+) -> tauri::Result<()> {
     let label = composer_label(draft_id);
     if let Some(existing) = app.get_webview_window(&label) {
         let _ = existing.unminimize();
@@ -822,13 +853,9 @@ fn open_composer(app: &AppHandle, draft_id: &uuid::Uuid, fresh: bool) -> tauri::
     let slot = composer_windows(app).len();
     let navigation_app = app.clone();
     let url = composer_url(draft_id, fresh);
-    let locale = app
-        .try_state::<DesktopState>()
-        .and_then(|state| state.notification_settings().map(|(_, locale)| locale))
-        .unwrap_or_else(crate::locale::system_locale);
     let builder = window_chrome::style_builder(
         WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
-            .title(locale.new_mail_title())
+            .title(composer_title(app, subject))
             .inner_size(WINDOW_WIDTH, WINDOW_HEIGHT)
             .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
             .visible(false)
@@ -847,6 +874,7 @@ fn open_composer(app: &AppHandle, draft_id: &uuid::Uuid, fresh: bool) -> tauri::
     window_chrome::watch_state(&window);
     watch_close(&window);
     window.show()?;
+    crate::app_menu::windows_changed(app);
     window.set_focus()
 }
 

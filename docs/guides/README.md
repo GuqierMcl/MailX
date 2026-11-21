@@ -4,6 +4,12 @@ English | [简体中文](zh-CN/README.md)
 
 This page covers the basics of the desktop app. Published installers are listed in [Releases](https://github.com/GuqierMcl/MailX/releases); verification scope is described in the [validation guidance](../development/validation.md), and upcoming features in the [roadmap](../roadmap/README.md).
 
+## Application menu
+
+On macOS, use the menu bar at the top of the screen. On Windows, open the down-chevron immediately to the left of the minimize button. Both menus group commands under MailX, File, Edit, View, Message, Window and Help. Open **MailX → Settings** with **Cmd+,** on macOS or **Ctrl+,** on Windows, including from a separate compose window.
+
+The menu follows the active window. To attach a file while writing, choose **File → Add Attachment**. To return to an open draft, choose it from **Window**. **MailX → Quit MailX** exits the app after pending drafts are saved. Closing a window follows your usual close-window preference.
+
 ## Install and add an account
 
 1. Pick the installer for your platform in Releases and open it as described in that release's install notes. macOS has separate Apple silicon and Intel builds; Windows has an x64 installer; Linux has x64 AppImage, deb and rpm. The macOS build is signed and notarized, so it opens normally; the Windows and Linux builds are not code-signed yet. You can check your download against the `SHA256SUMS.txt` of the same release.

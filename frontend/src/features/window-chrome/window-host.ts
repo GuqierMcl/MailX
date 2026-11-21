@@ -4,7 +4,7 @@ import type { ApiResult } from '@/generated/accounts'
 
 export type WindowPlatform = 'macos' | 'windows' | 'linux'
 export type WindowButton = 'minimize' | 'maximize' | 'close'
-export type WindowAction = 'minimize' | 'toggleMaximize' | 'close' | 'startDragging' | 'titleBarDoubleClick'
+export type WindowAction = 'minimize' | 'toggleMaximize' | 'toggleFullscreen' | 'close' | 'startDragging' | 'titleBarDoubleClick'
 
 export type WindowState = { maximized: boolean; fullscreen: boolean; focused: boolean }
 
@@ -21,6 +21,7 @@ export type WindowChrome = {
 
 /** The window behind the title bar: the desktop host, or a dev preview in the browser. */
 export interface WindowHost {
+  readonly preview?: boolean
   getChrome(): Promise<WindowChrome>
   perform(action: WindowAction): void
   onStateChange(listener: (state: WindowState) => void): () => void
@@ -71,6 +72,7 @@ export function createPreviewWindowHost(platform: WindowPlatform, onClose?: () =
   let state: WindowState = { maximized: false, fullscreen: false, focused: true }
   const listeners = new Set<(state: WindowState) => void>()
   return {
+    preview: true,
     getChrome: async () => ({
       platform,
       leading: [],
@@ -80,6 +82,11 @@ export function createPreviewWindowHost(platform: WindowPlatform, onClose?: () =
     }),
     perform(action) {
       if (action === 'close') { onClose?.(); return }
+      if (action === 'toggleFullscreen') {
+        state = { ...state, fullscreen: !state.fullscreen }
+        listeners.forEach((listener) => listener(state))
+        return
+      }
       if (action !== 'toggleMaximize' && action !== 'titleBarDoubleClick') return
       state = { ...state, maximized: !state.maximized }
       listeners.forEach((listener) => listener(state))
