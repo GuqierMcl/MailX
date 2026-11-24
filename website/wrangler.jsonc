@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // mailxapp.com: the official site and documentation, built by Astro into ./dist.
+  "name": "mailx-website",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-20",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // Only addresses without a language need the Worker, to choose one. Every
+    // other request is served straight from the static assets.
+    "run_worker_first": ["/", "/download", "/download/", "/changelog", "/changelog/", "/privacy", "/privacy/", "/docs", "/docs/*"],
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "mailxapp.com", "custom_domain": true }],
+  "observability": { "enabled": true }
+}

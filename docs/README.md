@@ -30,7 +30,7 @@
 | 目录 | 内容 | 本阶段状态 |
 | --- | --- | --- |
 | [product/](product/README.md) | 产品目标、当前范围、兼容边界与非目标 | 当前范围 / 后续 Planned |
-| [guides/](guides/README.md) | 安装、账号接入、使用与已知限制（英文为主，`zh-CN/` 为中文页）；未来官方文档站的构建源 | 当前用户指南 |
+| [guides/](guides/README.md) | 用户指南，`zh-CN/` 与 `en/` 一一对应，中文为主；官网文档的构建源。两处旧 `README.md` 待新指南写完后移除 | 重写中 |
 | [architecture/](architecture/README.md) | 当前包边界与后续数据、流程设计 | 部分 Implemented |
 | [contracts/](contracts/README.md) | 当前桌面 IPC 与本地 MCP 契约；后续 HTTP 设计 | 部分 Implemented / 接口未冻结 |
 | [ai-runtime/](ai-runtime/README.md) | 模型适配、运行生命周期和权限 | Initial draft |
@@ -39,7 +39,7 @@
 | [roadmap/](roadmap/README.md) | 已有能力、桌面发布准备与后续工作 | 部分 Implemented / 后续 Planned |
 | [reference/](reference/README.md) | 外部调研、接入评估与设计参考资料 | Reference |
 
-下载入口放在根 README，安装、账号接入、MCP 配置和已知限制由 `guides/` 维护，并与实际行为同步。`guides/` 是未来官方文档站的构建源：站点构建时直接读取该目录的 Markdown，不另行维护副本，因此其中只放面向用户的稳定说明，并保证页面单独渲染时链接与图片仍然有效。站点结构与构建方式尚未确定。
+下载入口放在根 README，安装、账号接入、MCP 配置和已知限制由 `guides/` 维护，并与实际行为同步。`guides/` 是官网文档的构建源：[`website/`](../website/README.md) 构建时直接读取 `guides/zh-CN/` 与 `guides/en/` 的 Markdown，不另行维护副本，因此其中只放面向用户的稳定说明。每页一个主题，开头用 frontmatter 写 `title` 与 `description`，文件名用英文短词且两种语言相同；只链接指南内部页面或外部网址，不链接仓库里的开发文档；新增对外连接时同步更新隐私页。
 
 ## 状态与维护规则
 

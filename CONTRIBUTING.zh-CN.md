@@ -18,7 +18,7 @@
 - Rust 内部使用 `snake_case`，跨边界 JSON 使用 `camelCase`；结构化错误和权限在核心服务统一处理。
 - 凭证、邮箱正文、真实附件、模型提示词原文和本地连接配置不得进入提交、日志或测试快照。测试邮件使用合成数据。
 - 涉及同步、发送、HTML、权限和迁移的改动，应包含故障路径验证；普通文档排版修改无需新增测试。
-- `README.md` 与 `README.zh-CN.md` 必须同时更新，保持章节结构一致；`CONTRIBUTING`、`SECURITY`、`CODE_OF_CONDUCT` 与用户指南同样规则，以英文版为准。
+- `README.md` 与 `README.zh-CN.md` 必须同时更新，保持章节结构一致；`CONTRIBUTING`、`SECURITY`、`CODE_OF_CONDUCT` 同样规则，以英文版为准。用户指南在 `docs/guides/zh-CN/` 与 `docs/guides/en/` 中页面一一对应，以中文版为准。
 - 提交消息使用 Conventional Commits，例如 `docs(architecture): define mailbox sync lifecycle`。
 - 用户可见的改动在 PR 里往 `CHANGELOG.md` 的 `[Unreleased]` 下补一行，中英文写在同一行。数据库升级和表结构细节记在[数据库迁移文档](docs/architecture/database-migrations.md)。升级或回退需要用户操作时，同步更新用户指南。版本号只通过 `bun run version:bump` 或 `bun run version:set` 修改。发版步骤见[发版流程](docs/development/release.md)。
 

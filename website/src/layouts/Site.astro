@@ -1,0 +1,71 @@
+---
+import '../styles/site.css'
+import logoBlack from '../assets/brand/logo-horizontal-black.svg?url'
+import logoWhite from '../assets/brand/logo-horizontal-white.svg?url'
+import { LOCALES, LOCALE_LABELS, STRINGS, localePath, otherLocale, type Locale } from '../i18n'
+import { setLanguageCookie } from '../lib/locale.mjs'
+
+interface Props {
+  locale: Locale
+  /** The page's path without its language, e.g. `/download/`. */
+  path: string
+  title: string
+  description?: string
+}
+
+const { locale, path, title, description = STRINGS[Astro.props.locale].description } = Astro.props
+const t = STRINGS[locale]
+const other = otherLocale(locale)
+const absolute = (target: string) => new URL(target, Astro.site).href
+const here = absolute(localePath(locale, path))
+const pageTitle = title.includes('MailX') ? title : `${title} · MailX`
+const nav = [
+  { href: localePath(locale, '/download/'), label: t.nav.download, path: '/download/' },
+  { href: localePath(locale, '/docs/'), label: t.nav.docs, path: '/docs/' },
+  { href: localePath(locale, '/changelog/'), label: t.nav.changelog, path: '/changelog/' },
+]
+---
+
+<!doctype html>
+<html lang={locale}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={here} />
+    {LOCALES.map((item) => <link rel="alternate" hreflang={item} href={absolute(localePath(item, path))} />)}
+    <link rel="alternate" hreflang="x-default" href={absolute(path)} />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="sitemap" href="/sitemap-index.xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MailX" />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={here} />
+    <meta property="og:image" content={absolute('/og-image.png')} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script is:inline set:html={setLanguageCookie} />
+  </head>
+  <body>
+    <header class="site-header wrap">
+      <a class="logo" href={localePath(locale, '/')} aria-label="MailX">
+        <img class="only-light" src={logoBlack} alt="" height="30" />
+        <img class="only-dark" src={logoWhite} alt="" height="30" />
+      </a>
+      <nav>
+        {nav.map((item) => <a href={item.href} aria-current={item.path === path ? 'page' : undefined}>{item.label}</a>)}
+        <a href="https://github.com/GuqierMcl/MailX">{t.nav.github}</a>
+        <a href={localePath(other, path)} hreflang={other} lang={other}>{LOCALE_LABELS[other]}</a>
+      </nav>
+    </header>
+    <main><slot /></main>
+    <footer class="site-footer wrap">
+      <span>© MailX · {t.footer.license}</span>
+      <a class="push" href={localePath(locale, '/docs/privacy/')}>{t.footer.privacy}</a>
+      <a href="https://github.com/GuqierMcl/MailX">GitHub</a>
+    </footer>
+  </body>
+</html>

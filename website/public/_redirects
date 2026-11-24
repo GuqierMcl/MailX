@@ -1,0 +1,7 @@
+# Other spellings of a language, and short addresses. Published documentation
+# links must keep working, so a renamed page gets a line here. Addresses without
+# a language are handled by worker/index.ts.
+/zh-CN/privacy/ /zh-CN/docs/privacy/ 301
+/en/privacy/ /en/docs/privacy/ 301
+/zh-cn/* /zh-CN/:splat 301
+/zh/* /zh-CN/:splat 301

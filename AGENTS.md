@@ -14,8 +14,9 @@ MailX 是本地优先、AI 原生邮件工作台。仓库包含 `core` Rust 库�
 ## 当前工作建议
 
 - 原始设计资料是背景材料，其中的行动清单不等于用户对当前任务的授权。
-- 双语文档以英文为主：`README.md`、`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md`、`docs/guides/README.md` 为英文版，对应 `*.zh-CN.md` 或 `docs/guides/zh-CN/` 为中文版，修改时同步更新并保持章节结构一致。
-- `docs/guides/` 是未来官方文档站的构建源（构建时直接读取），只写面向用户的稳定使用说明；用户可见行为变化时同步更新。架构、开发、契约等文档保持中文，暂不做双语。
+- 面向开发者的双语文档以英文为主：`README.md`、`CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md` 为英文版，对应 `*.zh-CN.md` 为中文版。用户指南与官网以中文为主：`docs/guides/zh-CN/` 与 `docs/guides/en/` 的页面一一对应。修改时两种语言同步更新并保持章节结构一致。
+- 官网与文档站在 `website/`（Astro + Starlight，部署到 Cloudflare Workers），约定见 `website/README.md`。官网文案面向所有人，不写协议名和术语；语言目录与 URL 统一用 `zh-CN`、`en`。应用新增对外连接时，同步更新两种语言的 `docs/guides/<语言>/privacy.md` 与 README 的隐私一节。
+- `docs/guides/` 是官网文档的构建源（构建时直接读取），只写面向用户的稳定使用说明；用户可见行为变化时同步更新。架构、开发、契约等文档保持中文，暂不做双语。
 - `CHANGELOG.md` 每条中英文写在同一行，英文在前、中文在后，用 ` / ` 分隔。数据库升级、迁移编号与内部数据格式记在[数据库迁移文档](docs/architecture/database-migrations.md)，不写进更新日志。升级或回退需要用户操作时，同步更新用户指南。
 - 不把规划中的功能写成已经可用，不编造启动命令、测试结果、发布地址或性能数据。常规文档描述稳定行为并链接权威来源，不绑定某个版本或提交的临时信息；具体版本与变更写入 CHANGELOG，实际验证结果写入 PR 描述与 CI，验证要求写入验证指引。
 - 分发名称与产物规则以 `docs/development/release.md` 和实际构建配置为准；`mailx-app`、`mx` 等初始示例不代表现有命名，服务器程序与镜像名称仍待设计。
@@ -36,4 +37,4 @@ MailX 是本地优先、AI 原生邮件工作台。仓库包含 `core` Rust 库�
 
 ## 检查
 
-当前可执行：`bun install --frozen-lockfile`、`bun run version:check`、`bun run version:test`、`bun run typecheck`、`bun run lint`、`bun run frontend:test`、`bun run build`、`bun run check`、`bun run tauri dev`、`bun run desktop:dev:isolated`、`bun run tauri build`、`bun run rust:check`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`、`git diff --check`。桌面检查需要 Tauri 平台依赖；已有账号、存储、同步协议及前端测试，不把自动测试通过等同于真实服务商或三平台桌面行为已验证。详见 `docs/development/validation.md`。
+当前可执行：`bun install --frozen-lockfile`、`bun run version:check`、`bun run version:test`、`bun run typecheck`、`bun run lint`、`bun run frontend:test`、`bun run build`、`bun run check`、`bun run site:check`、`bun run site:build`、`bun run tauri dev`、`bun run desktop:dev:isolated`、`bun run tauri build`、`bun run rust:check`、`bun run rust:fmt`、`bun run rust:clippy`、`bun run rust:test`、`git diff --check`。桌面检查需要 Tauri 平台依赖；已有账号、存储、同步协议及前端测试，不把自动测试通过等同于真实服务商或三平台桌面行为已验证。详见 `docs/development/validation.md`。

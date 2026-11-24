@@ -1,0 +1,78 @@
+---
+import Site from '../layouts/Site.astro'
+import { STRINGS, type Locale } from '../i18n'
+import { RELEASES_URL, formatSize, latestRelease, type Download, type DownloadId } from '../lib/release'
+
+interface Props { locale: Locale }
+const { locale } = Astro.props
+const t = STRINGS[locale].download
+const release = await latestRelease()
+const find = (id: DownloadId): Download | undefined => release?.downloads[id]
+const groups = [
+  { os: 'macos', name: t.macos.name, note: t.macos.note, extra: t.macos.which, links: [[t.macos.arm, find('macos-arm64')], [t.macos.intel, find('macos-x64')]] },
+  { os: 'windows', name: t.windows.name, note: t.windows.note, extra: null, links: [[t.windows.setup, find('windows-x64')]] },
+  { os: 'linux', name: t.linux.name, note: t.linux.note, extra: null, links: [[t.linux.appimage, find('linux-appimage')], [t.linux.deb, find('linux-deb')], [t.linux.rpm, find('linux-rpm')]] },
+] as { os: string; name: string; note: string; extra: string | null; links: [string, Download | undefined][] }[]
+---
+
+<Site locale={locale} path="/download/" title={t.title}>
+  <div class="page-head wrap">
+    <h1>{t.title}</h1>
+    <p>{t.lead}</p>
+    {release && <p class="version">{t.version(release.version, release.date)} · <a href={release.url}>{t.releaseNotes}</a></p>}
+  </div>
+  <div class="wrap">
+    {release ? (
+      <div class="grid">
+        {groups.map((group) => (
+          <section class="island card" data-os={group.os}>
+            <p class="badge" hidden>{t.recommended}</p>
+            <h2>{group.name}</h2>
+            <p class="muted">{group.note}</p>
+            <div class="links">
+              {group.links.map(([label, download]) => download && (
+                <a class="button" href={download.url}>{label}<span class="muted size">{formatSize(download.size)}</span></a>
+              ))}
+            </div>
+            {group.extra && <p class="muted extra">{group.extra}</p>}
+          </section>
+        ))}
+      </div>
+    ) : (
+      <section class="island card"><p>{t.fallback}</p><a class="button primary" href={`${RELEASES_URL}/latest`}>GitHub</a></section>
+    )}
+    <p class="muted more">
+      {t.updates}
+      <a href={RELEASES_URL}>{t.allReleases}</a>
+      {release?.checksums && <Fragment> · <a href={release.checksums}>{t.checksums}</a></Fragment>}
+    </p>
+  </div>
+</Site>
+
+<script>
+  // Point at the visitor's system; every download stays on the page either way.
+  const agent = navigator.userAgent
+  const mobile = /Android|iPhone|iPad/.test(agent)
+  const os = mobile ? null : /Windows/.test(agent) ? 'windows' : /Mac OS X/.test(agent) ? 'macos' : /Linux/.test(agent) ? 'linux' : null
+  const card = os && document.querySelector<HTMLElement>(`.card[data-os="${os}"]`)
+  if (card) {
+    card.classList.add('recommended')
+    card.querySelector<HTMLElement>('.badge')!.hidden = false
+  }
+</script>
+
+<style>
+  .version { font-size: 1rem; }
+  .grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); align-items: start; }
+  .card { padding: 1.75rem; position: relative; }
+  .card.recommended { box-shadow: 0 0 0 2px var(--mx-accent), var(--mx-shadow); }
+  .badge { position: absolute; top: 1.5rem; right: 1.5rem; margin: 0; font-size: 0.8rem; font-weight: 600; color: var(--mx-accent); }
+  .card h2 { font-size: 1.35rem; }
+  .card p { margin: 0.6rem 0 0; font-size: 0.95rem; }
+  .card .badge { margin: 0; font-size: 0.8rem; }
+  .links { display: grid; gap: 0.6rem; margin-top: 1.25rem; }
+  .links .button { justify-content: space-between; }
+  .size { font-weight: 400; font-size: 0.85rem; }
+  .card .extra { font-size: 0.85rem; margin-top: 1rem; }
+  .more { margin: 2rem 0 0; font-size: 0.95rem; }
+</style>

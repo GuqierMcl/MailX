@@ -7,7 +7,8 @@
   "repository": "https://github.com/GuqierMcl/MailX.git",
   "packageManager": "bun@1.3.12",
   "workspaces": [
-    "frontend"
+    "frontend",
+    "website"
   ],
   "scripts": {
     "dev": "bun run frontend:dev",
@@ -20,6 +21,10 @@
     "build": "bun run frontend:build",
     "lint": "bun run frontend:lint",
     "typecheck": "bun run frontend:typecheck",
+    "site:dev": "bun run --cwd website dev",
+    "site:build": "bun run --cwd website build",
+    "site:check": "bun run --cwd website check",
+    "site:preview": "bun run --cwd website preview",
     "tauri": "bun scripts/tauri.mjs",
     "desktop:dev": "bun run tauri dev",
     "desktop:dev:isolated": "bun scripts/dev-isolated.mjs",
