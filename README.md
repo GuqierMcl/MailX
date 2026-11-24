@@ -4,94 +4,84 @@
 
 # MailX
 
-A fast, lightweight, local-first email client — built for every inbox, with AI at its core.
+The local-first, AI-native email client—lightweight, fast, and built to unite all your inboxes effortlessly.
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/GuqierMcl/MailX?include_prereleases&sort=semver)](https://github.com/GuqierMcl/MailX/releases)
-[![Downloads](https://img.shields.io/github/downloads/GuqierMcl/MailX/total)](https://github.com/GuqierMcl/MailX/releases)
-![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square&labelColor=1f1f22)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/GuqierMcl/MailX?include_prereleases&sort=semver&style=flat-square&labelColor=1f1f22)](https://github.com/GuqierMcl/MailX/releases)
+[![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square&labelColor=1f1f22)](https://github.com/GuqierMcl/MailX/releases)
 
 English | [简体中文](README.zh-CN.md)
 
 </div>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/mailx-dark.webp">
-  <img src="docs/assets/screenshots/mailx-light.webp" alt="MailX main window" width="900">
-</picture>
+<img src="docs/assets/screenshots/en/inbox-light.webp" alt="MailX main window (light)" width="860">
+
+<img src="docs/assets/screenshots/en/inbox-dark.webp" alt="MailX main window (dark)" width="860">
 
 ## Features
 
-- **Fast and lightweight** — A Rust core on the system WebView, with no bundled browser engine. MailX opens straight into your locally cached mail, on Windows, macOS and Linux.
-- **One inbox for every account** — Read all your mailboxes in a single unified inbox. Search headers, previews, cached message bodies and attachment names locally. Read and starred states sync back to the server; archive locally or delete with a short undo window.
-- **Safe reading** — Message bodies download when you open them and render in an isolated sandbox that cannot reach the app. Remote images wait until you allow them.
-- **Translate what you read** — Translate an open message in place, keeping its layout, with no setup (Microsoft Translate by default, using the channel a browser's built-in translator uses, which is unofficial and may stop working) or with a DeepL, Microsoft Translator or Google Cloud Translation key of your own. Nothing is sent until you agree and translate; attachments and passwords are never sent.
-- **Composing in its own window** — A rich-text editor for new mail, replies and forwards, with attachments and pasted screenshots. Drafts are saved locally as you type.
-- **Sending you can trust** — Every message goes through a send queue, with an optional undo delay and retries for eligible failures. A message the server may already have accepted is never sent twice on its own. Local sent copies appear in the Sent folder while waiting for a matching server copy.
-- **Per-account network routing** — Each account can connect directly or through its own SOCKS5 or HTTP proxy. If the proxy fails, MailX stops rather than quietly connecting without it.
-- **At home on your desktop** — IMAP IDLE for prompt inbox updates, new-mail notifications, an unread badge on the app icon (macOS and Linux), optional background operation and launch at login, in-app updates, light and dark themes, English and Chinese.
-- **Connect your AI tools** — An optional local MCP server lets compatible clients search and read mail, organize messages, manage drafts and attachments, and send mail. Connect a supported client or copy its configuration from Settings → MCP; MailX must be running.
+- **Every account, one inbox** — Add as many mailboxes as you like and read them together. Gmail, iCloud, Outlook, Microsoft 365, self-hosted Exchange, QQ Mail and 163 work out of the box; any other server that speaks IMAP and SMTP can be added by entering your settings.
+- **Local first** — Mail, drafts and attachments live on your own computer, so the app opens straight into what it already has. No MailX account, no cloud relay, no telemetry, and search runs entirely on this machine.
+- **AI native** — The built-in assistant works on your mail directly: it finds what needs a reply across every account, drafts answers and tidies the inbox. It shows what it did, cites the messages it used, and asks before it changes anything. If you'd rather use your own tools, connect them through the local MCP server.
+- **Fast and light** — A Rust core on the system WebView, with no bundled browser engine. MailX opens into locally cached mail without waiting on the network.
+- **Safe reading** — Message bodies render in an isolated sandbox that cannot reach the app, and remote images wait until you allow them.
+- **Writing and sending you can trust** — A separate composer window with rich text, attachments and pasted screenshots, and drafts saved as you type. Every message goes through a send queue with an optional undo, retries for eligible failures, and no automatic resend of a message the server may already have accepted.
+- **Translate in place** — Translate the message you are reading without disturbing its layout, with no setup or with a DeepL, Microsoft or Google key of your own. Nothing is sent until you agree.
+- **At home on your desktop** — IMAP IDLE for prompt inbox updates, new-mail notifications and an unread badge on the app icon, plus optional background operation, launch at login, in-app updates, light and dark themes, and an English and Chinese interface.
+
+## Screenshots
+
+**Reading**
+
+| Light | Dark |
+| :---: | :---: |
+| <img src="docs/assets/screenshots/en/reading-light.webp" alt="Reading a message (light)" width="430"> | <img src="docs/assets/screenshots/en/reading-dark.webp" alt="Reading a message (dark)" width="430"> |
+
+**Now**
+
+| Light | Dark |
+| :---: | :---: |
+| <img src="docs/assets/screenshots/en/now-light.webp" alt="The Now page (light)" width="430"> | <img src="docs/assets/screenshots/en/now-dark.webp" alt="The Now page (dark)" width="430"> |
+
+**Assistant conversation**
+
+| Light | Dark |
+| :---: | :---: |
+| <img src="docs/assets/screenshots/en/chat-light.webp" alt="An assistant conversation (light)" width="430"> | <img src="docs/assets/screenshots/en/chat-dark.webp" alt="An assistant conversation (dark)" width="430"> |
+
+**Composing, with AI rewriting**
+
+| Light | Dark |
+| :---: | :---: |
+| <img src="docs/assets/screenshots/en/compose-light.webp" alt="The composer window (light)" width="430"> | <img src="docs/assets/screenshots/en/compose-dark.webp" alt="The composer window (dark)" width="430"> |
 
 ## Supported Mailboxes
 
-MailX includes dedicated setup entries for these services. For most of them, pick one, enter your address and the password, authorization code or app-specific password your provider issues for mail clients, and the server settings are filled in for you. Outlook and Microsoft 365 sign in through your browser instead.
+These services have been tested for compatibility and for sending and receiving. Pick one, enter your address and the password, authorization code or app-specific password your provider issues for mail clients, and the server settings are filled in for you; Outlook and Microsoft 365 sign in through your browser instead.
 
-| <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="32"> | <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud Mail" height="32"> | <img src="frontend/src/assets/providers/outlook.svg" alt="Outlook" height="32"> | <img src="frontend/src/assets/providers/microsoft.svg" alt="Microsoft 365" height="32"> | <img src="frontend/src/assets/providers/exchange.png" alt="Microsoft Exchange" height="32"> | <img src="frontend/src/assets/providers/feishu.png" alt="Feishu" height="32"> | <img src="frontend/src/assets/providers/lark.png" alt="Lark" height="32"> | <img src="frontend/src/assets/providers/qqmail.png" alt="QQ Mail" height="32"> |
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| Gmail | iCloud Mail | Outlook | Microsoft 365 | Exchange (self-hosted) | [Feishu Mail (China)](docs/guides/README.md#feishu-mail-china) | [Lark Mail (International)](docs/guides/README.md#lark-mail-international) | QQ Mail |
-| <img src="frontend/src/assets/providers/netease-163.png" alt="NetEase 163 Mail" height="32"> | <img src="frontend/src/assets/providers/netease-126.png" alt="NetEase 126 Mail" height="32"> | <img src="frontend/src/assets/providers/netease-yeah.png" alt="NetEase Yeah Mail" height="32"> | <img src="frontend/src/assets/providers/mail-139.png" alt="139 Mail" height="32"> | <img src="frontend/src/assets/providers/sina-mail.jpg" alt="Sina Free Mail" height="32"> |  |  |  |
-| 163 Mail | 126 Mail | Yeah Mail | 139 Mail | [Sina Free Mail](docs/guides/README.md#sina-free-mail) |  |  |  |
+<p align="center">
+  <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="28">
+  <img src="frontend/src/assets/providers/icloud-mail.png" alt="iCloud Mail" height="28">
+  <img src="frontend/src/assets/providers/outlook.svg" alt="Outlook" height="28">
+  <img src="frontend/src/assets/providers/microsoft.svg" alt="Microsoft 365" height="28">
+  <img src="frontend/src/assets/providers/exchange.png" alt="Microsoft Exchange" height="28">
+  <img src="frontend/src/assets/providers/qqmail.png" alt="QQ Mail" height="28">
+  <img src="frontend/src/assets/providers/netease-163.png" alt="NetEase 163 Mail" height="28">
+  <img src="frontend/src/assets/providers/netease-126.png" alt="NetEase 126 Mail" height="28">
+  <img src="frontend/src/assets/providers/netease-yeah.png" alt="NetEase Yeah Mail" height="28">
+  <img src="frontend/src/assets/providers/mail-139.png" alt="139 Mail" height="28">
+  <img src="frontend/src/assets/providers/sina-mail.jpg" alt="Sina Free Mail" height="28">
+  <img src="frontend/src/assets/providers/feishu.png" alt="Feishu Mail" height="28">
+  <img src="frontend/src/assets/providers/lark.png" alt="Lark Mail" height="28">
+</p>
 
-Choose Feishu Mail or Lark Mail according to the service that hosts your organization's mailbox, not the domain in your email address.
+Gmail · iCloud Mail · Outlook · Microsoft 365 · Exchange (self-hosted) · QQ Mail · 163 Mail · 126 Mail · Yeah Mail · 139 Mail · Sina Free Mail · Feishu Mail · Lark Mail
 
-Gmail accepts `@gmail.com` and `@googlemail.com` addresses with a Google app password, which needs 2-Step Verification. See the [account setup guide](docs/guides/README.md#gmail) for how to create one and when it isn't available.
-
-iCloud Mail accepts `@icloud.com`, `@me.com` and `@mac.com` addresses with an Apple app-specific password. See the [account setup guide](docs/guides/README.md#icloud-mail) for the requirements and username settings.
-
-Outlook (personal Outlook.com, Hotmail and Live addresses) and Microsoft 365 (work or school mail) sign in through the Microsoft sign-in page in your browser, so you never enter a password in MailX. Outlook.com needs IMAP turned on in Outlook settings; work or school accounts may need an administrator to approve MailX or allow IMAP and SMTP. For company-hosted servers, choose the separate Exchange (self-hosted) entry to discover an EWS endpoint or enter its HTTPS URL manually. See the [account setup guide](docs/guides/README.md#microsoft-outlook--microsoft-365) for details.
-
-Self-hosted Exchange uses EWS over HTTPS with NTLMv2, with automatic discovery and manual setup; it uses the same local inbox, drafts and outbox. Deployment and platform validation is described in the [validation guidance](docs/development/validation.md#exchange-ews-validation); results land in the PR that ships them.
-
-Any other mailbox that offers IMAP and SMTP with password sign-in can be added by entering its servers manually. Browser sign-in for Gmail (without an app password) is planned; password and app-password compatibility depends on the provider and account settings. Compatibility with real providers has only been partly verified so far — if your mailbox misbehaves, please [open an issue](https://github.com/GuqierMcl/MailX/issues).
+Mailboxes that are not on this list but support IMAP and SMTP can still be added by entering their server settings by hand. Setup details and requirements for each service are in the [account setup guide](docs/guides/README.md).
 
 <sub>Provider names and logos are trademarks of their respective owners and are shown only to identify the service.</sub>
 
-## Privacy & Data
-
-- **Your mail is stored locally.** Headers, downloaded messages, drafts and attachments are kept in a local database and files. There is no MailX account, cloud relay or telemetry; the mail cache itself is not encrypted by MailX.
-- **Passwords live in the system keychain** — macOS Keychain, Windows Credential Manager or the Secret Service on Linux — and are never shown back in the app.
-- **Connections you control.** MailX connects to your mail servers (through the account's proxy if set) and checks GitHub for updates, which you can turn off. Enabling avatar lookups or allowing remote images also makes requests to the relevant image services. Avatar lookups are off by default, and remote images ask first.
-- **Mail you send carries its own images.** Pictures inserted into the body travel inside the message; displaying them does not require downloading from an external image server.
-- **Translation sends text only when you ask.** After you agree, translating a message sends its subject and text to the service you chose (Microsoft or Google for the no-setup services), and nothing else; a key of your own stays in the system keychain, and an optional proxy is used for translation only. Saved translations stay on this computer.
-- **MCP is off by default.** Enabling it grants connected local clients access to all accounts, draft management, local file attachments, attachment export and direct sending without per-message confirmation. A client may forward mail content to its AI provider. Disable MCP in Settings to revoke access; MCP cannot delete mail.
-
-## Roadmap
-
-| Module | Status |
-| --- | --- |
-| Desktop app: receiving, reading, local search, multiple accounts | ✅ Available |
-| Desktop app: composing and sending | ✅ Available |
-| Desktop app: showing sent copies in the Sent folder | ✅ Implemented |
-| Full-text search of local content | ✅ Implemented |
-| Browser sign-in: Outlook, Microsoft 365 | ✅ Implemented |
-| Browser sign-in: Gmail | 🗓️ Planned |
-| Built-in AI assistant: Now summary and chat | ✅ Implemented |
-| Message translation, with no setup or with a key of your own | ✅ Implemented (automated tests only) |
-| Local MCP server for external AI clients | ✅ Implemented |
-| Server: self-hosted web version | 🗓️ Planned |
-
-What changed in each release is in the [CHANGELOG](CHANGELOG.md); the detailed roadmap is in [docs/roadmap/README.md](docs/roadmap/README.md) (written in Chinese).
-
-## Known Limitations
-
-- MailX supports IMAP and SMTP accounts with a password, authorization code or app-specific password, and browser sign-in for Outlook and Microsoft 365. Browser sign-in for Gmail and other providers and the self-hosted web version are planned.
-- Initial synchronization starts with a fixed 30-day window and fills up to the newest 1,000 messages per folder per round, retaining previously cached messages. Search covers local content; unopened message bodies may be missing from results. Attachments are searched by name, not by their contents.
-- Archive is local to this computer. Moving messages to arbitrary server folders and synchronizing local drafts to the server are not implemented. Sent copies do not upload to the server.
-- Builds are available for Windows, macOS and Linux, but feature and provider coverage differs. See the [validation guidance](docs/development/validation.md) for what is verified and how, and each release's notes for tested combinations.
-
-## Getting Started
-
-### Download
+## Download
 
 Published builds are on the [Releases](https://github.com/GuqierMcl/MailX/releases) page:
 
@@ -125,6 +115,21 @@ bun run check       # run the version, type, lint, test, build and Rust checks
 
 See [docs/development/README.md](docs/development/README.md) for the full list of commands.
 
+## Privacy & Data
+
+- **Your mail is stored locally.** Headers, downloaded messages, drafts and attachments are kept in a local database and files. There is no MailX account, cloud relay or telemetry; the mail cache itself is not encrypted by MailX.
+- **Passwords live in the system keychain** — macOS Keychain, Windows Credential Manager or the Secret Service on Linux — and are never shown back in the app.
+- **Connections you control.** Each account can connect directly or through its own SOCKS5 or HTTP proxy, and if the proxy fails MailX stops rather than quietly connecting without it. MailX connects to your mail servers and checks GitHub for updates, which you can turn off; enabling avatar lookups or allowing remote images also makes requests to the relevant image services. Avatar lookups are off by default, and remote images ask first.
+- **Mail you send carries its own images.** Pictures inserted into the body travel inside the message; displaying them does not require downloading from an external image server.
+- **Translation sends text only when you ask.** After you agree, translating a message sends its subject and text to the service you chose, and nothing else; a key of your own stays in the system keychain, and an optional proxy is used for translation only. Saved translations stay on this computer.
+- **MCP is off by default.** Enabling it grants connected local clients access to all accounts, draft management, local file attachments, attachment export and direct sending without per-message confirmation. A client may forward mail content to its AI provider. Disable MCP in Settings to revoke access; MCP cannot delete mail.
+
+## Known Limitations
+
+- Archive is local to this computer. Moving messages to arbitrary server folders and synchronizing local drafts to the server are not implemented, and local sent copies do not upload.
+- Initial synchronization starts with a fixed 30-day window and fills up to the newest 1,000 messages per folder per round, retaining previously cached messages. Search covers local content; unopened message bodies may be missing from results, and attachments are searched by name, not by their contents.
+- Browser sign-in for Gmail and other providers, and the self-hosted web version, are still planned.
+
 ## Documentation
 
 Design and development documentation is written in Chinese; the user guide, contributing, security and conduct documents are available in both English and Chinese.
@@ -135,6 +140,7 @@ Design and development documentation is written in Chinese; the user guide, cont
 - [Product scope](docs/product/README.md)
 - [AI design](docs/ai-runtime/README.md)
 - [Development guide](docs/development/README.md)
+- [Roadmap](docs/roadmap/README.md)
 
 ## Contributing
 
