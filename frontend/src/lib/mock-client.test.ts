@@ -347,6 +347,9 @@ describe('showcase seed', () => {
     expect(accounts.map((account) => account.authentication.kind)).toEqual([
       'oauth2', 'password', 'oauth2', 'password', 'password', 'password', 'ewsNtlm', 'password',
     ])
+    // Preset providers show their logo; only the manually configured account needs a colour.
+    expect(accounts.map((account) => account.color))
+      .toEqual([null, null, null, null, null, null, null, '#d97706'])
     expect(accounts.find((account) => account.providerId === 'microsoft-work')).toMatchObject({
       authentication: { kind: 'oauth2', state: 'connected' },
     })

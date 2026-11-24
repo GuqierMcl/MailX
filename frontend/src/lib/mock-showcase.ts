@@ -30,10 +30,11 @@ const ME = {
   [STUDIO]: me('alex@example.net'),
 } as Record<string, MailAddress>
 
-const profile = (displayName: string, color: string) => ({ displayName, color, senderName: null, useProviderIcon: true })
+/** A preset provider shows its logo instead of a colour, so only the generic account sets one. */
+const profile = (displayName: string, color: string | null = null) => ({ displayName, color, senderName: null, useProviderIcon: true })
 const keep = { kind: 'password', mode: 'shared', password: { action: 'keep' } } as const
 
-function imap(id: string, providerId: string | null, name: string, color: string, servers: [string, string, 465 | 587]): AccountConfigInput {
+function imap(id: string, providerId: string | null, name: string, servers: [string, string, 465 | 587], color?: string): AccountConfigInput {
   const username = ME[id].address
   return {
     ...profile(name, color),
@@ -52,16 +53,16 @@ export type ShowcaseAccount =
 
 /** One account per common sign-in kind: Microsoft OAuth, app passwords, authorization codes, Exchange EWS and plain IMAP. */
 const accounts: ShowcaseAccount[] = [
-  { id: WORK, oauth: { providerId: 'microsoft-work', address: ME[WORK].address, profile: profile('Work', '#2563eb') } },
-  { id: PERSONAL, config: imap(PERSONAL, 'gmail', 'Gmail', '#16a34a', ['imap.gmail.com', 'smtp.gmail.com', 465]) },
-  { id: OUTLOOK, oauth: { providerId: 'microsoft-personal', address: ME[OUTLOOK].address, profile: profile('Outlook', '#0891b2') } },
-  { id: ICLOUD, config: imap(ICLOUD, 'icloud', 'iCloud', '#64748b', ['imap.mail.me.com', 'smtp.mail.me.com', 587]) },
-  { id: QQ, config: imap(QQ, 'qq', 'QQ', '#ca8a04', ['imap.qq.com', 'smtp.qq.com', 465]) },
-  { id: NETEASE, config: imap(NETEASE, 'netease163', '163', '#dc2626', ['imap.163.com', 'smtp.163.com', 465]) },
+  { id: WORK, oauth: { providerId: 'microsoft-work', address: ME[WORK].address, profile: profile('Work') } },
+  { id: PERSONAL, config: imap(PERSONAL, 'gmail', 'Gmail', ['imap.gmail.com', 'smtp.gmail.com', 465]) },
+  { id: OUTLOOK, oauth: { providerId: 'microsoft-personal', address: ME[OUTLOOK].address, profile: profile('Outlook') } },
+  { id: ICLOUD, config: imap(ICLOUD, 'icloud', 'iCloud', ['imap.mail.me.com', 'smtp.mail.me.com', 587]) },
+  { id: QQ, config: imap(QQ, 'qq', 'QQ', ['imap.qq.com', 'smtp.qq.com', 465]) },
+  { id: NETEASE, config: imap(NETEASE, 'netease163', '163', ['imap.163.com', 'smtp.163.com', 465]) },
   {
     id: CAMPUS,
     config: {
-      ...profile('University', '#7c3aed'),
+      ...profile('University'),
       emailAddress: ME[CAMPUS].address,
       providerId: 'exchange-self-hosted',
       backend: 'ews',
@@ -70,7 +71,7 @@ const accounts: ShowcaseAccount[] = [
       route: { kind: 'direct' },
     },
   },
-  { id: STUDIO, config: imap(STUDIO, null, 'Studio', '#d97706', ['imap.example.net', 'smtp.example.net', 465]) },
+  { id: STUDIO, config: imap(STUDIO, null, 'Studio', ['imap.example.net', 'smtp.example.net', 465], '#d97706') },
 ]
 
 const customFolders: CustomFolders = {
