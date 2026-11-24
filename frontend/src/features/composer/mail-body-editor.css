@@ -18,7 +18,23 @@
 }
 
 .mail-format-group { display: flex; gap: 2px; flex-shrink: 0; }
-.mail-paragraph-trigger { width: 66px; justify-content: space-between; font-size: 12px; padding: 0 4px; }
+/* The label is localized ("正文", "Message body", "Heading 2"), so the trigger
+   sizes to its text and truncates past a cap instead of overlapping the marks. */
+.mail-paragraph-trigger {
+  width: auto;
+  min-width: 66px;
+  max-width: 8rem;
+  justify-content: space-between;
+  font-size: 12px;
+  padding: 0 4px;
+  gap: 2px;
+}
+.mail-paragraph-trigger > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .mail-format-button[aria-pressed="true"] { background: var(--accent); color: var(--accent-foreground); }
 .mail-format-more { display: none; }
 .mail-body-surface { display: flex; min-height: 0; flex: 1; overflow-y: auto; }
