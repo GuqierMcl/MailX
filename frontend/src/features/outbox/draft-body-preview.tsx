@@ -1,12 +1,11 @@
 import { lazy, Suspense, useState } from 'react'
-import { isTauri } from '@tauri-apps/api/core'
 import type { Draft } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
+import { mockBackend } from '@/lib/dev-mock'
 import { BodySession, BodySkeleton } from '@/features/mail/body-document'
 import { useBodyEnvironment } from '@/features/mail/use-body-environment'
 
-const DevelopmentDraftBody = import.meta.env.DEV && !isTauri()
-  ? lazy(() => import('./development-draft-body')) : null
+const DevelopmentDraftBody = mockBackend ? lazy(() => import('./development-draft-body')) : null
 
 export function DraftBodyPreview({ client, draft, onRefresh }: { client: MailxClient; draft: Draft; onRefresh: () => void }) {
   const { visible, settings, dark } = useBodyEnvironment(client)

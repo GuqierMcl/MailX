@@ -336,10 +336,27 @@ describe('mock drafts and sending', () => {
 })
 
 describe('showcase seed', () => {
-  it('loads fictitious mail that only uses example domains', async () => {
+  it('shows one account for every common sign-in kind', async () => {
     const client = createMockClient({ seed: 'showcase' })
     const accounts = await client.listAccounts()
-    expect(accounts.map((account) => account.displayName)).toEqual(['Work', 'Personal', 'Studio'])
+    expect(accounts.map((account) => account.displayName)).toEqual([
+      'Work', 'Gmail', 'Outlook', 'iCloud', 'QQ', '163', 'University', 'Studio',
+    ])
+    expect(accounts.map((account) => account.providerId))
+      .toEqual(['microsoft-work', 'gmail', 'microsoft-personal', 'icloud', 'qq', 'netease163', 'exchange-self-hosted', null])
+    expect(accounts.map((account) => account.authentication.kind)).toEqual([
+      'oauth2', 'password', 'oauth2', 'password', 'password', 'password', 'ewsNtlm', 'password',
+    ])
+    expect(accounts.find((account) => account.providerId === 'microsoft-work')).toMatchObject({
+      authentication: { kind: 'oauth2', state: 'connected' },
+    })
+    const campus = accounts.find((account) => account.providerId === 'exchange-self-hosted')!
+    expect('ews' in campus && campus.ews).toMatchObject({ url: expect.stringContaining('example.org') })
+  })
+
+  it('loads fictitious mail that only uses example domains or demo mailboxes', async () => {
+    const client = createMockClient({ seed: 'showcase' })
+    const accounts = await client.listAccounts()
     const page = await client.listEmails({ ...emailQuery({ folderRole: 'inbox' }), limit: 200 })
     expect(page.items.length).toBeGreaterThanOrEqual(14)
     expect(page.items.some((item) => item.isStarred)).toBe(true)
@@ -351,7 +368,37 @@ describe('showcase seed', () => {
     for (const detail of await Promise.all(page.items.map((item) => client.getEmail(item.id)))) {
       addresses.push(...detail.to.map((to) => to.address))
     }
-    for (const address of addresses) expect(address).toMatch(/@example\.(com|org|net)$/)
+    // Reserved domains anywhere; on real providers only this demo identity, so no real mailbox is on screen.
+    const demo = /^alex([._]morgan)?[._]demo@(gmail|outlook|icloud|qq)\.com$|^alex_morgan_demo@163\.com$/
+    for (const address of addresses) expect(address).toMatch(new RegExp(`${demo.source}|@example\\.(com|org|net)$`))
+  })
+
+  it('starts the assistant history with chats whose cards open real mail and drafts', async () => {
+    const client = createMockClient({ seed: 'showcase' })
+    const list = await client.assistantListConversations({ limit: 20 })
+    expect(list.items).toHaveLength(4)
+    expect(list.items.map((item) => item.messageCount)).toEqual([2, 1, 1, 1])
+    const newest = await client.assistantGetConversation(list.items[0].id)
+    const turn = (index: number) => {
+      const found = newest.turns[index]
+      if (found.role !== 'assistant') throw new Error(`expected an assistant turn at ${index}`)
+      return found
+    }
+    expect(newest.turns.map((item) => item.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
+    expect(turn(1).reasoning).not.toHaveLength(0)
+    expect(turn(1).tools.map((tool) => tool.name)).toEqual(['mail_search', 'mail_read'])
+    const links = [...turn(1).text.matchAll(/mailx:\/\/email\/([^)\s]+)/g)].map((match) => match[1])
+    expect(links).toHaveLength(4)
+    for (const id of links) expect((await client.getEmail(id)).summary.id).toBe(id)
+    expect(turn(3).tools.map((tool) => tool.name)).toEqual(['draft_reply'])
+    const card = turn(3).tools[0].summary
+    if (card.type !== 'draft') throw new Error('expected a draft card')
+    expect((await client.getDraft(card.draftId)).subject).toBe('Re: 周六羽毛球，场地订好了')
+    const archive = await client.assistantGetConversation(list.items[1].id)
+    const archived = archive.turns[1]
+    if (archived.role !== 'assistant') throw new Error('expected an assistant turn')
+    expect(archived.confirmations).toMatchObject([{ tool: 'mail_archive', outcome: 'approved' }])
+    expect(archived.tools.at(-1)?.summary).toMatchObject({ type: 'changed', count: 2 })
   })
 
   it('leaves the default dataset alone', async () => {

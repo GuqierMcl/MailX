@@ -2,7 +2,7 @@ import { errorDetail } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
-import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
+import { convertFileSrc } from '@tauri-apps/api/core'
 import { ErrorNotice } from '@/components/error-notice'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -10,13 +10,13 @@ import { Delayed } from '@/components/ui/delayed'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { RemoteImagePolicy, RemoteImageStatus } from '@/generated/accounts'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
+import { mockBackend } from '@/lib/dev-mock'
 import { useUpdateSecurity } from '@/features/settings/settings-queries'
 import { cn } from '@/lib/utils'
 import { useBodyEnvironment } from './use-body-environment'
 import { ImageFailures } from './image-failures'
 
-const DevelopmentBody = import.meta.env.DEV && !isTauri()
-  ? lazy(() => import('./development-body')) : null
+const DevelopmentBody = mockBackend ? lazy(() => import('./development-body')) : null
 
 function bodyDocumentUrl(emailId: string, documentToken: string, dark: boolean) {
   const url = new URL(convertFileSrc('', 'mailx-body'))
