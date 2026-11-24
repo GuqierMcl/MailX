@@ -1,0 +1,14 @@
+# Build output and Astro's generated types
+/dist/
+/.astro/
+/.wrangler/
+
+# Copied from branding/ and frontend/public by scripts/sync-assets.mjs; the
+# originals there are the only sources.
+/src/assets/brand/
+/public/favicon.ico
+/public/favicon.svg
+/public/favicon-16x16.png
+/public/favicon-32x32.png
+/public/apple-touch-icon.png
+/public/og-image.png

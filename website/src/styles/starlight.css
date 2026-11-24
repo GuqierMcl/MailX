@@ -1,0 +1,17 @@
+/* Bring the Starlight docs in line with the rest of the site. */
+:root {
+  --sl-font: var(--mx-font);
+  --sl-color-accent-low: oklch(0.92 0.04 258);
+  --sl-color-accent: var(--mx-accent);
+  --sl-color-accent-high: oklch(0.35 0.15 258);
+  --sl-color-bg: var(--mx-island);
+  --sl-color-bg-nav: var(--mx-canvas);
+  --sl-color-bg-sidebar: var(--mx-canvas);
+  --sl-color-hairline: transparent;
+  --sl-color-hairline-light: var(--mx-ring);
+}
+
+:root[data-theme="dark"] {
+  --sl-color-accent-low: oklch(0.27 0.08 258);
+  --sl-color-accent-high: oklch(0.85 0.09 255);
+}

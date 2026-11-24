@@ -1,0 +1,64 @@
+---
+import Screenshot from './Screenshot.astro'
+import Site from '../layouts/Site.astro'
+import { STRINGS, localePath, type Locale } from '../i18n'
+import inboxLightZh from '../../../docs/assets/screenshots/zh-CN/inbox-light.webp'
+import inboxDarkZh from '../../../docs/assets/screenshots/zh-CN/inbox-dark.webp'
+import inboxLightEn from '../../../docs/assets/screenshots/en/inbox-light.webp'
+import inboxDarkEn from '../../../docs/assets/screenshots/en/inbox-dark.webp'
+
+interface Props { locale: Locale }
+const { locale } = Astro.props
+const t = STRINGS[locale]
+const shots = locale === 'zh-CN' ? { light: inboxLightZh, dark: inboxDarkZh } : { light: inboxLightEn, dark: inboxDarkEn }
+const sizes = '(min-width: 1180px) 1120px, calc(100vw - 2.5rem)'
+---
+
+<Site locale={locale} path="/" title={t.home.title}>
+  <section class="hero wrap">
+    <h1>{t.home.headline}</h1>
+    <p class="tagline">{t.home.tagline}</p>
+    <div class="actions">
+      <a class="button primary" href={localePath(locale, '/download/')}>{t.home.download}</a>
+      <a class="button" href={localePath(locale, '/docs/')}>{t.home.docs}</a>
+    </div>
+    <p class="platforms muted">{t.home.platforms}</p>
+    <div class="shot"><Screenshot {...shots} alt={t.home.screenshotAlt} sizes={sizes} eager /></div>
+  </section>
+
+  <section class="features wrap">
+    <h2>{t.home.featuresTitle}</h2>
+    <ul>
+      {t.home.features.map((feature) => (
+        <li class="island">
+          <h3>{feature.title}</h3>
+          <p>{feature.body}</p>
+        </li>
+      ))}
+    </ul>
+  </section>
+
+  <section class="closing wrap">
+    <h2>{t.home.closingTitle}</h2>
+    <p class="muted">{t.home.closingBody}</p>
+    <a class="button primary" href={localePath(locale, '/download/')}>{t.home.download}</a>
+  </section>
+</Site>
+
+<style>
+  .hero { text-align: center; padding-block: 4rem 2rem; }
+  .hero h1 { font-size: clamp(2.25rem, 6vw, 3.75rem); }
+  .tagline { margin: 1rem 0 0; font-size: clamp(1.1rem, 2.5vw, 1.35rem); color: var(--mx-muted); }
+  .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; margin-top: 2rem; }
+  .platforms { margin: 1rem 0 0; font-size: 0.9rem; }
+  .shot { margin-top: 3rem; }
+  .shot :global(img) { width: 100%; border-radius: 16px; }
+  .features { padding-block: 4rem 2rem; }
+  .features h2, .closing h2 { font-size: clamp(1.6rem, 4vw, 2.25rem); text-align: center; }
+  .features ul { list-style: none; margin: 2.5rem 0 0; padding: 0; display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
+  .features li { padding: 1.75rem; }
+  .features h3 { font-size: 1.15rem; }
+  .features p { margin: 0.6rem 0 0; color: var(--mx-muted); }
+  .closing { text-align: center; padding-block: 4rem 3rem; }
+  .closing p { margin: 0.75rem 0 1.75rem; }
+</style>

@@ -18,7 +18,7 @@ MailX has a Rust mail core, a React + TypeScript + Vite + shadcn frontend, a Tau
 - Rust uses `snake_case` internally and JSON crossing a boundary uses `camelCase`; structured errors and permissions are handled once in the core service.
 - Never commit credentials, message bodies, real attachments, raw model prompts or local connection configuration, and keep them out of logs and test snapshots. Test mail uses synthetic data.
 - Changes to sync, sending, HTML, permissions or migrations need failure-path verification; ordinary documentation edits do not need new tests.
-- `README.md` and `README.zh-CN.md` are updated together and keep the same section structure. `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` and the user guide follow the same rule, with English as the primary language.
+- `README.md` and `README.zh-CN.md` are updated together and keep the same section structure. `CONTRIBUTING.md`, `SECURITY.md` and `CODE_OF_CONDUCT.md` follow the same rule, with English as the primary language. The user guide keeps matching pages in `docs/guides/zh-CN/` and `docs/guides/en/`, with Chinese as the primary language.
 - Commit messages follow Conventional Commits, for example `docs(architecture): define mailbox sync lifecycle`.
 - Add one line in English and Chinese to `[Unreleased]` in `CHANGELOG.md` for each user-facing change. Keep database upgrades and schema details in the [database migration documentation](docs/architecture/database-migrations.md). Put any steps users need to take when upgrading or rolling back in the user guide. Bump versions only through `bun run version:bump` or `bun run version:set`. See the [release process](docs/development/release.md).
 
