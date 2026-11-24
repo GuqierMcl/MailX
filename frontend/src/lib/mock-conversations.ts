@@ -22,6 +22,13 @@ export type MockConversationsDeps = {
   /** Ids the seeded replies can point to; without them the seeds have no cards. */
   firstEmail?: () => { id: string } | null
   firstFolder?: () => { id: string } | null
+  /** Replaces the default past conversations. */
+  chats?: (zh: boolean) => SeedChat[]
+}
+
+export type SeedChat = {
+  minutesAgo: number
+  turns: { user: string; text: string; tools?: ChatTurnTool[]; reasoning?: ChatTurnReasoning[]; confirmations?: ChatTurnConfirmation[] }[]
 }
 
 type Stored = { id: string; title: string; createdAt: string; updatedAt: string; turns: ChatTurn[] }
@@ -63,6 +70,24 @@ export function createMockConversations(deps: MockConversationsDeps) {
   function seed() {
     if (seeded) return
     seeded = true
+    if (deps.chats) {
+      for (const chat of deps.chats(zh())) {
+        const turns = chat.turns.flatMap((turn, index): ChatTurn[] => {
+          const at = ago(chat.minutesAgo + (chat.turns.length - 1 - index) * 2)
+          return [
+            { role: 'user', text: turn.user, at },
+            {
+              role: 'assistant', text: turn.text, tools: turn.tools ?? [], reasoning: turn.reasoning ?? [],
+              confirmations: turn.confirmations ?? [], state: 'completed', finishedReason: 'stop', error: null, at,
+            },
+          ]
+        })
+        const at = ago(chat.minutesAgo)
+        store.push({ id: crypto.randomUUID(), title: title(chat.turns[0].user), createdAt: turns[0].at, updatedAt: at, turns })
+      }
+      newestFirst()
+      return
+    }
     const email = deps.firstEmail?.()?.id
     const folder = deps.firstFolder?.()?.id
     const card = email ? `\n\n[${zh() ? '账单提醒' : 'Billing reminder'}](mailx://email/${email})\n\n` : '\n\n'

@@ -1,34 +1,78 @@
-import type { AccountConfigInput, MailAddress } from '@/generated/accounts'
+import type { AccountConfigInput, ChatTurnTool, MailAddress } from '@/generated/accounts'
 import type { CustomFolders, Seed } from '@/lib/mock-client'
+import type { SeedChat } from '@/lib/mock-conversations'
 
 /**
- * Fictitious data for README screenshots in the browser preview (`?seed=showcase`).
- * Every person, service and address is invented and uses reserved example domains.
+ * Fictitious data for screenshots (`?seed=showcase`, or `VITE_MAILX_SEED=showcase` in the desktop dev build).
+ * People, services and organizations are invented and use reserved example domains; mailbox addresses on
+ * real providers use obvious demo names so the provider icons and sign-in kinds look like the real thing.
  * The bodies are plain text so the reader needs no HTML document.
  */
 
 const WORK = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const PERSONAL = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const STUDIO = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+const OUTLOOK = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
+const ICLOUD = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+const QQ = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+const NETEASE = '16316316-3163-4163-8163-163163163163'
+const CAMPUS = '0e0e0e0e-0e0e-4e0e-8e0e-0e0e0e0e0e0e'
 
-const ME_WORK: MailAddress = { name: 'Alex Morgan', address: 'alex.morgan@example.com' }
-const ME_PERSONAL: MailAddress = { name: 'Alex Morgan', address: 'alex@example.org' }
-const ME_STUDIO: MailAddress = { name: 'Alex Morgan', address: 'alex@example.net' }
+const me = (address: string): MailAddress => ({ name: 'Alex Morgan', address })
+const ME = {
+  [WORK]: me('alex.morgan@example.com'),
+  [PERSONAL]: me('alex.morgan.demo@gmail.com'),
+  [OUTLOOK]: me('alex.morgan.demo@outlook.com'),
+  [ICLOUD]: me('alex.morgan.demo@icloud.com'),
+  [QQ]: me('alex.morgan.demo@qq.com'),
+  [NETEASE]: me('alex_morgan_demo@163.com'),
+  [CAMPUS]: me('alex.morgan@example.org'),
+  [STUDIO]: me('alex@example.net'),
+} as Record<string, MailAddress>
 
-function config(displayName: string, color: string, address: string, domain: string): AccountConfigInput {
+/** A preset provider shows its logo instead of a colour, so only the generic account sets one. */
+const profile = (displayName: string, color: string | null = null) => ({ displayName, color, senderName: null, useProviderIcon: true })
+const keep = { kind: 'password', mode: 'shared', password: { action: 'keep' } } as const
+
+function imap(id: string, providerId: string | null, name: string, servers: [string, string, 465 | 587], color?: string): AccountConfigInput {
+  const username = ME[id].address
   return {
-    displayName,
-    useProviderIcon: true,
-    senderName: null,
-    color,
-    emailAddress: address,
-    providerId: null,
-    imap: { host: `imap.${domain}`, port: 993, tls: 'implicit', username: address },
-    smtp: { host: `smtp.${domain}`, port: 465, tls: 'implicit', username: address },
-    authentication: { kind: 'password', mode: 'shared', password: { action: 'keep' } },
+    ...profile(name, color),
+    emailAddress: username,
+    providerId,
+    imap: { host: servers[0], port: 993, tls: 'implicit', username },
+    smtp: { host: servers[1], port: servers[2], tls: servers[2] === 465 ? 'implicit' : 'startTls', username },
+    authentication: keep,
     route: { kind: 'direct' },
   }
 }
+
+export type ShowcaseAccount =
+  | { id: string; config: AccountConfigInput }
+  | { id: string; oauth: { providerId: 'microsoft-personal' | 'microsoft-work'; address: string; profile: ReturnType<typeof profile> } }
+
+/** One account per common sign-in kind: Microsoft OAuth, app passwords, authorization codes, Exchange EWS and plain IMAP. */
+const accounts: ShowcaseAccount[] = [
+  { id: WORK, oauth: { providerId: 'microsoft-work', address: ME[WORK].address, profile: profile('Work') } },
+  { id: PERSONAL, config: imap(PERSONAL, 'gmail', 'Gmail', ['imap.gmail.com', 'smtp.gmail.com', 465]) },
+  { id: OUTLOOK, oauth: { providerId: 'microsoft-personal', address: ME[OUTLOOK].address, profile: profile('Outlook') } },
+  { id: ICLOUD, config: imap(ICLOUD, 'icloud', 'iCloud', ['imap.mail.me.com', 'smtp.mail.me.com', 587]) },
+  { id: QQ, config: imap(QQ, 'qq', 'QQ', ['imap.qq.com', 'smtp.qq.com', 465]) },
+  { id: NETEASE, config: imap(NETEASE, 'netease163', '163', ['imap.163.com', 'smtp.163.com', 465]) },
+  {
+    id: CAMPUS,
+    config: {
+      ...profile('University'),
+      emailAddress: ME[CAMPUS].address,
+      providerId: 'exchange-self-hosted',
+      backend: 'ews',
+      ews: { url: 'https://mail.example.org/EWS/Exchange.asmx', username: ME[CAMPUS].address },
+      authentication: keep,
+      route: { kind: 'direct' },
+    },
+  },
+  { id: STUDIO, config: imap(STUDIO, null, 'Studio', ['imap.example.net', 'smtp.example.net', 465], '#d97706') },
+]
 
 const customFolders: CustomFolders = {
   [WORK]: [
@@ -36,8 +80,20 @@ const customFolders: CustomFolders = {
     ['projects/atlas', 'Atlas', 'projects', true],
   ],
   [PERSONAL]: [['travel', 'Travel', null, true]],
-  [STUDIO]: [],
+  [NETEASE]: [['thesis', '论文', null, true]],
 }
+
+const SUBJECTS = {
+  roadmap: 'Quarterly roadmap: what we need from you',
+  tanaka: '来週の打ち合わせについて',
+  thesis: '论文第三章修改意见',
+  badminton: '周六羽毛球，场地订好了',
+  itinerary: 'Your itinerary: Lisbon → Berlin, November 14',
+  buildPassed: '[atlas-web] Build #482 passed',
+  buildFailed: '[atlas-web] Build #479 failed',
+  maintenance: 'Scheduled maintenance: Saturday 22:00–02:00',
+  photos: "Photos from Grandma's birthday",
+} as const
 
 const seeds: Seed[] = [
   {
@@ -72,9 +128,10 @@ Sara`,
   {
     account: WORK,
     from: { name: 'Build Bot', address: 'build-bot@example.com' },
-    subject: '[atlas-web] Build #482 passed',
+    subject: SUBJECTS.buildPassed,
     text: 'Build #482 on branch main passed in 6 min 12 s.\n\n214 tests ran, 0 failed, 3 skipped.\nArtifacts are available for 14 days.',
     hoursAgo: 1.2,
+    read: true,
   },
   {
     account: WORK,
@@ -83,6 +140,33 @@ Sara`,
     text: 'Hi Alex, I attached the latest frames for the onboarding flow. Please look at the empty states in particular. We will walk through them on Thursday.',
     hoursAgo: 2.5,
     attachments: [['onboarding-review.pdf', 'application/pdf', 2_140_000]],
+  },
+  {
+    account: QQ,
+    from: { name: '王磊', address: 'wang.lei@example.com' },
+    subject: SUBJECTS.badminton,
+    text: '周六上午十点，体育馆 3 号场，订了两个小时。小周和阿杰也来，正好双打。你那边方便的话回我一声，我好把人数报给前台。球我带，你带拍子就行。',
+    hoursAgo: 1.5,
+  },
+  {
+    account: NETEASE,
+    from: { name: '张老师', address: 'zhang.wen@example.org' },
+    folder: 'thesis',
+    subject: SUBJECTS.thesis,
+    text: `Alex 你好：
+
+第三章我看完了，整体结构清楚，实验部分比上一版扎实很多。有三处需要再改一下：
+
+1. 3.2 节的对比实验，基线方法的参数设置要写明来源；
+2. 图 3-4 的纵轴单位缺失，建议和表 3-1 统一；
+3. 小结部分偏长，可以压缩到半页以内。
+
+批注版放在附件里。下周三之前把修改稿发我就可以。
+
+张文`,
+    hoursAgo: 3,
+    starred: true,
+    attachments: [['第三章-批注版.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 412_000]],
   },
   {
     account: PERSONAL,
@@ -94,6 +178,14 @@ Sara`,
     attachments: [['INV-2026-0192.pdf', 'application/pdf', 96_000]],
   },
   {
+    account: ICLOUD,
+    from: { name: 'Emma Morgan', address: 'emma.morgan@example.org' },
+    subject: SUBJECTS.photos,
+    text: 'Here are the photos from Sunday! Grandma loved the cake. The one of everyone on the porch is my favourite — could you print a copy for her?',
+    hoursAgo: 5,
+    attachments: [['porch.jpg', 'image/jpeg', 2_400_000], ['cake.jpg', 'image/jpeg', 1_900_000]],
+  },
+  {
     account: WORK,
     from: { name: 'Amara Okafor', address: 'amara.okafor@example.com' },
     subject: 'Invitation: Q4 planning sync',
@@ -102,10 +194,25 @@ Sara`,
     starred: true,
   },
   {
+    account: OUTLOOK,
+    from: { name: 'Harbor Fitness', address: 'hello@example.com' },
+    subject: 'Booking confirmed: Yoga Flow, Saturday 09:00',
+    text: 'Your spot in Yoga Flow on Saturday at 09:00 is confirmed. Please arrive ten minutes early. You can cancel free of charge up to 12 hours before the class.',
+    hoursAgo: 7,
+    read: true,
+  },
+  {
+    account: CAMPUS,
+    from: { name: 'IT Service Desk', address: 'it-help@example.org' },
+    subject: SUBJECTS.maintenance,
+    text: 'Mail and calendar services will be unavailable on Saturday from 22:00 to 02:00 while we upgrade the servers. Messages sent to you during this time will be delivered afterwards.',
+    hoursAgo: 8,
+  },
+  {
     account: PERSONAL,
     from: { name: 'Skyline Air', address: 'reservations@example.net' },
     folder: 'travel',
-    subject: 'Your itinerary: Lisbon → Berlin, November 14',
+    subject: SUBJECTS.itinerary,
     text: 'Your booking is confirmed. Flight SK 218 departs Lisbon at 07:45 and arrives in Berlin at 12:05. Online check-in opens 24 hours before departure.',
     hoursAgo: 9,
     read: true,
@@ -113,9 +220,17 @@ Sara`,
     attachments: [['itinerary.pdf', 'application/pdf', 134_000]],
   },
   {
+    account: QQ,
+    from: { name: '顺路快递', address: 'notice@example.net' },
+    subject: '您的包裹已到达驿站',
+    text: '您的包裹已到达小区东门驿站，取件码 6-2-1035，请在 3 天内取件。营业时间 08:00–21:00。',
+    hoursAgo: 11,
+    read: true,
+  },
+  {
     account: WORK,
     from: { name: 'Priscilla Hart', address: 'priscilla.hart@example.com' },
-    subject: 'Quarterly roadmap: what we need from you',
+    subject: SUBJECTS.roadmap,
     html: true,
     text: `Hello Alex,
 
@@ -141,7 +256,7 @@ Priscilla`,
   {
     account: PERSONAL,
     from: { name: '田中 ゆき', address: 'tanaka.yuki@example.org' },
-    subject: '来週の打ち合わせについて',
+    subject: SUBJECTS.tanaka,
     html: true,
     text: `アレックスさん
 
@@ -182,6 +297,16 @@ Lena Fischer`,
     hoursAgo: 14,
   },
   {
+    account: CAMPUS,
+    from: { name: 'Prof. Helen Brooks', address: 'helen.brooks@example.org' },
+    subject: 'Seminar slides for Thursday',
+    text: 'Dear all, the slides for Thursday are attached. Please read sections 2 and 3 before we meet; we will spend most of the hour on the open questions at the end.',
+    hoursAgo: 16,
+    read: true,
+    starred: true,
+    attachments: [['seminar-week-9.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 3_600_000]],
+  },
+  {
     account: STUDIO,
     from: { name: 'The Weekly Byte', address: 'newsletter@example.net' },
     subject: 'The Weekly Byte #128: Local-first software, one year on',
@@ -207,12 +332,28 @@ Lena Fischer`,
     attachments: [['renewal-edits.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 58_000]],
   },
   {
+    account: OUTLOOK,
+    from: { name: 'Marco Bianchi', address: 'marco.bianchi@example.net' },
+    subject: 'Long time no see — coffee next week?',
+    text: "I'm in town from Tuesday to Friday for a conference. Any chance you're free for a coffee one of those mornings? It's been far too long.",
+    hoursAgo: 33,
+  },
+  {
     account: STUDIO,
     from: { name: 'Priya Nair', address: 'priya.nair@example.net' },
     subject: 'Logo exploration, round 2',
     text: 'Here are the second round of marks. Version C is my favourite: it holds up at small sizes. Let me know which direction to refine.',
     hoursAgo: 38,
     attachments: [['logo-round-2.png', 'image/png', 820_000]],
+  },
+  {
+    account: NETEASE,
+    from: { name: '城市电力', address: 'bill@example.net' },
+    subject: '您的 10 月电费账单',
+    text: '尊敬的用户：您 10 月的用电量为 186 度，应缴电费 98.40 元，缴费截止日期为 11 月 20 日。电子发票见附件。',
+    hoursAgo: 40,
+    read: true,
+    attachments: [['电子发票-202610.pdf', 'application/pdf', 72_000]],
   },
   {
     account: PERSONAL,
@@ -223,9 +364,17 @@ Lena Fischer`,
     read: true,
   },
   {
+    account: ICLOUD,
+    from: { name: 'Cloud Storage', address: 'billing@example.net' },
+    subject: 'Your storage plan renews on December 2',
+    text: 'Your 200 GB plan renews on December 2 for $2.99. No action is needed. You can change or cancel your plan in your account settings.',
+    hoursAgo: 50,
+    read: true,
+  },
+  {
     account: WORK,
     from: { name: 'Build Bot', address: 'build-bot@example.com' },
-    subject: '[atlas-web] Build #479 failed',
+    subject: SUBJECTS.buildFailed,
     text: 'Build #479 on branch feature/search failed after 4 min 40 s.\n\n2 tests failed: search_index_rebuild, search_cursor_paging.',
     hoursAgo: 52,
     read: true,
@@ -273,13 +422,145 @@ Lena Fischer`,
   },
 ]
 
+/** The AI draft the first saved chat points to. */
+const REPLY_DRAFT = {
+  account: QQ,
+  source: SUBJECTS.badminton,
+  to: { name: '王磊', address: 'wang.lei@example.com' },
+  subject: `Re: ${SUBJECTS.badminton}`,
+  text: '没问题，周六上午十点 3 号场见，我带拍子。要是需要多带一副，提前跟我说一声。',
+}
+
+type ChatRefs = {
+  /** Id of the showcase email with this subject. */
+  email: (subject: string) => string | null
+  /** The AI draft in `REPLY_DRAFT`, made on first use. */
+  draft: () => { id: string; subject: string } | null
+}
+
+/** Saved chats for the assistant history: they lean on the emails above so the cards open real messages. */
+function chats(zh: boolean, refs: ChatRefs): SeedChat[] {
+  const card = (label: string, subject: string) => {
+    const id = refs.email(subject)
+    return id ? `[${label}](mailx://email/${id})` : label
+  }
+  const ids = (...subjects: string[]) => subjects.map(refs.email).filter((id): id is string => id !== null)
+  const tool = (callId: string, name: string, summary: ChatTurnTool['summary'], textOffset = 0): ChatTurnTool =>
+    ({ callId, name, status: 'done', summary, textOffset })
+  const draft = refs.draft()
+
+  const triageAsk = zh ? '我所有邮箱里，今天有哪些需要回复的？' : 'Which emails across my accounts need a reply today?'
+  const triageReply = zh
+    ? `看了 8 个账号今天的未读邮件，有 4 封在等你回复：
+
+1. **路线图确认**（Work · Microsoft 365）— Priscilla 需要你在周五前定三件事：上线语言、保留哪个引导流程、迁移指南由谁负责。
+   ${card('Quarterly roadmap: what we need from you', SUBJECTS.roadmap)}
+2. **论文修改意见**（163）— 张老师提了三处修改，下周三前交修改稿。
+   ${card('论文第三章修改意见', SUBJECTS.thesis)}
+3. **下周的会面时间**（Gmail）— 田中提议周二 15:00 或周三 10:00，邮件是日语写的。
+   ${card('来週の打ち合わせについて', SUBJECTS.tanaka)}
+4. **周六羽毛球**（QQ）— 王磊在等你确认人数。
+   ${card('周六羽毛球，场地订好了', SUBJECTS.badminton)}
+
+另外，University 账号周六晚上 22:00 到次日 02:00 有服务器维护，不用回复，但那段时间收不到新邮件。`
+    : `I looked at today's unread mail in all 8 accounts. Four messages are waiting on you:
+
+1. **Roadmap decisions** (Work · Microsoft 365) — Priscilla needs three answers by Friday: launch languages, which onboarding flow to keep, and who owns the migration guide.
+   ${card('Quarterly roadmap: what we need from you', SUBJECTS.roadmap)}
+2. **Thesis feedback** (163) — three changes to chapter 3, due next Wednesday.
+   ${card('论文第三章修改意见', SUBJECTS.thesis)}
+3. **Meeting time next week** (Gmail) — Tanaka suggests Tuesday 15:00 or Wednesday 10:00. The message is in Japanese.
+   ${card('来週の打ち合わせについて', SUBJECTS.tanaka)}
+4. **Saturday badminton** (QQ) — Wang Lei is waiting to confirm numbers.
+   ${card('周六羽毛球，场地订好了', SUBJECTS.badminton)}
+
+Also: the University account has server maintenance on Saturday from 22:00 to 02:00. No reply needed, but no new mail will arrive during that window.`
+  const draftAsk = zh ? '先帮我回王磊，说周六可以，我带拍子。' : "Reply to Wang Lei first: Saturday works, I'll bring my racket."
+  const draftReply = zh
+    ? '草稿写好了，用的是你的 QQ 账号，可以直接打开修改或发送：'
+    : "Here's the draft, from your QQ account. Open it to edit or send:"
+
+  const archiveAsk = zh ? '把已经看过的构建通知都归档' : 'Archive the build notifications I have already read'
+  const archiveReply = zh
+    ? '找到 2 封已读的构建通知，都在 Work 账号里，已归档。需要的话可以在“已归档”里找回。'
+    : 'Found 2 read build notifications, both in the Work account, and archived them. They are in Archive if you need them.'
+
+  const tripAsk = zh ? '我去柏林的航班几点起飞？' : 'When does my flight to Berlin leave?'
+  const tripReply = zh
+    ? `11 月 14 日，SK 218 航班，**07:45** 从里斯本起飞，12:05 到柏林。起飞前 24 小时开放网上值机。
+
+${card('Your itinerary: Lisbon → Berlin, November 14', SUBJECTS.itinerary)}`
+    : `November 14, flight SK 218. It leaves Lisbon at **07:45** and lands in Berlin at 12:05. Online check-in opens 24 hours before departure.
+
+${card('Your itinerary: Lisbon → Berlin, November 14', SUBJECTS.itinerary)}`
+
+  const photoAsk = zh ? '奶奶生日的照片是谁发的？' : "Who sent the photos from Grandma's birthday?"
+  const photoReply = zh
+    ? `是 Emma 发到你 iCloud 邮箱的，附件里有两张照片。她想让你把门廊那张全家福打印一份给奶奶。
+
+${card("Photos from Grandma's birthday", SUBJECTS.photos)}`
+    : `Emma sent them to your iCloud address, with two photos attached. She'd like you to print the one of everyone on the porch for Grandma.
+
+${card("Photos from Grandma's birthday", SUBJECTS.photos)}`
+
+  return [
+    {
+      minutesAgo: 18,
+      turns: [
+        {
+          user: triageAsk,
+          text: triageReply,
+          tools: [tool('call-1', 'mail_search', { type: 'found', count: 11 }), tool('call-2', 'mail_read', { type: 'read', emailIds: ids(SUBJECTS.roadmap, SUBJECTS.thesis, SUBJECTS.tanaka, SUBJECTS.badminton) })],
+          reasoning: [
+            {
+              text: zh
+                ? '用户要的是今天需要回复的邮件，范围是全部账号。先搜今天的未读，再逐封读正文，判断是不是在等回复。'
+                : 'The user wants today\'s mail that needs a reply, across every account. Search today\'s unread first, then read each one to see whether it is waiting on an answer.',
+              durationMs: 3800, textOffset: 0, toolsBefore: 0,
+            },
+            {
+              text: zh
+                ? '11 封里有 4 封明确在等回复。路线图有周五的截止时间，排第一；维护通知不用回复，但值得提一句。'
+                : 'Four of the eleven clearly expect an answer. The roadmap has a Friday deadline, so it goes first; the maintenance notice needs no reply but is worth a mention.',
+              durationMs: 1600, textOffset: 0, toolsBefore: 2,
+            },
+          ],
+        },
+        {
+          user: draftAsk,
+          text: draftReply,
+          tools: draft ? [tool('call-3', 'draft_reply', { type: 'draft', draftId: draft.id, subject: draft.subject }, draftReply.length)] : [],
+        },
+      ],
+    },
+    {
+      minutesAgo: 60 * 3,
+      turns: [{
+        user: archiveAsk,
+        text: archiveReply,
+        tools: [
+          tool('call-1', 'mail_search', { type: 'found', count: 2 }),
+          tool('call-2', 'mail_archive', { type: 'changed', count: 2, emailIds: ids(SUBJECTS.buildPassed, SUBJECTS.buildFailed), undo: null }),
+        ],
+        confirmations: [{ callId: 'call-2', tool: 'mail_archive', action: 'organize', outcome: 'approved', textOffset: 0 }],
+      }],
+    },
+    {
+      minutesAgo: 60 * 22,
+      turns: [{ user: tripAsk, text: tripReply, tools: [tool('call-1', 'mail_search', { type: 'found', count: 1 })] }],
+    },
+    {
+      minutesAgo: 60 * 46,
+      turns: [{ user: photoAsk, text: photoReply, tools: [tool('call-1', 'mail_search', { type: 'found', count: 1 })] }],
+    },
+  ]
+}
+
 export const SHOWCASE_DATASET = {
-  accounts: [
-    { id: WORK, config: config('Work', '#2563eb', ME_WORK.address, 'example.com') },
-    { id: PERSONAL, config: config('Personal', '#16a34a', ME_PERSONAL.address, 'example.org') },
-    { id: STUDIO, config: config('Studio', '#d97706', ME_STUDIO.address, 'example.net') },
-  ],
+  accounts,
   seeds,
   customFolders,
-  me: { [WORK]: ME_WORK, [PERSONAL]: ME_PERSONAL, [STUDIO]: ME_STUDIO } as Record<string, MailAddress>,
+  me: ME,
+  replyDraft: REPLY_DRAFT,
+  chats,
 }

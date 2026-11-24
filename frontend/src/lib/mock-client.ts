@@ -85,7 +85,7 @@ export type MockClientOptions = {
    * its URL names. Return `null` and the mock makes a blank draft with that id.
    */
   resolveDraft?: (id: string) => Draft | null
-  /** Browser preview only: `showcase` loads the fictitious screenshot dataset. */
+  /** `showcase` loads the fictitious screenshot dataset. */
   seed?: string | null
   /** Delay between the assistant's streamed events. Default 40 ms. */
   assistantStepMs?: number
@@ -193,6 +193,15 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const folder = folders.find((row) => row.role === 'inbox' && row.selectable)
       return folder ? { id: folder.id } : null
     },
+    chats: options.seed === 'showcase'
+      ? (zh) => SHOWCASE_DATASET.chats(zh, {
+        email: (subject) => emails.find((row) => row.summary.subject === subject)?.summary.id ?? null,
+        draft: () => {
+          const draft = showcaseReplyDraft()
+          return draft ? { id: draft.id, subject: draft.subject } : null
+        },
+      })
+      : undefined,
   })
   assistant.onEvent((event) => history.observe(event))
   const removedDrafts = new Set<string>()
@@ -345,6 +354,19 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     if (!accounts.some((row) => row.id === draft.accountId)) draft.accountId = accounts[0]?.id ?? ''
     drafts.set(id, draft)
     return draft
+  }
+  // Showcase only: the AI reply draft the saved chats point to, made the first time a chat asks for it.
+  let replyDraft: Draft | null = null
+  function showcaseReplyDraft() {
+    if (replyDraft) return replyDraft
+    const { account, source, to, subject, text } = SHOWCASE_DATASET.replyDraft
+    const email = emails.find((row) => row.summary.subject === source)
+    if (!email || !accounts.some((row) => row.id === account)) return null
+    replyDraft = newDraft({
+      accountId: account, kind: 'reply', origin: 'ai', sourceEmailId: email.summary.id, to: [to], cc: [], bcc: [],
+      subject, bodyHtml: `<p>${text}</p>`, bodyText: text, inReplyTo: null, references: null,
+    })
+    return replyDraft
   }
   function newDraft(draft: Omit<Draft, 'id' | 'createdAt' | 'updatedAt' | 'revision' | 'attachments'>) {
     const now = new Date().toISOString()
@@ -1887,10 +1909,15 @@ const DEFAULT_DATASET: MockDataset = {
   lazyPreviews: true,
 }
 
-/** Fictitious data for README screenshots, selected with `?seed=showcase`; see `mock-showcase.ts`. */
+/** Fictitious data for README screenshots, selected with `?seed=showcase` (or `VITE_MAILX_SEED=showcase` in the desktop dev build); see `mock-showcase.ts`. */
 function showcaseDataset(): MockDataset {
   return {
-    accounts: SHOWCASE_DATASET.accounts.map(({ id, config }) => accountFromConfig(id, 1, config)),
+    accounts: SHOWCASE_DATASET.accounts.map((account) => 'config' in account
+      ? accountFromConfig(account.id, 1, account.config)
+      : oauthAccountFromSession(account.id, {
+        kind: 'create', providerId: account.oauth.providerId, route: { kind: 'direct' },
+        hint: account.oauth.address, mailbox: account.oauth.address, attempts: 0,
+      }, account.oauth.profile)),
     seeds: SHOWCASE_DATASET.seeds,
     customFolders: SHOWCASE_DATASET.customFolders,
     me: SHOWCASE_DATASET.me,

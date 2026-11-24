@@ -20,6 +20,7 @@ import { isTauri } from '@tauri-apps/api/core'
 import { createDesktopClient, type MailxClient } from '@/lib/mailx-client'
 import { windowRole } from '@/lib/composer-window'
 import { createMockClient, seedPreviewOutbox } from '@/lib/mock-client'
+import { mockBackend, mockSeed } from '@/lib/dev-mock'
 import { createQueryClient } from '@/lib/query-client'
 import { preloadMailBodyEditor } from '@/features/composer/mail-body-editor-loader'
 import { SettingsSync } from '@/i18n/settings-sync'
@@ -30,9 +31,9 @@ import { ApplicationMenuActions, PreferencesMenuActions } from '@/features/setti
 // A plain browser in development gets synthetic data so the UI can be designed without the desktop host.
 // `?composer=<id>` previews a composer window: that tab's own mock has no such draft, so it
 // starts one (blank, first account). "Opening" a composer from the main preview opens such a tab.
-const client = import.meta.env.DEV && !isTauri()
+const client = mockBackend
   ? createMockClient({
-    seed: new URLSearchParams(window.location.search).get('seed'),
+    seed: mockSeed(),
     resolveDraft: () => null,
     onOpenComposer: (draft, fresh) => {
       const params = new URLSearchParams(window.location.search)
@@ -46,7 +47,7 @@ const client = import.meta.env.DEV && !isTauri()
 
 // Browser preview only: `?seed=outbox` fills the mock with a draft and with sends that end failed,
 // unknown and waiting for a retry, so the drafts and outbox views can be looked at.
-if (import.meta.env.DEV && !isTauri() && new URLSearchParams(window.location.search).get('seed') === 'outbox') {
+if (mockBackend && mockSeed() === 'outbox') {
   void seedPreviewOutbox(client)
 }
 
