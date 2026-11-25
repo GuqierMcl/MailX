@@ -1,17 +1,100 @@
-/* Bring the Starlight docs in line with the rest of the site. */
+/* The docs wear the same canvas and glass as the rest of the site. */
 :root {
   --sl-font: var(--mx-font);
   --sl-color-accent-low: oklch(0.92 0.04 258);
   --sl-color-accent: var(--mx-accent);
   --sl-color-accent-high: oklch(0.35 0.15 258);
-  --sl-color-bg: var(--mx-island);
-  --sl-color-bg-nav: var(--mx-canvas);
-  --sl-color-bg-sidebar: var(--mx-canvas);
+  --sl-color-text-accent: var(--mx-accent);
+  --sl-color-bg-nav: transparent;
+  --sl-color-bg-sidebar: transparent;
   --sl-color-hairline: transparent;
+  --sl-color-hairline-shade: transparent;
   --sl-color-hairline-light: var(--mx-ring);
+  --sl-nav-height: 5rem;
+  --sl-text-h1: 2.25rem;
+  --sl-text-h2: 1.5rem;
+  --sl-text-h3: 1.2rem;
 }
 
 :root[data-theme="dark"] {
+  --sl-color-bg: var(--mx-island);
   --sl-color-accent-low: oklch(0.27 0.08 258);
   --sl-color-accent-high: oklch(0.85 0.09 255);
 }
+
+html { background: var(--mx-canvas); }
+body { background: transparent; }
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--mx-backdrop);
+}
+
+/* The floating bar. The glass sits on a pseudo-element: a filter on the header
+   itself would re-anchor the fixed elements inside it. */
+.page > .header { padding-inline: 2rem; padding-block: 12px 16px; border: 0; background: none; }
+.page > .header::before {
+  content: "";
+  position: absolute;
+  inset: 12px 1rem 16px;
+  z-index: -1;
+  border-radius: 18px;
+  background: var(--mx-glass);
+  -webkit-backdrop-filter: var(--mx-glass-blur);
+  backdrop-filter: var(--mx-glass-blur);
+  box-shadow: inset 0 1px 0 var(--mx-glass-edge), 0 0 0 1px var(--mx-glass-ring), var(--mx-shadow);
+  transition: background-color 250ms;
+}
+.scrolled .page > .header::before { background: var(--mx-glass-strong); }
+.site-title img { height: 26px; width: auto; }
+.social-icons { gap: 0.1rem; }
+.social-icons::after { border: 0; }
+button[data-open-modal] { border-radius: 12px; border-color: var(--mx-ring); background: var(--mx-glass); }
+dialog { border-radius: 20px; }
+
+/* Sidebar: a quiet list with one soft selected row. */
+.sidebar-content a { border-radius: 10px; padding: 0.4rem 0.75rem; }
+.sidebar-content a:hover { background: var(--mx-ring); }
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover { color: var(--mx-text); background: var(--mx-glass-strong); box-shadow: 0 0 0 1px var(--mx-glass-ring); }
+
+/* The article is one panel. The canvas behind it is already soft, so it needs
+   a tint but no filter. */
+.main-pane > main {
+  max-width: 56rem;
+  margin: 0.25rem auto 2rem;
+  border-radius: 24px;
+  background: var(--mx-glass-strong);
+  box-shadow: inset 0 1px 0 var(--mx-glass-edge), 0 0 0 1px var(--mx-glass-ring), var(--mx-shadow);
+}
+/* Starlight pushes the text towards the table of contents on wide screens;
+   inside a panel it belongs in the middle. */
+.main-pane { padding-inline: 1rem; }
+.main-pane .content-panel .sl-container { margin-inline: auto; }
+.sl-markdown-content :is(td, th) { border-color: var(--mx-ring); }
+
+@media (max-width: 49.99rem) {
+  .sidebar-pane { background: var(--mx-canvas); }
+  /* Leave room for the fixed menu button at the end of the bar. */
+  .page > .header { padding-inline: 1.75rem 4.75rem; }
+  button.sl-menu-button, [data-theme] button.sl-menu-button { top: 22px; inset-inline-end: 1.5rem; box-shadow: none; color: var(--mx-text); background: var(--mx-ring); }
+  button[data-open-modal] { background: none; }
+  .main-pane { padding-inline: 0.75rem; }
+}
+
+/* "On this page" on narrow screens: a second, smaller glass bar. */
+mobile-starlight-toc > nav {
+  top: calc(var(--sl-nav-height) - 8px);
+  inset-inline: calc(var(--sl-content-inline-start, 0px) + 1rem) 1rem;
+  border: 0;
+  border-radius: 14px;
+  background: var(--mx-glass-strong);
+  -webkit-backdrop-filter: var(--mx-glass-blur);
+  backdrop-filter: var(--mx-glass-blur);
+  box-shadow: inset 0 1px 0 var(--mx-glass-edge), 0 0 0 1px var(--mx-glass-ring);
+}
+mobile-starlight-toc .toggle { border-color: transparent; background: none; }
+mobile-starlight-toc .dropdown { border-radius: 0 0 14px 14px; background: var(--mx-island); }

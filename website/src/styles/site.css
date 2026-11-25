@@ -1,26 +1,54 @@
 @import "./tokens.css";
 
 *, *::before, *::after { box-sizing: border-box; }
-html { color-scheme: light dark; scroll-padding-top: 5rem; }
+html { color-scheme: light dark; scroll-padding-top: 6rem; }
+html[data-theme="light"] { color-scheme: light; }
+html[data-theme="dark"] { color-scheme: dark; }
 body {
   margin: 0;
+  min-height: 100vh;
   background: var(--mx-canvas);
   color: var(--mx-text);
   font-family: var(--mx-font);
   font-size: 16px;
-  line-height: 1.65;
+  line-height: 1.7;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01";
 }
+
+/* The gradient canvas, fixed so glass always has something to blur. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--mx-backdrop);
+}
+
 a { color: inherit; }
 img { max-width: 100%; height: auto; display: block; }
-h1, h2, h3 { line-height: 1.2; letter-spacing: -0.02em; margin: 0; text-wrap: balance; }
-:lang(zh-CN) h1, :lang(zh-CN) h2, :lang(zh-CN) h3 { letter-spacing: 0; }
+h1, h2, h3 { line-height: 1.18; letter-spacing: -0.025em; margin: 0; text-wrap: balance; font-weight: 700; }
+/* Chinese headings break at punctuation and spaces, not inside a word. */
+:lang(zh-CN) :is(h1, h2, h3) { letter-spacing: 0; word-break: keep-all; overflow-wrap: anywhere; }
 code { font-size: 0.9em; background: var(--mx-ring); border-radius: 6px; padding: 0.1em 0.35em; overflow-wrap: anywhere; }
-:focus-visible { outline: 2px solid var(--mx-accent); outline-offset: 3px; border-radius: 8px; }
+:focus-visible { outline: 2px solid var(--mx-accent); outline-offset: 3px; border-radius: 10px; }
 
 .wrap { width: min(1120px, 100% - 2.5rem); margin-inline: auto; }
 .muted { color: var(--mx-muted); }
+.numeric { font-variant-numeric: tabular-nums; }
+
+/* Glass: use sparingly, a few panels per page, never inside a scrolling list. */
+.glass {
+  background: var(--mx-glass);
+  -webkit-backdrop-filter: var(--mx-glass-blur);
+  backdrop-filter: var(--mx-glass-blur);
+  box-shadow: inset 0 1px 0 var(--mx-glass-edge), 0 0 0 1px var(--mx-glass-ring), var(--mx-shadow);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass { background: var(--mx-glass-strong); }
+}
 
 /* An island: solid, rounded, a faint ring and shadow, no dividers inside. */
 .island {
@@ -34,44 +62,101 @@ code { font-size: 0.9em; background: var(--mx-ring); border-radius: 6px; padding
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  min-height: 44px;
-  padding: 0.5rem 1.25rem;
-  border-radius: 12px;
+  min-height: 46px;
+  padding: 0.55rem 1.35rem;
+  border-radius: 14px;
   font-weight: 600;
   text-decoration: none;
-  background: var(--mx-island);
-  box-shadow: 0 0 0 1px var(--mx-ring);
+  background: var(--mx-glass-strong);
+  box-shadow: inset 0 1px 0 var(--mx-glass-edge), 0 0 0 1px var(--mx-glass-ring), 0 1px 2px oklch(0 0 0 / 0.05);
 }
-.button:hover { box-shadow: 0 0 0 1px var(--mx-muted); }
-.button.primary { background: var(--mx-accent); color: var(--mx-accent-text); box-shadow: none; }
-.button.primary:hover { filter: brightness(1.06); }
+.button:hover { background: var(--mx-island); }
+.button.primary {
+  color: var(--mx-accent-text);
+  background: linear-gradient(180deg, var(--mx-accent), var(--mx-accent-strong));
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.25), 0 1px 2px oklch(0 0 0 / 0.1), 0 8px 20px -6px var(--mx-accent);
+}
+.button.primary:hover { filter: brightness(1.07); }
+@media (prefers-reduced-motion: no-preference) {
+  .button:hover { transform: translateY(-1px); }
+}
 
-.site-header { display: flex; align-items: center; gap: 1.5rem; padding-block: 1rem; }
-.site-header .logo { display: flex; margin-right: auto; }
-.site-header .logo img { height: 30px; width: auto; }
-.site-header nav { display: flex; flex-wrap: wrap; gap: 0.25rem; }
-.site-header nav a { padding: 0.5rem 0.75rem; border-radius: 10px; text-decoration: none; font-size: 0.95rem; }
-.site-header nav a:hover, .site-header nav a[aria-current="page"] { background: var(--mx-ring); }
+/* The header is a floating glass bar, like the app's islands over its canvas. */
+.site-header { position: sticky; top: 12px; z-index: 20; margin-top: 12px; }
+.site-header .bar { display: flex; align-items: center; gap: 1rem; padding: 8px 8px 8px 16px; border-radius: 18px; }
+.site-header .logo { display: flex; margin-right: auto; border-radius: 8px; }
+.site-header .logo img { height: 26px; width: auto; }
+.site-header nav { display: flex; align-items: center; gap: 2px; }
+.site-header nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 36px;
+  padding: 0 0.8rem;
+  border-radius: 11px;
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 0.92rem;
+  color: var(--mx-muted);
+}
+.site-header nav a:hover { color: var(--mx-text); background: var(--mx-ring); }
+.site-header nav a[aria-current="page"] { color: var(--mx-text); background: var(--mx-glass-strong); box-shadow: 0 0 0 1px var(--mx-glass-ring); }
+.theme-toggle { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 11px; background: none; color: var(--mx-muted); cursor: pointer; }
+.theme-toggle[hidden] { display: none; }
+.theme-toggle:hover { color: var(--mx-text); background: var(--mx-ring); }
+.theme-toggle svg { width: 17px; height: 17px; }
+.site-header .language svg { width: 15px; height: 15px; }
 
 .only-dark { display: none; }
+[data-theme="dark"] .only-dark { display: block; }
+[data-theme="dark"] .only-light { display: none; }
 @media (prefers-color-scheme: dark) {
-  .only-dark { display: block; }
-  .only-light { display: none; }
+  :root:not([data-theme]) .only-dark { display: block; }
+  :root:not([data-theme]) .only-light { display: none; }
 }
 
-.site-footer { padding-block: 3rem 2.5rem; font-size: 0.9rem; color: var(--mx-muted); display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; }
+.site-footer { padding-block: 4rem 2.5rem; font-size: 0.9rem; color: var(--mx-muted); display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; }
 .site-footer a { text-decoration: none; }
-.site-footer a:hover { text-decoration: underline; }
+.site-footer a:hover { color: var(--mx-text); }
 .site-footer .push { margin-left: auto; }
 
-.page-head { padding-block: 3rem 2rem; }
+.page-head { padding-block: 3.5rem 2rem; }
 .page-head h1 { font-size: clamp(2rem, 5vw, 2.75rem); }
 .page-head p { margin: 0.75rem 0 0; font-size: 1.1rem; color: var(--mx-muted); }
 
 @media (max-width: 640px) {
-  .site-header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .site-header .bar { padding-left: 12px; gap: 0.25rem; }
+  .site-header nav a { padding: 0 0.5rem; font-size: 0.88rem; }
+  .site-header nav .wide { display: none; }
+  /* The changelog stays reachable from the footer. */
+  .site-header nav .roomy { display: none; }
+  .site-header .language span { display: none; }
+}
+/* On the narrowest phones the logo is the way home. */
+@media (max-width: 420px) {
+  .site-header nav .home { display: none; }
+}
+@media (max-width: 640px) {
   .site-footer .push { margin-left: 0; }
 }
+/* Scroll motion (src/lib/motion.mjs). Only applies once the script has run. */
+.motion [data-reveal] {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity 700ms cubic-bezier(0.2, 0.7, 0.2, 1), transform 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition-delay: calc(var(--i, 0) * 70ms);
+}
+.motion [data-reveal].shown { opacity: 1; transform: none; }
+.motion [data-reveal="zoom"] { transform: translateY(28px) scale(0.97); }
+.motion [data-reveal="zoom"].shown { transform: none; }
+.motion .site-header { animation: header-in 600ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes header-in { from { opacity: 0; transform: translateY(-12px); } }
+/* The bar starts narrow; scrolling opens it to the width of the content and
+   makes its glass denser. */
+.site-header .bar { max-width: 860px; margin-inline: auto; transition: max-width 450ms cubic-bezier(0.2, 0.7, 0.2, 1), background-color 250ms; }
+.scrolled .site-header .bar { max-width: 1120px; background: var(--mx-glass-strong); }
+@media print { .motion [data-reveal] { opacity: 1; transform: none; } }
+
 @media (prefers-reduced-motion: no-preference) {
-  .button { transition: box-shadow 150ms, filter 150ms; }
+  .button, .site-header nav a { transition: background-color 150ms, color 150ms, filter 150ms, transform 150ms; }
 }

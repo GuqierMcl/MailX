@@ -1,0 +1,90 @@
+---
+/**
+ * The welcome drawing above the headline: three letters drift in from
+ * different sides and drop into one inbox tray, which then shows an unread
+ * badge. That is MailX in one picture, so it needs no words and works in
+ * every language. Pure SVG and CSS; with reduced motion it rests on a still
+ * frame of the letters gathered above the tray.
+ */
+const letters = [
+  { x: 42, y: 46, r: -14, delay: '0s' },
+  { x: 130, y: 20, r: 0, delay: '0.7s' },
+  { x: 218, y: 50, r: 14, delay: '1.4s' },
+]
+---
+
+<svg class="welcome" viewBox="0 0 260 150" aria-hidden="true" focusable="false">
+  <ellipse class="glow" cx="130" cy="140" rx="64" ry="6" />
+  <path class="tray-back" d="M74 100 L88 80 H172 L186 100" />
+  {letters.map((letter, index) => (
+    <g class="letter" style={`--x:${letter.x}px;--y:${letter.y}px;--r:${letter.r}deg;animation-delay:${letter.delay}`}>
+      <rect x="-22" y="-15" width="44" height="30" rx="5" />
+      <path d="M-19 -11 L0 3 L19 -11" />
+      {index === 1 && <circle class="dot" cx="16" cy="-11" r="3.2" />}
+    </g>
+  ))}
+  <path class="tray-front" d="M70 100 V126 Q70 134 78 134 H182 Q190 134 190 126 V100 H162 L156 110 H104 L98 100 Z" />
+  <g class="badge">
+    <circle cx="188" cy="100" r="10" />
+    <path d="M184.2 100.2 L187 103 L192 97.4" />
+  </g>
+</svg>
+
+<style>
+  .welcome {
+    display: block;
+    width: clamp(180px, 24vw, 236px);
+    height: auto;
+    margin: 0 auto 1.5rem;
+    overflow: visible;
+    fill: none;
+    stroke: var(--mx-line);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .tray-back { opacity: 0.55; }
+  .tray-front { fill: var(--mx-paper); }
+  .letter rect { fill: var(--mx-paper); }
+  .letter .dot { fill: var(--mx-accent); stroke: none; }
+  .glow { fill: var(--mx-accent); stroke: none; opacity: 0.12; }
+
+  /* The still frame: letters fanned out above the tray, one badge. */
+  .letter {
+    transform-box: view-box;
+    transform-origin: 0 0;
+    transform: translate(var(--x), var(--y)) rotate(var(--r));
+  }
+  .badge { transform-box: fill-box; transform-origin: center; }
+  .badge circle { fill: var(--mx-accent); stroke: none; }
+  .badge path { stroke: var(--mx-accent-text); stroke-width: 2.2; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .letter { animation: deliver 6s cubic-bezier(0.45, 0, 0.25, 1) infinite both; }
+    .badge { animation: badge 6s ease-out infinite both; }
+    .glow { animation: glow 6s ease-in-out infinite both; }
+  }
+
+  @keyframes deliver {
+    0% { opacity: 0; transform: translate(var(--x), calc(var(--y) - 6px)) rotate(var(--r)); }
+    8% { opacity: 1; transform: translate(var(--x), var(--y)) rotate(var(--r)); }
+    18% { transform: translate(var(--x), var(--y)) rotate(var(--r)); }
+    34% { transform: translate(130px, 64px) rotate(0deg) scale(0.92); }
+    44% { opacity: 1; transform: translate(130px, 118px) rotate(0deg) scale(0.86); }
+    45%, 100% { opacity: 0; transform: translate(130px, 118px) rotate(0deg) scale(0.86); }
+  }
+
+  @keyframes badge {
+    0%, 67% { opacity: 0; transform: scale(0.2); }
+    71% { opacity: 1; transform: scale(1.15); }
+    75%, 92% { opacity: 1; transform: scale(1); }
+    97%, 100% { opacity: 0; transform: scale(1); }
+  }
+
+  @keyframes glow {
+    0%, 62% { opacity: 0.08; }
+    71% { opacity: 0.32; }
+    90%, 100% { opacity: 0.08; }
+  }
+</style>

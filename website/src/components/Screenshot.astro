@@ -11,14 +11,15 @@ interface Props {
 }
 
 // One <picture> with a media query, so a visitor downloads only the screenshot
-// that matches their system theme.
+// that matches their theme. The query follows the system; the theme script
+// rewrites it when the visitor has chosen (src/lib/theme.mjs).
 const { light, dark, alt, sizes, eager = false } = Astro.props
 const widths = [640, 960, 1280, 2000]
 const [lightImage, darkImage] = await Promise.all([light, dark].map((src) => getImage({ src, format: 'webp', widths, sizes })))
 ---
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset={darkImage.srcSet.attribute} sizes={sizes} width={dark.width} height={dark.height} />
+  <source data-dark media="(prefers-color-scheme: dark)" srcset={darkImage.srcSet.attribute} sizes={sizes} width={dark.width} height={dark.height} />
   <img
     src={lightImage.src}
     srcset={lightImage.srcSet.attribute}
@@ -31,3 +32,4 @@ const [lightImage, darkImage] = await Promise.all([light, dark].map((src) => get
     decoding="async"
   />
 </picture>
+<script is:inline>window.mxTheme?.apply()</script>

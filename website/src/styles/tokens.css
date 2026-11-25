@@ -1,39 +1,90 @@
 /* Colours follow the app's neutral palette (frontend/src/index.css) with one
-   blue accent. The page is the canvas; content sits on islands above it. */
+   blue accent. The page is a soft gradient canvas taken from the screenshots'
+   backdrop; glass panels float above it. */
 :root {
   --mx-font: "Inter Variable", Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei",
     "Noto Sans CJK SC", "Noto Sans SC", system-ui, sans-serif;
-  --mx-canvas: oklch(0.97 0.004 250);
+  --mx-canvas: oklch(0.975 0.006 250);
   --mx-island: oklch(1 0 0);
-  --mx-text: oklch(0.18 0 0);
-  --mx-muted: oklch(0.5 0 0);
-  --mx-ring: oklch(0.18 0 0 / 0.1);
-  --mx-shadow: 0 1px 2px oklch(0 0 0 / 0.05), 0 12px 32px oklch(0 0 0 / 0.06);
+  --mx-text: oklch(0.2 0.01 260);
+  --mx-muted: oklch(0.47 0.015 260);
+  --mx-ring: oklch(0.2 0.02 260 / 0.1);
+  --mx-shadow: 0 1px 2px oklch(0.2 0.02 260 / 0.05), 0 16px 40px oklch(0.2 0.02 260 / 0.08);
   --mx-accent: oklch(0.55 0.2 258);
+  --mx-accent-strong: oklch(0.49 0.21 262);
   --mx-accent-text: oklch(0.99 0 0);
   --mx-radius: 20px;
+
+  /* Glass: a tinted, blurred panel with a light edge on top. */
+  --mx-glass: oklch(1 0 0 / 0.58);
+  --mx-glass-strong: oklch(1 0 0 / 0.78);
+  --mx-glass-edge: oklch(1 0 0 / 0.75);
+  --mx-glass-ring: oklch(0.2 0.02 260 / 0.08);
+  --mx-glass-blur: blur(22px) saturate(170%);
+
+  /* The backdrop: the screenshots' mint, blue and violet, kept faint. */
+  --mx-glow-1: oklch(0.9 0.08 180 / 0.75);
+  --mx-glow-2: oklch(0.86 0.09 245 / 0.55);
+  --mx-glow-3: oklch(0.88 0.08 295 / 0.6);
+  --mx-glow-4: oklch(0.93 0.05 215 / 0.6);
+
+  --mx-backdrop:
+    radial-gradient(42% 38% at 8% 4%, var(--mx-glow-1), transparent 70%),
+    radial-gradient(38% 34% at 92% 8%, var(--mx-glow-3), transparent 70%),
+    radial-gradient(50% 45% at 62% 52%, var(--mx-glow-2), transparent 72%),
+    radial-gradient(45% 40% at 14% 82%, var(--mx-glow-4), transparent 72%);
+
+  /* The welcome drawing. */
+  --mx-line: oklch(0.3 0.02 260 / 0.85);
+  --mx-paper: oklch(1 0 0 / 0.92);
+}
+
+/* Dark values appear twice: for the theme in use (src/lib/theme.mjs), and for a
+   dark system when scripts are off. theme.test.ts keeps them identical. */
+:root[data-theme="dark"] {
+  --mx-canvas: oklch(0.16 0.012 270);
+  --mx-island: oklch(0.21 0.012 270);
+  --mx-text: oklch(0.96 0.005 270);
+  --mx-muted: oklch(0.72 0.015 270);
+  --mx-ring: oklch(1 0 0 / 0.1);
+  --mx-shadow: 0 1px 2px oklch(0 0 0 / 0.4), 0 16px 40px oklch(0 0 0 / 0.35);
+  --mx-accent: oklch(0.72 0.14 255);
+  --mx-accent-strong: oklch(0.78 0.12 255);
+  --mx-accent-text: oklch(0.17 0.02 260);
+  --mx-glass: oklch(0.24 0.015 270 / 0.55);
+  --mx-glass-strong: oklch(0.26 0.015 270 / 0.78);
+  --mx-glass-edge: oklch(1 0 0 / 0.1);
+  --mx-glass-ring: oklch(1 0 0 / 0.08);
+  /* The dark screenshots' peach, rose and violet, dimmed for a dark page. */
+  --mx-glow-1: oklch(0.42 0.09 30 / 0.4);
+  --mx-glow-2: oklch(0.38 0.1 350 / 0.38);
+  --mx-glow-3: oklch(0.4 0.12 295 / 0.45);
+  --mx-glow-4: oklch(0.3 0.07 260 / 0.5);
+  --mx-line: oklch(0.92 0.01 270 / 0.85);
+  --mx-paper: oklch(0.24 0.015 270 / 0.95);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --mx-canvas: oklch(0.16 0.004 250);
-    --mx-island: oklch(0.21 0.004 250);
-    --mx-text: oklch(0.96 0 0);
-    --mx-muted: oklch(0.7 0 0);
+  :root:not([data-theme]) {
+    --mx-canvas: oklch(0.16 0.012 270);
+    --mx-island: oklch(0.21 0.012 270);
+    --mx-text: oklch(0.96 0.005 270);
+    --mx-muted: oklch(0.72 0.015 270);
     --mx-ring: oklch(1 0 0 / 0.1);
-    --mx-shadow: 0 1px 2px oklch(0 0 0 / 0.4), 0 12px 32px oklch(0 0 0 / 0.35);
-    --mx-accent: oklch(0.7 0.15 255);
-    --mx-accent-text: oklch(0.16 0 0);
+    --mx-shadow: 0 1px 2px oklch(0 0 0 / 0.4), 0 16px 40px oklch(0 0 0 / 0.35);
+    --mx-accent: oklch(0.72 0.14 255);
+    --mx-accent-strong: oklch(0.78 0.12 255);
+    --mx-accent-text: oklch(0.17 0.02 260);
+    --mx-glass: oklch(0.24 0.015 270 / 0.55);
+    --mx-glass-strong: oklch(0.26 0.015 270 / 0.78);
+    --mx-glass-edge: oklch(1 0 0 / 0.1);
+    --mx-glass-ring: oklch(1 0 0 / 0.08);
+    /* The dark screenshots' peach, rose and violet, dimmed for a dark page. */
+    --mx-glow-1: oklch(0.42 0.09 30 / 0.4);
+    --mx-glow-2: oklch(0.38 0.1 350 / 0.38);
+    --mx-glow-3: oklch(0.4 0.12 295 / 0.45);
+    --mx-glow-4: oklch(0.3 0.07 260 / 0.5);
+    --mx-line: oklch(0.92 0.01 270 / 0.85);
+    --mx-paper: oklch(0.24 0.015 270 / 0.95);
   }
-}
-
-:root[data-theme="dark"] {
-  --mx-canvas: oklch(0.16 0.004 250);
-  --mx-island: oklch(0.21 0.004 250);
-  --mx-text: oklch(0.96 0 0);
-  --mx-muted: oklch(0.7 0 0);
-  --mx-ring: oklch(1 0 0 / 0.1);
-  --mx-shadow: 0 1px 2px oklch(0 0 0 / 0.4), 0 12px 32px oklch(0 0 0 / 0.35);
-  --mx-accent: oklch(0.7 0.15 255);
-  --mx-accent-text: oklch(0.16 0 0);
 }

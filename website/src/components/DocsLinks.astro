@@ -1,0 +1,19 @@
+---
+/** Replaces Starlight's social icons: the site's own links, so the docs header leads back to the site. */
+import { LOCALES, STRINGS, localePath } from '../i18n'
+
+const locale = LOCALES.find((item) => Astro.url.pathname.startsWith(`/${item}/`)) ?? LOCALES[0]
+const t = STRINGS[locale]
+---
+
+<a class="roomy" href={localePath(locale, '/')}>{t.nav.home}</a>
+<a href={localePath(locale, '/download/')}>{t.nav.download}</a>
+<a class="roomy" href={localePath(locale, '/changelog/')}>{t.nav.changelog}</a>
+<a class="roomy" href="https://github.com/GuqierMcl/MailX" rel="me">{t.nav.github}</a>
+
+<style>
+  a { padding: 0.35rem 0.6rem; border-radius: 10px; font-size: 0.9rem; text-decoration: none; white-space: nowrap; color: var(--mx-muted); }
+  a:hover { color: var(--mx-text); background: var(--mx-ring); }
+  /* Between the phone menu and a full-width bar there is room for one link. */
+  @media (min-width: 50rem) and (max-width: 72rem) { .roomy { display: none; } }
+</style>

@@ -67,10 +67,10 @@ test('every entry in the real changelog has both halves', () => {
   }
 })
 
-test('sectionLabel uses plain words and keeps unknown headings', () => {
-  expect(sectionLabel('🚀 Feature', 'zh-CN')).toBe('新功能')
-  expect(sectionLabel('🩹 Fixed', 'en')).toBe('Fixed')
-  expect(sectionLabel('Something else', 'en')).toBe('Something else')
+test('sectionLabel keeps the emoji, translates the word and keeps unknown headings', () => {
+  expect(sectionLabel('🚀 Feature', 'zh-CN')).toEqual({ emoji: '🚀', label: '新功能' })
+  expect(sectionLabel('🩹 Fixed', 'en')).toEqual({ emoji: '🩹', label: 'Fixed' })
+  expect(sectionLabel('Something else', 'en')).toEqual({ emoji: '', label: 'Something else' })
 })
 
 test('renderInline escapes HTML and only links http(s)', () => {
