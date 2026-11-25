@@ -98,10 +98,16 @@ const SECTION_LABELS: Record<string, Record<Locale, string>> = {
   Changed: { en: 'Changed', 'zh-CN': '变更' },
 }
 
-/** A plain label for a heading such as `🚀 Feature`; unknown headings stay as written. */
-export function sectionLabel(kind: string, locale: Locale): string {
-  const name = kind.replace(/^[^A-Za-z]+/, '').trim()
-  return SECTION_LABELS[name]?.[locale] ?? kind
+/**
+ * A heading such as `🚀 Feature` as `{ emoji: '🚀', label: '新功能' }`: the
+ * emoji is kept from CHANGELOG.md, the word is translated. Unknown headings
+ * keep their own word.
+ */
+export function sectionLabel(kind: string, locale: Locale): { emoji: string; label: string } {
+  const match = kind.match(/^([^A-Za-z]*)(.*)$/)!
+  const emoji = match[1].trim()
+  const name = match[2].trim()
+  return { emoji, label: SECTION_LABELS[name]?.[locale] ?? name }
 }
 
 function escapeHtml(text: string): string {

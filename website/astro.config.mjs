@@ -2,6 +2,7 @@
 import { defineConfig } from 'astro/config'
 import starlight from '@astrojs/starlight'
 import { DEFAULT_LOCALE, setLanguageCookie } from './src/lib/locale.mjs'
+import { motionScript } from './src/lib/motion.mjs'
 import { sidebar } from './src/lib/sidebar.mjs'
 
 export default defineConfig({
@@ -28,10 +29,12 @@ export default defineConfig({
       },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/GuqierMcl/MailX' }],
       sidebar,
+      components: { SocialIcons: './src/components/DocsLinks.astro' },
       customCss: ['./src/styles/tokens.css', './src/styles/starlight.css'],
       head: [
         { tag: 'link', attrs: { rel: 'icon', href: '/favicon.ico', sizes: '32x32' } },
         { tag: 'script', content: setLanguageCookie },
+        { tag: 'script', content: motionScript },
       ],
       // Guide paths are relative to this package (../docs/guides/…); the
       // browser resolves the dot segment, so the link opens docs/guides/….

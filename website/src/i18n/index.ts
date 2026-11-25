@@ -5,6 +5,8 @@ import zhCN, { type Strings } from './zh-CN'
 export { LOCALES, type Locale }
 
 export const LOCALE_LABELS: Record<Locale, string> = { 'zh-CN': '简体中文', en: 'English' }
+/** For the header's language switch, where space is short. */
+export const LOCALE_SHORT: Record<Locale, string> = { 'zh-CN': '中文', en: 'EN' }
 export const STRINGS: Record<Locale, Strings> = { 'zh-CN': zhCN, en }
 
 /** Every page lives under its language: `/zh-CN/download/`, `/en/download/`. */

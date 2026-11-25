@@ -2,46 +2,44 @@
 import changelog from '../../../CHANGELOG.md?raw'
 import Site from '../layouts/Site.astro'
 import { STRINGS, type Locale } from '../i18n'
-import { parseChangelog, renderInline, sectionLabel } from '../lib/changelog'
+import Release from './Release.astro'
+import { parseChangelog } from '../lib/changelog'
 
 interface Props { locale: Locale }
 const { locale } = Astro.props
 const t = STRINGS[locale].changelog
 const releases = parseChangelog(changelog)
+// The newest versions are open; older ones fold away but stay on the page,
+// so search, links to #v0.2.0 and Ctrl+F still find them.
+const OPEN = 3
+const recent = releases.slice(0, OPEN)
+const older = releases.slice(OPEN)
 ---
 
 <Site locale={locale} path="/changelog/" title={t.title}>
-  <div class="page-head wrap">
-    <h1>{t.title}</h1>
-    <p>{t.lead}</p>
+  <div class="page-head wrap narrow">
+    <h1 data-reveal>{t.title}</h1>
+    <p data-reveal style="--i:1">{t.lead}</p>
   </div>
-  <div class="wrap list">
-    {releases.map((release) => (
-      <article class="island" id={`v${release.version}`}>
-        <h2><a href={`#v${release.version}`}>{release.version}</a> <time class="muted" datetime={release.date}>{release.date}</time></h2>
-        {release.sections.map((section) => (
-          <section>
-            <h3>{sectionLabel(section.kind, locale)}</h3>
-            <ul>
-              {section.entries.map((entry) => (
-                <li><Fragment set:html={renderInline(entry[locale])} />{entry.link && <Fragment> <a class="muted pr" href={entry.link.url}>{entry.link.label}</a></Fragment>}</li>
-              ))}
-            </ul>
-          </section>
-        ))}
-      </article>
-    ))}
+  <div class="wrap narrow list">
+    {recent.map((release) => <Release release={release} locale={locale} open />)}
+    {older.length > 0 && <h2 class="older muted" data-reveal>{t.older(older.length)}</h2>}
+    {older.map((release) => <Release release={release} locale={locale} />)}
   </div>
 </Site>
 
+<script>
+  // A link to an older version opens it.
+  const open = () => {
+    const target = location.hash && document.getElementById(location.hash.slice(1))
+    if (target instanceof HTMLDetailsElement) target.open = true
+  }
+  open()
+  addEventListener('hashchange', open)
+</script>
+
 <style>
-  .list { display: grid; gap: 1.25rem; }
-  article { padding: 1.75rem 2rem; min-width: 0; }
-  h2 { font-size: 1.4rem; }
-  h2 a { text-decoration: none; }
-  h2 time { font-size: 0.95rem; font-weight: 400; margin-left: 0.5rem; }
-  h3 { font-size: 1rem; margin-top: 1.5rem; }
-  ul { margin: 0.5rem 0 0; padding-left: 1.2rem; }
-  li { margin-top: 0.4rem; overflow-wrap: anywhere; }
-  .pr { font-size: 0.85em; text-decoration: none; }
+  .narrow { width: min(860px, 100% - 2.5rem); }
+  .list { display: grid; gap: 1rem; }
+  .older { margin: 2rem 0 0.25rem; font-size: 0.95rem; font-weight: 600; }
 </style>

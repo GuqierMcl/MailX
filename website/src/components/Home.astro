@@ -1,36 +1,45 @@
 ---
+import Icon, { type IconName } from './Icon.astro'
 import Screenshot from './Screenshot.astro'
+import Welcome from './Welcome.astro'
 import Site from '../layouts/Site.astro'
 import { STRINGS, localePath, type Locale } from '../i18n'
-import inboxLightZh from '../../../docs/assets/screenshots/zh-CN/inbox-light.webp'
-import inboxDarkZh from '../../../docs/assets/screenshots/zh-CN/inbox-dark.webp'
-import inboxLightEn from '../../../docs/assets/screenshots/en/inbox-light.webp'
-import inboxDarkEn from '../../../docs/assets/screenshots/en/inbox-dark.webp'
+import { screenshot } from '../lib/screenshots'
 
 interface Props { locale: Locale }
 const { locale } = Astro.props
 const t = STRINGS[locale]
-const shots = locale === 'zh-CN' ? { light: inboxLightZh, dark: inboxDarkZh } : { light: inboxLightEn, dark: inboxDarkEn }
-const sizes = '(min-width: 1180px) 1120px, calc(100vw - 2.5rem)'
+// On phones a screenshot is cropped to part of the window, so it is drawn
+// wider than the screen there.
+const heroSizes = '(max-width: 640px) 200vw, (min-width: 1180px) 1120px, calc(100vw - 2.5rem)'
+const showcaseSizes = '(max-width: 860px) 200vw, 700px'
 ---
 
 <Site locale={locale} path="/" title={t.home.title}>
   <section class="hero wrap">
-    <h1>{t.home.headline}</h1>
-    <p class="tagline">{t.home.tagline}</p>
-    <div class="actions">
+    <div data-reveal><Welcome /></div>
+    <h1 data-reveal style="--i:1">{t.home.headline}</h1>
+    <p class="tagline" data-reveal style="--i:2">{t.home.tagline}</p>
+    <div class="actions" data-reveal style="--i:3">
       <a class="button primary" href={localePath(locale, '/download/')}>{t.home.download}</a>
       <a class="button" href={localePath(locale, '/docs/')}>{t.home.docs}</a>
     </div>
-    <p class="platforms muted">{t.home.platforms}</p>
-    <div class="shot"><Screenshot {...shots} alt={t.home.screenshotAlt} sizes={sizes} eager /></div>
+    <p class="platforms muted" data-reveal style="--i:4">{t.home.platforms}</p>
+    <div class="shot" data-reveal="zoom" style="--i:5"><Screenshot {...screenshot(locale, 'inbox')} alt={t.home.screenshotAlt} sizes={heroSizes} eager /></div>
+  </section>
+
+  <section class="providers wrap">
+    <h2 data-reveal>{t.home.providersTitle}</h2>
+    <ul>{t.home.providers.map((name, index) => <li data-reveal style={`--i:${index * 0.5}`}>{name}</li>)}</ul>
+    <p class="muted" data-reveal>{t.home.providersNote}</p>
   </section>
 
   <section class="features wrap">
-    <h2>{t.home.featuresTitle}</h2>
+    <h2 data-reveal>{t.home.featuresTitle}</h2>
     <ul>
-      {t.home.features.map((feature) => (
-        <li class="island">
+      {t.home.features.map((feature, index) => (
+        <li class="island" data-reveal style={`--i:${index % 3}`}>
+          <span class="icon"><Icon name={feature.icon as IconName} /></span>
           <h3>{feature.title}</h3>
           <p>{feature.body}</p>
         </li>
@@ -38,7 +47,36 @@ const sizes = '(min-width: 1180px) 1120px, calc(100vw - 2.5rem)'
     </ul>
   </section>
 
-  <section class="closing wrap">
+  {t.home.showcases.map((item) => (
+    <section class="showcase wrap">
+      <div class="words" data-reveal>
+        <h2>{item.title}</h2>
+        <p>{item.body}</p>
+        {item.points.length > 0 && <ul>{item.points.map((point) => <li>{point}</li>)}</ul>}
+      </div>
+      <div class:list={["shot", item.shot]} data-reveal="zoom" style="--i:1"><Screenshot {...screenshot(locale, item.shot as 'now' | 'reading' | 'chat' | 'compose')} alt={item.alt} sizes={showcaseSizes} /></div>
+    </section>
+  ))}
+
+  <section class="privacy wrap">
+    <div class="panel glass" data-reveal="zoom">
+      <h2>{t.home.privacy.title}</h2>
+      <ul>{t.home.privacy.points.map((point) => <li>{point}</li>)}</ul>
+      <a href={localePath(locale, '/docs/privacy/')}>{t.home.privacy.link} →</a>
+    </div>
+  </section>
+
+  <section class="faq wrap">
+    <h2 data-reveal>{t.home.faqTitle}</h2>
+    {t.home.faq.map((item, index) => (
+      <details class="island" data-reveal style={`--i:${index}`}>
+        <summary>{item.q}</summary>
+        <p>{item.a}</p>
+      </details>
+    ))}
+  </section>
+
+  <section class="closing wrap" data-reveal>
     <h2>{t.home.closingTitle}</h2>
     <p class="muted">{t.home.closingBody}</p>
     <a class="button primary" href={localePath(locale, '/download/')}>{t.home.download}</a>
@@ -46,19 +84,82 @@ const sizes = '(min-width: 1180px) 1120px, calc(100vw - 2.5rem)'
 </Site>
 
 <style>
-  .hero { text-align: center; padding-block: 4rem 2rem; }
-  .hero h1 { font-size: clamp(2.25rem, 6vw, 3.75rem); }
-  .tagline { margin: 1rem 0 0; font-size: clamp(1.1rem, 2.5vw, 1.35rem); color: var(--mx-muted); }
+  .hero { text-align: center; padding-block: 3.5rem 2rem; }
+  .hero h1 { font-size: clamp(2.3rem, 5.4vw, 3.5rem); max-width: 22ch; margin-inline: auto; }
+  .hero h1:lang(zh-CN) { max-width: none; }
+  .tagline { margin: 1rem auto 0; max-width: 34em; font-size: clamp(1.08rem, 2.2vw, 1.3rem); color: var(--mx-muted); }
   .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.75rem; margin-top: 2rem; }
-  .platforms { margin: 1rem 0 0; font-size: 0.9rem; }
-  .shot { margin-top: 3rem; }
-  .shot :global(img) { width: 100%; border-radius: 16px; }
-  .features { padding-block: 4rem 2rem; }
-  .features h2, .closing h2 { font-size: clamp(1.6rem, 4vw, 2.25rem); text-align: center; }
+  .platforms { margin: 1.1rem 0 0; font-size: 0.88rem; }
+  /* The screenshot floats on a soft glow drawn from the page's own colours. */
+  .shot { position: relative; isolation: isolate; margin-top: 3.5rem; }
+  .shot::before {
+    content: "";
+    position: absolute;
+    inset: 8% 6% -6%;
+    z-index: -1;
+    border-radius: 40px;
+    background: linear-gradient(120deg, var(--mx-glow-1), var(--mx-glow-2) 50%, var(--mx-glow-3));
+    filter: blur(48px);
+    opacity: 0.9;
+  }
+  .shot :global(img) { width: 100%; border-radius: 18px; box-shadow: 0 0 0 1px var(--mx-glass-ring), 0 30px 80px -20px oklch(0.2 0.05 260 / 0.35); }
+  @media (max-width: 640px) {
+    .hero { padding-top: 2.25rem; }
+    .actions .button { flex: 1 1 100%; }
+    .shot { margin-top: 2.5rem; }
+  }
+  section > h2, .closing h2, .privacy h2 { font-size: clamp(1.6rem, 3.6vw, 2.25rem); text-align: center; }
+
+  .providers { padding-block: 4rem 0; text-align: center; }
+  .providers h2 { font-size: 1.15rem; font-weight: 600; }
+  .providers ul { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; max-width: 860px; margin: 1.25rem auto 0; padding: 0; }
+  .providers li { padding: 0.35rem 0.95rem; border-radius: 999px; font-size: 0.95rem; background: var(--mx-glass); box-shadow: inset 0 1px 0 var(--mx-glass-edge), 0 0 0 1px var(--mx-glass-ring); }
+  .providers p { margin: 1.1rem 0 0; font-size: 0.9rem; }
+
+  .features { padding-block: 7.5rem 0; }
   .features ul { list-style: none; margin: 2.5rem 0 0; padding: 0; display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
   .features li { padding: 1.75rem; }
+  .icon { display: grid; place-items: center; width: 46px; height: 46px; margin-bottom: 1.1rem; border-radius: 14px; color: var(--mx-accent); background: color-mix(in oklab, var(--mx-accent) 12%, transparent); }
   .features h3 { font-size: 1.15rem; }
   .features p { margin: 0.6rem 0 0; color: var(--mx-muted); }
-  .closing { text-align: center; padding-block: 4rem 3rem; }
+
+  .showcase { display: grid; grid-template-columns: 5fr 8fr; align-items: center; gap: 4rem; padding-top: 7.5rem; }
+  .showcase .shot { margin: 0; min-width: 0; }
+  .showcase:nth-of-type(odd) .words { order: 2; }
+  .showcase:nth-of-type(odd) { grid-template-columns: 8fr 5fr; }
+  .showcase h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); text-align: left; }
+  .showcase p { margin: 1rem 0 0; font-size: 1.08rem; color: var(--mx-muted); }
+  .showcase ul, .privacy ul { list-style: none; margin: 1.25rem 0 0; padding: 0; display: grid; gap: 0.6rem; }
+  .showcase li, .privacy li { position: relative; padding-left: 1.6rem; }
+  .showcase li::before, .privacy li::before { content: ""; position: absolute; left: 0.3rem; top: 0.45em; width: 0.35em; height: 0.65em; border: solid var(--mx-accent); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+  .privacy { padding-top: 7.5rem; }
+  .panel { padding: 3rem 2rem; border-radius: 28px; display: grid; justify-items: center; }
+  .panel ul { margin-top: 1.5rem; }
+  .panel a { margin-top: 1.75rem; font-weight: 600; color: var(--mx-accent); text-decoration: none; }
+  .panel a:hover { text-decoration: underline; }
+
+  .faq { padding-top: 7.5rem; max-width: 760px; }
+  .faq h2 { margin-bottom: 2rem; }
+  .faq details { margin-top: 0.75rem; border-radius: 16px; }
+  .faq summary { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1.05rem 1.4rem; font-weight: 600; cursor: pointer; list-style: none; border-radius: 16px; }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after { content: ""; flex: none; width: 0.5em; height: 0.5em; border: solid var(--mx-muted); border-width: 0 2px 2px 0; transform: translateY(-25%) rotate(45deg); }
+  .faq details[open] summary::after { transform: translateY(25%) rotate(225deg); }
+  .faq p { margin: 0; padding: 0 1.4rem 1.2rem; color: var(--mx-muted); }
+
+  .closing { text-align: center; padding-block: 7.5rem 2rem; }
   .closing p { margin: 0.75rem 0 1.75rem; }
+
+  @media (max-width: 860px) {
+    .showcase, .showcase:nth-of-type(odd) { grid-template-columns: minmax(0, 1fr); gap: 2rem; padding-top: 5rem; }
+    .showcase:nth-of-type(odd) .words { order: 0; }
+    .features, .privacy, .faq, .closing { padding-top: 5rem; }
+  }
+  /* Part of the window at a readable size instead of all of it in miniature. */
+  @media (max-width: 640px) {
+    .shot :global(img) { aspect-ratio: 5 / 6; object-fit: cover; object-position: 38% 0; }
+    .showcase .shot :global(img) { aspect-ratio: 1; object-position: 62% 0; }
+    .showcase .compose :global(img) { object-position: 0 0; }
+  }
 </style>

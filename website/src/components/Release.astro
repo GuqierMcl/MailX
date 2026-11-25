@@ -1,0 +1,50 @@
+---
+import type { Locale } from '../i18n'
+import { renderInline, sectionLabel, type ChangelogRelease } from '../lib/changelog'
+
+interface Props { release: ChangelogRelease; locale: Locale; open?: boolean }
+const { release, locale, open = false } = Astro.props
+---
+
+<details class="glass release" id={`v${release.version}`} open={open} data-reveal>
+  <summary>
+    <span class="version numeric">{release.version}</span>
+    <time class="muted numeric" datetime={release.date}>{release.date}</time>
+  </summary>
+  <div class="body">
+    {release.sections.map((section) => {
+      const { emoji, label } = sectionLabel(section.kind, locale)
+      return (
+        <section>
+          <h3>{emoji && <span class="emoji" aria-hidden="true">{emoji}</span>}{label}</h3>
+          <ul>
+            {section.entries.map((entry) => (
+              <li><Fragment set:html={renderInline(entry[locale])} />{entry.link && <Fragment> <a class="muted pr" href={entry.link.url}>{entry.link.label}</a></Fragment>}</li>
+            ))}
+          </ul>
+        </section>
+      )
+    })}
+  </div>
+</details>
+
+<style>
+  .release { border-radius: var(--mx-radius); min-width: 0; }
+  summary { display: flex; align-items: baseline; gap: 0.75rem; padding: 1.25rem 1.75rem; cursor: pointer; list-style: none; border-radius: var(--mx-radius); }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: ""; margin-left: auto; align-self: center; width: 0.5em; height: 0.5em; border: solid var(--mx-muted); border-width: 0 2px 2px 0; transform: translateY(-25%) rotate(45deg); }
+  .release[open] summary::after { transform: translateY(25%) rotate(225deg); }
+  .version { font-size: 1.35rem; font-weight: 700; }
+  time { font-size: 0.92rem; }
+  .body { padding: 0 1.75rem 1.5rem; }
+  section + section { margin-top: 1.25rem; }
+  h3 { display: flex; align-items: center; gap: 0.45rem; font-size: 1rem; }
+  .emoji { font-size: 1.05rem; line-height: 1; }
+  ul { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+  li { margin-top: 0.4rem; overflow-wrap: anywhere; }
+  .pr { font-size: 0.85em; text-decoration: none; }
+  @media (max-width: 640px) {
+    summary { padding: 1.1rem 1.25rem; }
+    .body { padding: 0 1.25rem 1.25rem; }
+  }
+</style>
