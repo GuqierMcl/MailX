@@ -1,13 +1,15 @@
 name: Website
 
 # Builds mailxapp.com (website/) and deploys it to Cloudflare Workers.
-#   - pull request: check and build only, never deploys and needs no secrets;
 #   - push to main, or run by hand on main: deploys;
 #   - release published: deploys main again, so the download page and changelog
 #     show the new version.
+# Pull requests are checked by the Website job in ci.yml. The paths match
+# SITE_INPUT in scripts/lib/change-scope.mjs.
 on:
-  pull_request:
-    paths: &paths
+  push:
+    branches: [main]
+    paths:
       - "website/**"
       - "docs/guides/**"
       - "docs/assets/screenshots/**"
@@ -17,9 +19,6 @@ on:
       - "package.json"
       - "bun.lock"
       - ".github/workflows/website.yml"
-  push:
-    branches: [main]
-    paths: *paths
   release:
     types: [published]
   workflow_dispatch:
@@ -27,10 +26,10 @@ on:
 permissions:
   contents: read
 
-# Deploys run one after another; a newer push to a PR replaces its running check.
+# Deploys run one after another.
 concurrency:
-  group: website-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: website-deploy
+  cancel-in-progress: false
 
 env:
   ASTRO_TELEMETRY_DISABLED: "1"
@@ -38,7 +37,7 @@ env:
 
 jobs:
   website:
-    name: Website
+    name: Deploy website
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -57,7 +56,7 @@ jobs:
           # Reads the latest release for the download page.
           GITHUB_TOKEN: ${{ github.token }}
       - name: Deploy to Cloudflare
-        if: github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref == 'refs/heads/main')
+        if: github.event_name == 'release' || github.ref == 'refs/heads/main'
         run: bun run --cwd website deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

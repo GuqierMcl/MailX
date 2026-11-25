@@ -22,12 +22,15 @@ jobs:
   # `paths-ignore` leaves its required checks pending forever. A job skipped
   # through `if` reports success instead, which lets docs-only PRs merge.
   #   - docs:    documentation and text only, nothing to build;
+  #   - site:    only website files, possibly with documentation: the website
+  #              checks run, the application's do not;
   #   - release: only a version bump written by `version:bump` / `version:set`
   #              plus CHANGELOG.md, checked by the light release job below;
   #   - code:    everything else, the full suite.
-  # A push to main is `release` only when it lands such a bump on a commit whose
-  # CI result already passed: the code is then identical to a fully checked
-  # commit. Every other push to main is `code`. The Release workflow refuses
+  # `website` is separate: the website is checked whenever something it is built
+  # from changed. A push to main is `release` or `site` only on top of a commit
+  # whose CI result already passed: the application is then identical to a fully
+  # checked commit. Every other push to main is `code`. The Release workflow refuses
   # tags whose CI result has not passed.
   changes:
     name: Detect code changes
@@ -37,6 +40,7 @@ jobs:
       checks: read
     outputs:
       kind: ${{ steps.filter.outputs.kind }}
+      website: ${{ steps.filter.outputs.website }}
       code: ${{ steps.filter.outputs.kind == 'code' }}
     steps:
       - uses: actions/checkout@v7
@@ -53,63 +57,64 @@ jobs:
           BEFORE: ${{ github.event.before }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          # A push to main may skip only as a release: the previous tip of main
-          # must already have a passing CI result, and everything pushed since
-          # must be a version bump of it. Anything else, including any error,
-          # runs everything. Documentation pushes are not skipped on main.
-          if [ "$EVENT" != "pull_request" ]; then
-            # A new branch reports an all-zero `before`.
-            if [ "$EVENT" = "push" ] && [ -n "${BEFORE//0/}" ] &&
-              git merge-base --is-ancestor "$BEFORE" "$GITHUB_SHA"; then
-              # The latest attempts only, so a failed re-run counts as failed;
-              # all of them must have succeeded, and there must be at least one.
-              ci=$(gh api "repos/$GITHUB_REPOSITORY/commits/$BEFORE/check-runs?check_name=CI%20result&filter=latest" \
-                --jq '[.check_runs[] | select(.app.slug == "github-actions") | (.conclusion // .status)]
-                  | if length > 0 and all(. == "success") then "success" else (join(" ") | if . == "" then "none" else . end) end') || ci=""
-              echo "CI result on the previous main $BEFORE: ${ci:-none}"
-              if [ "$ci" = "success" ] &&
-                git worktree add --detach "$RUNNER_TEMP/base" "$BEFORE" &&
-                verdict=$(bun "$RUNNER_TEMP/base/scripts/check-release-pr.mjs" "$BEFORE" "$GITHUB_SHA"); then
-                echo "$verdict"
-                if [ "$(printf '%s\n' "$verdict" | tail -n 1)" = "release" ]; then
-                  echo "kind=release" >> "$GITHUB_OUTPUT"
-                  exit 0
-                fi
+          # Every classifier comes from the base commit, so a change cannot alter
+          # how it is judged. A missing classifier or any error runs everything.
+          kind=code
+          website=true
+          finish() {
+            echo "kind=$kind  website=$website"
+            { echo "kind=$kind"; echo "website=$website"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          base_scripts="$RUNNER_TEMP/base/scripts"
+          is_release() {
+            local verdict
+            verdict=$(bun "$base_scripts/check-release-pr.mjs" "$1" "$2") || return 1
+            echo "$verdict"
+            [ "$(printf '%s\n' "$verdict" | tail -n 1)" = "release" ]
+          }
+          scope=""
+          read_scope() {
+            scope=$(bun "$base_scripts/check-change-scope.mjs" "$1") || { scope=""; return 1; }
+            echo "$scope"
+            if grep -qx 'website=false' <<< "$scope"; then website=false; fi
+          }
+          if [ "$EVENT" = "pull_request" ]; then
+            git worktree add --detach "$RUNNER_TEMP/base" "$BASE" || finish
+            read_scope "$BASE...$HEAD" || true
+            if grep -qx 'scope=docs' <<< "$scope"; then
+              kind=docs
+            elif grep -qx 'scope=site' <<< "$scope"; then
+              kind=site
+            elif is_release "$BASE" "$HEAD"; then
+              kind=release
+            fi
+            finish
+          fi
+          # A push to main may skip only when the previous tip of main already has
+          # a passing CI result and everything pushed since is a version bump of it
+          # or touches the website alone: the application is then identical to a
+          # checked commit. Documentation pushes are not skipped on main.
+          # A new branch reports an all-zero `before`.
+          if [ "$EVENT" = "push" ] && [ -n "${BEFORE//0/}" ] &&
+            git merge-base --is-ancestor "$BEFORE" "$GITHUB_SHA" &&
+            git worktree add --detach "$RUNNER_TEMP/base" "$BEFORE"; then
+            read_scope "$BEFORE..$GITHUB_SHA" || true
+            # The latest attempts only, so a failed re-run counts as failed;
+            # all of them must have succeeded, and there must be at least one.
+            ci=$(gh api "repos/$GITHUB_REPOSITORY/commits/$BEFORE/check-runs?check_name=CI%20result&filter=latest" \
+              --jq '[.check_runs[] | select(.app.slug == "github-actions") | (.conclusion // .status)]
+                | if length > 0 and all(. == "success") then "success" else (join(" ") | if . == "" then "none" else . end) end') || ci=""
+            echo "CI result on the previous main $BEFORE: ${ci:-none}"
+            if [ "$ci" = "success" ]; then
+              if grep -qx 'site-only=true' <<< "$scope"; then
+                kind=site
+              elif is_release "$BEFORE" "$GITHUB_SHA"; then
+                kind=release
               fi
             fi
-            echo "kind=code" >> "$GITHUB_OUTPUT"
-            exit 0
           fi
-          # Documentation and text only: anything else, including code that
-          # lives next to docs, workflows, scripts and lockfiles, counts as code.
-          # A failed diff must fall through to "code", never to "docs only".
-          if ! files=$(git diff --name-only "$BASE...$HEAD"); then
-            echo "kind=code" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "Changed files:"
-          echo "$files"
-          # Count the changed files that are NOT documentation. Counting lines
-          # (rather than relying on grep's exit status) keeps this unambiguous.
-          # shellcheck disable=SC2126 # `grep -c` exits non-zero on zero matches.
-          other=$(printf '%s\n' "$files" | grep -Ev '^(docs/.*\.(md|webp|png|jpg|svg)|[^/]+\.md|LICENSE|\.github/ISSUE_TEMPLATE/.*\.md|\.github/pull_request_template\.md)$' | wc -l | tr -d ' ') || other=1
-          if [ -n "$files" ] && [ "${other:-1}" -eq 0 ]; then
-            echo "kind=docs" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # A release PR? The classifier comes from the base commit, so the pull
-          # request cannot change how it is judged. It compares each version file
-          # with what a bump from the base writes; any other change, a missing
-          # classifier or any error means "code".
-          if git worktree add --detach "$RUNNER_TEMP/base" "$BASE" &&
-            verdict=$(bun "$RUNNER_TEMP/base/scripts/check-release-pr.mjs" "$BASE" "$HEAD"); then
-            echo "$verdict"
-            if [ "$(printf '%s\n' "$verdict" | tail -n 1)" = "release" ]; then
-              echo "kind=release" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          fi
-          echo "kind=code" >> "$GITHUB_OUTPUT"
+          finish
 
   # A release PR changes nothing but versions and the changelog, which is what
   # these checks cover. Merged onto a main whose CI passed, it gets the same
@@ -128,6 +133,29 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run version:check --release
       - run: bun run version:test
+
+  # Builds the site as .github/workflows/website.yml does, without deploying it.
+  website:
+    name: Website
+    needs: changes
+    if: needs.changes.outputs.website == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ASTRO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      # website/package.json carries the shared version.
+      - run: bun run version:check
+      - run: bun run site:check
+      - run: bun run site:build
+        env:
+          # Reads the latest release for the download page.
+          GITHUB_TOKEN: ${{ github.token }}
 
   frontend:
     name: Frontend and repository checks
@@ -240,11 +268,13 @@ jobs:
   # docs-only pull request pending forever. This job always runs and decides:
   #   - code changed: the frontend job and every Rust matrix job must have passed;
   #   - a release PR: the release checks must have passed, the rest skipped;
+  #   - website only: the website checks must have passed, the rest skipped;
   #   - documentation only: everything must have been skipped (or passed);
+  #   - whatever the kind, a website that had to be built must have passed;
   #   - anything failed or was cancelled, or change detection broke: fail.
   result:
     name: CI result
-    needs: [changes, release, frontend, rust]
+    needs: [changes, release, website, frontend, rust]
     if: always()
     runs-on: ubuntu-22.04
     timeout-minutes: 5
@@ -253,11 +283,13 @@ jobs:
         env:
           CHANGES: ${{ needs.changes.result }}
           KIND: ${{ needs.changes.outputs.kind }}
+          SITE_NEEDED: ${{ needs.changes.outputs.website }}
+          WEBSITE: ${{ needs.website.result }}
           RELEASE: ${{ needs.release.result }}
           FRONTEND: ${{ needs.frontend.result }}
           RUST: ${{ needs.rust.result }}
         run: |
-          echo "change detection: $CHANGES (kind=$KIND)  release: $RELEASE  frontend: $FRONTEND  rust: $RUST"
+          echo "change detection: $CHANGES (kind=$KIND, website=$SITE_NEEDED)  website: $WEBSITE  release: $RELEASE  frontend: $FRONTEND  rust: $RUST"
           if [ "$CHANGES" != "success" ]; then
             echo "::error::Change detection did not succeed, so nothing can be trusted."
             exit 1
@@ -270,6 +302,19 @@ jobs:
               esac
             done
           }
+          case "$SITE_NEEDED" in
+            true)
+              if [ "$WEBSITE" != "success" ]; then
+                echo "::error::The website changed, so its checks must pass."
+                exit 1
+              fi
+              ;;
+            false) settled "$WEBSITE" ;;
+            *)
+              echo "::error::Unexpected change detection output website='$SITE_NEEDED'."
+              exit 1
+              ;;
+          esac
           case "$KIND" in
             code)
               if [ "$FRONTEND" != "success" ] || [ "$RUST" != "success" ]; then
@@ -285,7 +330,7 @@ jobs:
               fi
               settled "$FRONTEND" "$RUST"
               ;;
-            docs)
+            docs | site)
               settled "$RELEASE" "$FRONTEND" "$RUST"
               ;;
             *)
