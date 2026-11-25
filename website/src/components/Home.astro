@@ -9,10 +9,8 @@ import { screenshot } from '../lib/screenshots'
 interface Props { locale: Locale }
 const { locale } = Astro.props
 const t = STRINGS[locale]
-// On phones a screenshot is cropped to part of the window, so it is drawn
-// wider than the screen there.
-const heroSizes = '(max-width: 640px) 200vw, (min-width: 1180px) 1120px, calc(100vw - 2.5rem)'
-const showcaseSizes = '(max-width: 860px) 200vw, 700px'
+const heroSizes = '(min-width: 1180px) 1120px, calc(100vw - 2.5rem)'
+const showcaseSizes = '(max-width: 860px) calc(100vw - 2.5rem), 700px'
 ---
 
 <Site locale={locale} path="/" title={t.home.title}>
@@ -54,7 +52,7 @@ const showcaseSizes = '(max-width: 860px) 200vw, 700px'
         <p>{item.body}</p>
         {item.points.length > 0 && <ul>{item.points.map((point) => <li>{point}</li>)}</ul>}
       </div>
-      <div class:list={["shot", item.shot]} data-reveal="zoom" style="--i:1"><Screenshot {...screenshot(locale, item.shot as 'now' | 'reading' | 'chat' | 'compose')} alt={item.alt} sizes={showcaseSizes} /></div>
+      <div class="shot" data-reveal="zoom" style="--i:1"><Screenshot {...screenshot(locale, item.shot as 'now' | 'reading' | 'chat' | 'compose')} alt={item.alt} sizes={showcaseSizes} /></div>
     </section>
   ))}
 
@@ -155,11 +153,5 @@ const showcaseSizes = '(max-width: 860px) 200vw, 700px'
     .showcase, .showcase:nth-of-type(odd) { grid-template-columns: minmax(0, 1fr); gap: 2rem; padding-top: 5rem; }
     .showcase:nth-of-type(odd) .words { order: 0; }
     .features, .privacy, .faq, .closing { padding-top: 5rem; }
-  }
-  /* Part of the window at a readable size instead of all of it in miniature. */
-  @media (max-width: 640px) {
-    .shot :global(img) { aspect-ratio: 5 / 6; object-fit: cover; object-position: 38% 0; }
-    .showcase .shot :global(img) { aspect-ratio: 1; object-position: 62% 0; }
-    .showcase .compose :global(img) { object-position: 0 0; }
   }
 </style>
