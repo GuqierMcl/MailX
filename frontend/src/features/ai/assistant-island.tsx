@@ -13,6 +13,7 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { cn } from '@/lib/utils'
 import { AiConsentDialog } from './ai-consent-dialog'
 import { AiMark } from './ai-mark'
+import { capsuleSuggestions, type SuggestionFacts } from './capsule-suggestions'
 import { ChatEnvContext, type ChatEnv } from './chat-env'
 import { ChatHistory } from './chat-history'
 import { ChatInput } from './chat-input'
@@ -55,31 +56,120 @@ function Pill({ onClick, children }: { onClick: () => void; children: ReactNode 
   )
 }
 
+/** Pointer rest before the capsule opens up, and the grace before it folds again. */
+const OPEN_DELAY_MS = 150
+const CLOSE_DELAY_MS = 300
+/** Time between one suggestion's entrance and the next. */
+const STAGGER_MS = 40
+
 /**
  * The global AI capsule (ai-chat-ui.md 5.1): a small field-like button at the bottom right of the mail
  * island. A click opens the assistant's own island; the label says what it would be asked about.
+ * Resting the pointer on it (or focusing it) widens it and rises a few suggestions above it, picked
+ * afresh each time from local templates (`capsule-suggestions.ts`); choosing one asks it at once.
  */
-export function AssistantCapsule({ view, raised, onOpen }: {
+export function AssistantCapsule({ view, raised, onOpen, facts, onAsk }: {
   view: AssistantView | null
   /** Lifted clear of a composer's bottom bar. */
   raised: boolean
   onOpen: () => void
+  /** What the suggestions may name, from data already on screen. */
+  facts?: SuggestionFacts
+  /** Opens the island and asks this, about the current view. */
+  onAsk?: (message: string) => void
 }) {
   useTranslation()
+  const reduced = usePrefersReducedMotion()
+  const [open, setOpen] = useState(false)
+  const [picks, setPicks] = useState<{ key: string; text: string }[]>([])
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const root = useRef<HTMLDivElement>(null)
+  const clear = () => { if (timer.current) { clearTimeout(timer.current); timer.current = null } }
+  useEffect(() => clear, [])
+
+  const context = view?.context ?? null
+  const show = () => {
+    if (!onAsk || open) return
+    // A new pick on every opening, so the same three do not come back each time.
+    setPicks(capsuleSuggestions(context, facts))
+    setOpen(true)
+  }
+  const later = (next: boolean) => {
+    clear()
+    timer.current = setTimeout(() => { timer.current = null; if (next) show(); else setOpen(false) }, next ? OPEN_DELAY_MS : CLOSE_DELAY_MS)
+  }
+  // What is on screen changed: the suggestions were for something else.
+  const key = viewKey(view)
+  const [shownFor, setShownFor] = useState(key)
+  if (shownFor !== key) { setShownFor(key); setOpen(false) }
+
+  const buttons = () => Array.from(root.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape' && open) {
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(false)
+      buttons().at(-1)?.focus()
+      return
+    }
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+    const list = buttons()
+    const index = list.indexOf(document.activeElement as HTMLButtonElement)
+    if (index < 0) return
+    event.preventDefault()
+    list[Math.max(0, Math.min(list.length - 1, index + (event.key === 'ArrowUp' ? -1 : 1)))]?.focus()
+  }
+
   return (
-    <button
-      type="button"
-      data-slot="assistant-capsule"
-      onClick={onOpen}
-      aria-keyshortcuts="Meta+J Control+J"
+    <div
+      ref={root}
+      data-slot="assistant-capsule-area"
+      onPointerEnter={() => later(true)}
+      onPointerLeave={() => later(false)}
+      onFocus={() => { clear(); show() }}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) later(false) }}
+      onKeyDown={onKeyDown}
       className={cn(
-        'animate-chat-rise group/capsule absolute right-4 z-20 flex h-9 w-60 max-w-[calc(100%-2rem)] items-center gap-2 rounded-full bg-background/95 pr-3 pl-3.5 text-left text-sm text-muted-foreground shadow-md ring-1 ring-foreground/10 outline-none backdrop-blur-sm transition-[bottom,box-shadow] duration-(--motion-medium) ease-(--ease-out-soft) hover:text-foreground hover:shadow-lg focus-visible:ring-2 focus-visible:ring-ring dark:bg-card/95',
+        'absolute right-4 z-20 flex max-w-[calc(100%-2rem)] flex-col items-end gap-1.5 transition-[bottom] duration-(--motion-medium) ease-(--ease-out-soft)',
         raised ? 'bottom-16' : 'bottom-4',
       )}
     >
-      <AiMark className="size-4" />
-      <span className="min-w-0 flex-1 truncate">{placeholder(view)}</span>
-    </button>
+      {open && picks.length > 0 && (
+        <div role="group" aria-label={t('ai:suggest.label')} className="flex max-w-full flex-col items-end gap-1.5">
+          {picks.map((pick, index) => (
+            <button
+              key={pick.key}
+              type="button"
+              data-slot="assistant-suggestion"
+              onClick={() => { setOpen(false); onAsk?.(pick.text) }}
+              // Bottom first, as they rise from the capsule.
+              style={{ animationDelay: `${(picks.length - 1 - index) * STAGGER_MS}ms` }}
+              className={cn(
+                'max-w-full truncate rounded-full bg-background/95 px-3 py-1.5 text-left text-xs text-foreground shadow-sm ring-1 ring-(--ai-2)/30 outline-none backdrop-blur-sm hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring dark:bg-card/95',
+                'animate-in fade-in-0 fill-mode-both duration-200 ease-(--ease-out-soft)',
+                !reduced && 'slide-in-from-bottom-2',
+              )}
+            >
+              {pick.text}
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        data-slot="assistant-capsule"
+        onClick={onOpen}
+        aria-keyshortcuts="Meta+J Control+J"
+        aria-expanded={onAsk ? open : undefined}
+        className={cn(
+          'animate-chat-rise group/capsule flex h-9 max-w-full items-center gap-2 rounded-full bg-background/95 pr-3 pl-3.5 text-left text-sm text-muted-foreground shadow-md ring-1 ring-foreground/10 outline-none backdrop-blur-sm transition-[width,box-shadow,color] duration-(--motion-medium) ease-(--ease-out-soft) hover:text-foreground hover:shadow-lg focus-visible:ring-2 focus-visible:ring-ring dark:bg-card/95',
+          open ? 'w-80' : 'w-60',
+        )}
+      >
+        <AiMark className="size-4" />
+        <span className="min-w-0 flex-1 truncate">{placeholder(view)}</span>
+      </button>
+    </div>
   )
 }
 
@@ -171,9 +261,11 @@ type IslandProps = {
   onSelectMailbox: (mailbox: Mailbox) => void
   /** Changes when something outside asks to start typing. */
   focusToken: number
+  /** A request to send now (a capsule suggestion); `key` changes for each one. */
+  ask?: { message: string; key: number } | null
 }
 
-function AssistantIslandView({ client, chat, service, view, width, overlay, onWidthCommit, onClose, onOpenEmail, onOpenDraft, accounts, folders, onSelectMailbox, focusToken }: IslandProps) {
+function AssistantIslandView({ client, chat, service, view, width, overlay, onWidthCommit, onClose, onOpenEmail, onOpenDraft, accounts, folders, onSelectMailbox, focusToken, ask }: IslandProps) {
   useTranslation()
   const reduced = usePrefersReducedMotion()
   const [input, setInput] = useState<HTMLTextAreaElement | null>(null)
@@ -215,6 +307,17 @@ function AssistantIslandView({ client, chat, service, view, width, overlay, onWi
   }, [chat])
 
   const newChat = useCallback(() => { chat.reset(); focusInput() }, [chat, focusInput])
+
+  // A suggestion chosen on the capsule is sent once, about what is on screen, like a typed message.
+  const asked = useRef<number | null>(null)
+  const askKey = ask?.key ?? null
+  const askMessage = ask?.message ?? ''
+  const askContext = activeView?.context ?? null
+  useEffect(() => {
+    if (askKey === null || asked.current === askKey) return
+    asked.current = askKey
+    if (!chat.busy) send(askMessage, askContext)
+  }, [askKey, askMessage, askContext, chat.busy, send])
 
   const pendingId = chat.pending?.requestId ?? null
   useEffect(() => {

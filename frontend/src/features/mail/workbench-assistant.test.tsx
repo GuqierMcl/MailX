@@ -45,6 +45,36 @@ describe('the assistant beside the mail', () => {
     expect(input).not.toBeInTheDocument()
   })
 
+  it('rises suggestions on hover and asks the one chosen about the open email', async () => {
+    const client = await withAssistant()
+    const start = vi.spyOn(client, 'assistantStart')
+    render(withTitleBar(<Workbench client={client} />))
+    await openFirstEmail()
+    const button = await capsule()
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.hover(button)
+    const group = await screen.findByRole('group', { name: '推荐的问题' })
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    const picks = within(group).getAllByRole('button')
+    expect(picks).toHaveLength(3)
+    const chosen = picks[0].textContent!
+    await userEvent.click(picks[0])
+    await island()
+    await waitFor(() => expect(start).toHaveBeenCalledWith({ kind: expect.objectContaining({ type: 'chat', message: chosen, context: expect.objectContaining({ type: 'email' }) }) }))
+  })
+
+  it('opens the suggestions from the keyboard too, and Esc folds them', async () => {
+    render(withTitleBar(<Workbench client={await withAssistant()} />))
+    const button = await capsule()
+    act(() => button.focus())
+    const group = await screen.findByRole('group', { name: '推荐的问题' })
+    fireEvent.keyDown(button, { key: 'ArrowUp' })
+    expect(within(group).getAllByRole('button').at(-1)).toHaveFocus()
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('group', { name: '推荐的问题' })).not.toBeInTheDocument())
+    expect(button).toHaveFocus()
+  })
+
   it('has no capsule without a usable model', async () => {
     render(withTitleBar(<Workbench client={createMockClient()} />))
     await screen.findByRole('list', { name: '邮件列表' })

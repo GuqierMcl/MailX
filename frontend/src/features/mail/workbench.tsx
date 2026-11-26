@@ -123,6 +123,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [askToken, setAskToken] = useState(0)
   // The assistant's island beside the mail (ai-chat-ui.md 5.1); not kept across launches.
   const [assistantOpen, setAssistantOpen] = useState(false)
+  /** A capsule suggestion for the island to send as it opens. */
+  const [assistantAsk, setAssistantAsk] = useState<{ message: string; key: number } | null>(null)
   const [assistantFocus, setAssistantFocus] = useState(0)
   // Set when the island gave its conversation to the Now page, so that page opens on it.
   const [nowHandoff, setNowHandoff] = useState(false)
@@ -927,6 +929,17 @@ export function Workbench({ client }: { client: MailxClient }) {
           ? { context: { type: 'email', emailId: opened.id }, label: body.email?.summary.subject.trim() || t('mail:noSubject') }
           : null
   const capsuleShown = assistant.usable && !nowPage && !assistantShown && layoutReady
+  // What the capsule's suggestions may name: the sender of the open email, else of the newest unread one listed.
+  const capsuleFacts = {
+    sender: assistantView?.context.type === 'email'
+      ? (body.email ? body.email.summary.from.name || body.email.summary.from.address : null)
+      : (() => { const unread = emails.find((email) => !email.isRead); return unread ? unread.from.name || unread.from.address : null })(),
+    count: selection.items.length,
+  }
+  const askAssistant = (message: string) => {
+    setAssistantAsk((current) => ({ message, key: (current?.key ?? 0) + 1 }))
+    openAssistant()
+  }
 
   // Expanding a message inside the thread opens it like any other (read mark, toolbar,
   // body) but keeps the anchor, so the same conversation stays on screen.
@@ -989,6 +1002,7 @@ export function Workbench({ client }: { client: MailxClient }) {
             folders={folders}
             onSelectMailbox={selectMailbox}
             focusToken={assistantFocus}
+            ask={assistantAsk}
           />
         ) : undefined}
       >
@@ -1225,7 +1239,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         )}
         {/* The Now page has no reader to fold. */}
         {accounts.length > 0 && !nowPage && !singlePane && <ReaderToggle collapsed={readerCollapsed} onToggle={toggleReader} />}
-        {capsuleShown && <AssistantCapsule view={assistantView} raised={inlineShown} onOpen={openAssistant} />}
+        {capsuleShown && <AssistantCapsule view={assistantView} raised={inlineShown} onOpen={openAssistant} facts={capsuleFacts} onAsk={askAssistant} />}
       </ShellLayout>
       </AvatarSourceProvider>
       {dialog}
