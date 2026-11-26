@@ -85,9 +85,9 @@ pub use settings::{
     AiConsent, AppSettings, AppearanceSettings, AssistantMode, AssistantSendMode,
     AssistantSettings, BadgeSettings, CloseBehavior, ComposeOpenMode, ComposeSettings, FontSize,
     GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailSettings, MailTheme, MailboxLabel,
-    McpSettings, NotificationSettings, NotificationSound, PreviewLines, ReadingMode,
-    RemoteImagePolicy, SecuritySettings, ServiceRoute, SettingsChanged, SettingsPatch,
-    SettingsSnapshot, SettingsStore, StartupView, ThemeMode, TranslationProviderId,
+    McpSettings, NotificationSettings, NotificationSound, NowArrangement, NowSettings,
+    PreviewLines, ReadingMode, RemoteImagePolicy, SecuritySettings, ServiceRoute, SettingsChanged,
+    SettingsPatch, SettingsSnapshot, SettingsStore, StartupView, ThemeMode, TranslationProviderId,
     TranslationSettings, mail_body_css,
 };
 pub use startup::StartupStatus;

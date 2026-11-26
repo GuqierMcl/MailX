@@ -127,6 +127,8 @@ fn main() {
         NotificationSound,
         NotificationSettings,
         BadgeSettings,
+        NowArrangement,
+        NowSettings,
         ComposeOpenMode,
         ComposeSettings,
         McpSettings,

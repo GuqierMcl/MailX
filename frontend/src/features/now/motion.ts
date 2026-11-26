@@ -54,3 +54,9 @@ export function entrance(mode: EntranceMode, index: number): { className?: strin
     style: { animationDelay: `${index * STAGGER_MS}ms` },
   }
 }
+
+/** The class and style that bring a block in; `className` is kept alongside the entrance's. */
+export function motionProps(mode: EntranceMode, index: number, className?: string) {
+  const motion = entrance(mode, index)
+  return { className: cn(className, motion.className), style: motion.style }
+}

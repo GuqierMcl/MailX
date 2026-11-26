@@ -37,6 +37,7 @@ import { createMockAssistant } from '@/lib/mock-assistant'
 import { createMockConversations } from '@/lib/mock-conversations'
 import { matchEmail, parseSearchTerms } from '@/lib/mock-search'
 import { DEFAULT_BADGE, DEFAULT_NOTIFICATIONS } from '@/features/notifications/defaults'
+import { DEFAULT_NOW } from '@/features/now/modules/defaults'
 import { DEFAULT_LAYOUT } from '@/features/shell/layout-defaults'
 import { SHOWCASE_DATASET } from '@/lib/mock-showcase'
 import type { McpClientConfig, McpStatus } from '@/features/mcp/types'
@@ -56,6 +57,11 @@ const PROVIDER_HELP_URLS = new Map<string, string>([
   ['feishu', 'https://www.feishu.cn/hc/zh-CN/articles/902478147400'],
   ['lark', 'https://www.larksuite.com/hc/en-US/articles/378111206512-log-in-to-lark-mail-through-a-third-party-email-client'],
 ])
+
+/** The core's rule for Now module ids: lowercase-initial ASCII letters, at most 32 characters, at most 32 distinct ids. */
+function normalizedModuleIds(ids: string[]): string[] {
+  return [...new Set(ids.filter((id) => /^[a-z][A-Za-z]{0,31}$/.test(id)))].slice(0, 32)
+}
 
 function normalizedAccountOrder(value: unknown): string[] | null {
   if (!Array.isArray(value) || value.length > 256) return null
@@ -101,7 +107,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
   // A stored settings file that opens on the inbox (the app default is the Now page): the workbench tests start from the list.
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false } }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false } }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -114,6 +120,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         // Like the core, fields a stored copy lacks (saved by an older preview) take their defaults.
         settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true }, translation: value.settings.translation ?? settings.settings.translation,
           assistant: { ...settings.settings.assistant, ...value.settings.assistant },
+          now: { ...DEFAULT_NOW, ...value.settings.now },
           layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
           readingMode: value.settings.layout.readingMode === 'single' ? 'single' : 'split',
           accountOrder: normalizedAccountOrder(value.settings.layout.accountOrder ?? []) ?? [] } } }
@@ -1301,7 +1308,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           const next = JSON.parse(event.newValue) as typeof settings
           if (typeof next.revision === 'number' && next.revision > settings.revision &&
               (next.effectiveLocale === 'en' || next.effectiveLocale === 'zh-CN') && next.settings?.general) {
-            settings = { ...next, settings: { ...next.settings, mail: { trashVerificationMailAfterCopy: next.settings.mail?.trashVerificationMailAfterCopy === true } } }
+            settings = { ...next, settings: { ...next.settings, mail: { trashVerificationMailAfterCopy: next.settings.mail?.trashVerificationMailAfterCopy === true }, now: { ...DEFAULT_NOW, ...next.settings.now } } }
             listener({ revision: settings.revision })
           }
         } catch { /* Ignore an invalid preview cache. */ }
@@ -1322,6 +1329,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (next.translation?.alwaysTranslate.some((code) => next.translation?.neverSuggest.includes(code))) {
         throw new MailxClientError({ code: 'validation', field: 'translation.alwaysTranslate', message: '配置参数无效。' })
       }
+      if (next.now) next = { ...next, now: { ...next.now, order: normalizedModuleIds(next.now.order), hidden: normalizedModuleIds(next.now.hidden) } }
       const appearance = next.appearance ?? settings.settings.appearance
       const interfaceFont = parseFontFamilies(appearance.interfaceFont).join(', ')
       const mailFont = parseFontFamilies(appearance.mailFont).join(', ')

@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { act, render, screen, waitFor, within } from '@/test/render'
+import { act, cleanup, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Account, AccountSyncState, CodeCandidate, EmailPage, EmailSummary, Folder, MailOverview, OutboxItem, OverviewActivity, OverviewCode, VerificationCodeStatus } from '@/generated/accounts'
@@ -12,6 +12,8 @@ import { daySegment, localDay } from './greeting'
 import { ENTRANCE_KEY, LAST_VISIT_KEY } from './visit'
 import { dayStarts } from './activity'
 import { NowPage, type NowPageProps } from './now-page'
+import { SNOOZED_KEY } from './modules/snooze'
+import type { NowSettings } from '@/generated/accounts'
 
 const account = exampleAccount({ displayName: '工作邮箱', senderName: '林夕' })
 
@@ -69,7 +71,9 @@ function Harness({ client, accounts, handlers, props, requested }: HarnessProps)
   )
 }
 
-function setup({ overview = empty, unread = [], accounts = [account], props = {}, statuses = {} }: {
+function setup({ overview = empty, unread = [], accounts = [account], props = {}, statuses = {}, now }: {
+  /** Saved module preferences. */
+  now?: Partial<NowSettings>
   overview?: MailOverview
   /** What the unread list query returns. */
   unread?: EmailSummary[]
@@ -80,6 +84,7 @@ function setup({ overview = empty, unread = [], accounts = [account], props = {}
   const client = testClient(accounts)
   client.getMailOverview.mockResolvedValue(overview)
   client.listEmails.mockResolvedValue(page(unread))
+  if (now) void client.updateSettings({ now: { arrangement: 'auto', order: [], hidden: [], ...now } })
   client.getVerificationCode.mockImplementation(async (emailId) => ({ emailId, ...(statuses[emailId] ?? { state: 'notFound', code: null, recognitionId: null }) }))
   const handlers = { onSelectMailbox: vi.fn(), onOpenAccount: vi.fn(), onOpenEmail: vi.fn(), onOpenUnread: vi.fn(), onOpenContact: vi.fn() }
   const requested = vi.fn<(targets: VerificationTarget[]) => void>()
@@ -165,7 +170,9 @@ describe('Now page', () => {
     expect(onOpenAccount).toHaveBeenCalledWith('stopped')
     await userEvent.click(within(section).getByRole('button', { name: '1 封邮件发送失败' }))
     expect(onSelectMailbox).toHaveBeenLastCalledWith({ kind: 'outbox' })
-    await userEvent.click(within(section).getByRole('button', { name: '2 份草稿未完成' }))
+    // Drafts are a module of their own, right after the codes.
+    const drafts = screen.getByRole('region', { name: '草稿' })
+    await userEvent.click(within(drafts).getByRole('button', { name: '2 份草稿未完成' }))
     expect(onSelectMailbox).toHaveBeenLastCalledWith({ kind: 'drafts' })
   })
 
@@ -570,6 +577,112 @@ describe('Now page', () => {
     // The icon is simply there.
     expect(document.querySelector('[data-slot="now-greeting-icon"]')).not.toHaveClass('animate-now-icon-in')
     expect(raf).not.toHaveBeenCalled()
+  })
+
+  describe('modules', () => {
+    /** Names of the module regions, top to bottom. */
+    const regions = () => [...document.querySelectorAll('[data-slot="now-content"] > section > div > h2')].map((heading) => heading.textContent)
+    const everything = {
+      overview: { ...empty, verificationCodes: [overviewCode('c1', '482913')], newMail: { total: 2, accounts: [], latest: [] }, activity: activityOf(), recentAttachments: [{ email: email('a1', { hasAttachment: true }), fileNames: ['合同.pdf'] }] } satisfies MailOverview,
+      props: { draftCount: 2, folders: [inbox(3)] },
+      statuses: { c1: ready('482913') },
+    }
+
+    it('shows drafts as their own module right after the codes', async () => {
+      setup(everything)
+      await screen.findByRole('region', { name: '草稿' })
+      await waitFor(() => expect(regions()).toEqual(['验证码', '草稿', '收件箱', '最近的附件', '近况']))
+    })
+
+    it('gives only the modules that can be hidden a menu, shown to the keyboard', async () => {
+      setup({ ...everything, props: { ...everything.props, outbox: [{ id: 'o1', state: 'failed' } as OutboxItem] } })
+      const attention = await screen.findByRole('region', { name: '需要处理' })
+      expect(within(attention).queryByRole('button', { name: /更多操作/ })).not.toBeInTheDocument()
+      const more = within(await screen.findByRole('region', { name: '草稿' })).getByRole('button', { name: '「草稿」的更多操作' })
+      // Out of sight until hover or focus, but never out of the tab order.
+      expect(more).toHaveClass('opacity-0', 'group-focus-within/module:opacity-100')
+      expect(more).not.toHaveAttribute('tabindex', '-1')
+    })
+
+    it('hides a module for today, and it returns when its content changes', async () => {
+      setup(everything)
+      const drafts = await screen.findByRole('region', { name: '草稿' })
+      await userEvent.click(within(drafts).getByRole('button', { name: '「草稿」的更多操作' }))
+      expect(await screen.findByRole('menuitem', { name: '不再显示' })).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('menuitem', { name: '今天先不看' }))
+      await waitFor(() => expect(screen.queryByRole('region', { name: '草稿' })).not.toBeInTheDocument())
+      expect(screen.getByRole('region', { name: '验证码' })).toBeInTheDocument()
+      expect(JSON.parse(localStorage.getItem(SNOOZED_KEY)!).drafts).toEqual({ day: localDay(new Date()), signature: '2' })
+      // Undo from the toast.
+      await userEvent.click(await screen.findByRole('button', { name: '撤销' }))
+      expect(await screen.findByRole('region', { name: '草稿' })).toBeInTheDocument()
+      expect(localStorage.getItem(SNOOZED_KEY)).toBeNull()
+
+      // Hidden again; a later visit with the same content keeps it away, new content brings it back.
+      localStorage.setItem(SNOOZED_KEY, JSON.stringify({ drafts: { day: localDay(new Date()), signature: '2' } }))
+      cleanup()
+      setup(everything)
+      await screen.findByRole('region', { name: '验证码' })
+      expect(screen.queryByRole('region', { name: '草稿' })).not.toBeInTheDocument()
+      cleanup()
+      setup({ ...everything, props: { ...everything.props, draftCount: 3 } })
+      expect(await screen.findByRole('region', { name: '草稿' })).toBeInTheDocument()
+    })
+
+    it('forgets a snooze from an earlier day', async () => {
+      localStorage.setItem(SNOOZED_KEY, JSON.stringify({ drafts: { day: '2020-01-01', signature: '2' } }))
+      setup(everything)
+      expect(await screen.findByRole('region', { name: '草稿' })).toBeInTheDocument()
+    })
+
+    it('stops showing a module for good, saves it in the settings, and undoes that', async () => {
+      const { client } = setup(everything)
+      const codes = await screen.findByRole('region', { name: '验证码' })
+      await userEvent.click(within(codes).getByRole('button', { name: '「验证码」的更多操作' }))
+      await userEvent.click(await screen.findByRole('menuitem', { name: '不再显示' }))
+      await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ now: { arrangement: 'auto', order: [], hidden: ['codes'] } }))
+      await waitFor(() => expect(screen.queryByRole('region', { name: '验证码' })).not.toBeInTheDocument())
+      expect(await screen.findByText('不再显示「验证码」')).toBeInTheDocument()
+      expect(screen.getByText('可以在“设置 → 外观”里恢复')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: '撤销' }))
+      await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ now: { arrangement: 'auto', order: [], hidden: [] } }))
+      expect(await screen.findByRole('region', { name: '验证码' })).toBeInTheDocument()
+    })
+
+    it('leaves out the modules the settings hide', async () => {
+      setup({ ...everything, now: { hidden: ['codes', 'activity', 'future'] } })
+      await screen.findByRole('region', { name: '草稿' })
+      await waitFor(() => expect(regions()).toEqual(['草稿', '收件箱', '最近的附件']))
+    })
+
+    it('follows a fixed order from the settings, with attention first, and appends the unplaced ones', async () => {
+      setup({ ...everything, now: { arrangement: 'fixed', order: ['activity', 'inbox'] }, props: { ...everything.props, outbox: [{ id: 'o1', state: 'failed' } as OutboxItem] } })
+      await screen.findByRole('region', { name: '近况' })
+      await waitFor(() => expect(regions()).toEqual(['需要处理', '近况', '收件箱', '验证码', '草稿', '最近的附件']))
+    })
+
+    it('reports a failed overview once, where its first module would be, and retries', async () => {
+      const client = testClient([account])
+      client.getMailOverview.mockRejectedValueOnce(new Error('boom'))
+      client.getMailOverview.mockResolvedValue({ ...empty, verificationCodes: [overviewCode('c1', '482913')] })
+      client.listEmails.mockResolvedValue(page([]))
+      client.getVerificationCode.mockImplementation(async (emailId) => ({ emailId, ...ready('482913') }))
+      render(
+        <TooltipProvider>
+          <NowPage client={client} accounts={[account]} folders={[]} syncStates={{}} draftCount={2} outbox={[]} verification={stubVerification()}
+            onSelectMailbox={vi.fn()} onOpenUnread={vi.fn()} onOpenContact={vi.fn()} onOpenAccount={vi.fn()} onOpenEmail={vi.fn()} />
+        </TooltipProvider>,
+      )
+      const retry = await screen.findByRole('button', { name: '重试' })
+      expect(screen.getAllByRole('alert')).toHaveLength(1)
+      expect(screen.getByText('没能读取邮箱概况')).toBeInTheDocument()
+      // The page stays: the local modules are still there, below the notice.
+      expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument()
+      expect(screen.getByRole('region', { name: '草稿' })).toBeInTheDocument()
+      await userEvent.click(retry)
+      await waitFor(() => expect(client.getMailOverview).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(screen.queryByText('没能读取邮箱概况')).not.toBeInTheDocument())
+    })
   })
 })
 

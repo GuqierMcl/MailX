@@ -693,6 +693,18 @@ export type BadgeSettings = { enabled: boolean,
  */
 excludedAccounts: Array<string>, };
 
+export type NowArrangement = "auto" | "fixed";
+
+export type NowSettings = { arrangement: NowArrangement,
+/**
+ * Module ids in the user's order; empty means the default order.
+ */
+order: Array<string>,
+/**
+ * Module ids that are never shown.
+ */
+hidden: Array<string>, };
+
 export type ComposeOpenMode = "window" | "inline";
 
 export type ComposeSettings = {
@@ -765,9 +777,9 @@ export type MailSettings = {
  */
 trashVerificationMailAfterCopy: boolean, };
 
-export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, badge: BadgeSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, assistant: AssistantSettings, };
+export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, badge: BadgeSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, assistant: AssistantSettings, now: NowSettings, };
 
-export type SettingsPatch = { general?: GeneralSettings, mail?: MailSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, badge?: BadgeSettings, compose?: ComposeSettings, translation?: TranslationSettings, assistant?: AssistantSettings, };
+export type SettingsPatch = { general?: GeneralSettings, mail?: MailSettings, appearance?: AppearanceSettings, security?: SecuritySettings, layout?: LayoutSettingsPatch, notifications?: NotificationSettings, badge?: BadgeSettings, compose?: ComposeSettings, translation?: TranslationSettings, assistant?: AssistantSettings, now?: NowSettings, };
 
 export type SettingsSnapshot = { settings: AppSettings,
 /**
