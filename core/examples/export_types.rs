@@ -114,6 +114,7 @@ fn main() {
         ThemeMode,
         FontSize,
         MailTheme,
+        WeekStartsOn,
         AppearanceSettings,
         RemoteImagePolicy,
         ImageFetchError,

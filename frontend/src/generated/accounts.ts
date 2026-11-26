@@ -619,6 +619,8 @@ export type FontSize = "small" | "default" | "large";
 
 export type MailTheme = "follow" | "light";
 
+export type WeekStartsOn = "sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday";
+
 export type AppearanceSettings = { theme: ThemeMode,
 /**
  * `""` or a lowercase `#rrggbb` color.
@@ -631,7 +633,7 @@ interfaceFont: string,
 /**
  * `""` or comma-separated font families for message bodies, tried in order.
  */
-mailFont: string, mailTheme: MailTheme, fontSize: FontSize, previewLines: PreviewLines, mailboxLabel: MailboxLabel, };
+mailFont: string, mailTheme: MailTheme, fontSize: FontSize, previewLines: PreviewLines, mailboxLabel: MailboxLabel, groupByDate: boolean, weekStartsOn: WeekStartsOn, };
 
 export type RemoteImagePolicy = "ask" | "automatic" | "never";
 

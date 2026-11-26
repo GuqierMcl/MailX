@@ -88,7 +88,7 @@ pub use settings::{
     McpSettings, NotificationSettings, NotificationSound, NowArrangement, NowSettings,
     PreviewLines, ReadingMode, RemoteImagePolicy, SecuritySettings, ServiceRoute, SettingsChanged,
     SettingsPatch, SettingsSnapshot, SettingsStore, StartupView, ThemeMode, TranslationProviderId,
-    TranslationSettings, mail_body_css,
+    TranslationSettings, WeekStartsOn, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::manager::{

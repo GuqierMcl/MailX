@@ -40,7 +40,11 @@ type EmailCardProps = {
   /** How a multi-account view names the owning mailbox on each row. */
   mailboxLabel?: MailboxLabel
   index: number
+  /** Zero-based position among emails, excluding date headings. */
+  position?: number
   count: number
+  timeLabel?: string
+  dateGroupLabel?: string
   style: React.CSSProperties
   ref: React.Ref<HTMLDivElement>
   onFlag?: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
@@ -62,7 +66,7 @@ type EmailCardProps = {
 export type RowClick = { toggle: boolean; range: boolean }
 
 /** A message row with its state slot and quick actions kept outside the main link. */
-export function EmailCard({ email, sentView, account, selected: opened, previewLines, mailboxLabel = 'name', index, count, style, ref, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, verification, selectionMode = false, picked = false, menuOpen = false, onSelect }: EmailCardProps) {
+export function EmailCard({ email, sentView, account, selected: opened, previewLines, mailboxLabel = 'name', index, position = index, count, timeLabel, dateGroupLabel, style, ref, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, verification, selectionMode = false, picked = false, menuOpen = false, onSelect }: EmailCardProps) {
   useTranslation()
   // In a sent view the row is about who the mail went to. The avatar follows
   // the same person, so it never shows the account owner on every row.
@@ -188,7 +192,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
       ref={ref}
       role="listitem"
       aria-setsize={count}
-      aria-posinset={index + 1}
+      aria-posinset={position + 1}
       aria-current={selected ? 'true' : undefined}
       data-index={index}
       style={style}
@@ -251,6 +255,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
         data-email-id={group ? undefined : email.id}
         role={selectionMode && !group ? 'checkbox' : undefined}
         aria-checked={selectionMode && !group ? picked : undefined}
+        aria-description={dateGroupLabel}
         aria-label={group ? t(group.unread > 0 ? 'mail:senderGroupLabelUnread' : 'mail:senderGroupLabel', { name: displayName(email.from), total: group.total, unread: group.unread }) : undefined}
         className="order-2 flex min-w-0 flex-1 items-center gap-3 text-left outline-none"
       >
@@ -326,7 +331,7 @@ export function EmailCard({ email, sentView, account, selected: opened, previewL
             selected ? 'text-foreground' : 'text-muted-foreground',
           )}
         >
-          {formatListTime(email.receivedAt)}
+          {timeLabel ?? formatListTime(email.receivedAt)}
         </time>
         {hasActions && actionsMounted && (
           <div
