@@ -12,6 +12,8 @@ The local-first, AI-native email client—lightweight, fast, and built to unite 
 
 English | [简体中文](README.zh-CN.md)
 
+[Website](https://mailxapp.com/en/) · [Docs](https://mailxapp.com/en/docs/) · [Releases](https://github.com/GuqierMcl/MailX/releases)
+
 </div>
 
 <img src="docs/assets/screenshots/en/inbox-light.webp" alt="MailX main window (light)" width="860">
@@ -20,14 +22,22 @@ English | [简体中文](README.zh-CN.md)
 
 ## Features
 
-- **Every account, one inbox** — Add as many mailboxes as you like and read them together. Gmail, iCloud, Outlook, Microsoft 365, self-hosted Exchange, QQ Mail and 163 work out of the box; any other server that speaks IMAP and SMTP can be added by entering your settings.
-- **Local first** — Mail, drafts and attachments live on your own computer, so the app opens straight into what it already has. No MailX account, no cloud relay, no telemetry, and search runs entirely on this machine.
-- **AI native** — The built-in assistant works on your mail directly: it finds what needs a reply across every account, drafts answers and tidies the inbox. It shows what it did, cites the messages it used, and asks before it changes anything. If you'd rather use your own tools, connect them through the local MCP server.
-- **Fast and light** — A Rust core on the system WebView, with no bundled browser engine. MailX opens into locally cached mail without waiting on the network.
-- **Safe reading** — Message bodies render in an isolated sandbox that cannot reach the app, and remote images wait until you allow them.
-- **Writing and sending you can trust** — A separate composer window with rich text, attachments and pasted screenshots, and drafts saved as you type. Every message goes through a send queue with an optional undo, retries for eligible failures, and no automatic resend of a message the server may already have accepted.
-- **Translate in place** — Translate the message you are reading without disturbing its layout, with no setup or with a DeepL, Microsoft or Google key of your own. Nothing is sent until you agree.
-- **At home on your desktop** — IMAP IDLE for prompt inbox updates, new-mail notifications and an unread badge on the app icon, plus optional background operation, launch at login, in-app updates, light and dark themes, and an English and Chinese interface.
+### Unified Inbox & Reliable Sending
+
+- **Every account, one inbox** — Add as many mailboxes as you like and read them together. Gmail, iCloud, Outlook, Microsoft 365, self-hosted Exchange, QQ Mail, and 163 work out of the box; any other IMAP/SMTP server can be added manually.
+- **Fast and light** — Built on a Rust core and the system WebView, with no bundled browser engine. MailX opens straight into locally cached mail without waiting on the network.
+- **Writing and sending you can trust** — A dedicated composer window supports rich text, attachments, pasted screenshots, and continuous draft saving. Sends go through a queue with optional undo, automatic retries for eligible failures, and protection against resending mail the server may already have accepted.
+- **At home on your desktop** — IMAP IDLE for prompt inbox updates, new-mail notifications, an unread badge on the app icon, background operation, launch at login, in-app updates, light/dark themes, and an English/Chinese interface.
+
+### Built-in AI & Translation
+
+- **AI native** — The built-in assistant finds what needs a reply across all accounts, drafts responses, and helps tidy your inbox. It explains its actions, cites source messages, and asks before making changes—or you can connect your own tools via the local MCP server.
+- **Translate in place** — Translate messages without disturbing their layout, either out of the box or with your own DeepL, Microsoft, or Google key. Nothing is sent until you agree.
+
+### Local-First & Safe Reading
+
+- **Local first** — Mail, drafts, and attachments live on your computer, with local full-text search and zero MailX accounts, cloud relays, or telemetry.
+- **Safe reading** — Message bodies render in an isolated sandbox that cannot reach the app, and remote images stay blocked until you allow them.
 
 ## Screenshots
 
@@ -57,7 +67,10 @@ English | [简体中文](README.zh-CN.md)
 
 ## Supported Mailboxes
 
-These services have been tested for compatibility and for sending and receiving. Pick one, enter your address and the password, authorization code or app-specific password your provider issues for mail clients, and the server settings are filled in for you; Outlook and Microsoft 365 sign in through your browser instead.
+These services have been tested for compatibility and for sending and receiving, with server settings filled in automatically:
+
+- **Browser sign-in (OAuth):** Outlook, Microsoft 365
+- **Password / app-specific password / authorization code:** Gmail, iCloud Mail, Exchange (self-hosted), QQ Mail, 163 Mail, 126 Mail, Yeah Mail, 139 Mail, Sina Free Mail, Feishu Mail, Lark Mail
 
 <p align="center">
   <img src="frontend/src/assets/providers/gmail.svg" alt="Gmail" height="28">
@@ -106,24 +119,32 @@ Prerequisites:
 
 ```sh
 bun install --frozen-lockfile
-bun tauri dev       # run the desktop app in development mode
+bun run desktop:dev           # run the desktop app in development mode
 bun run desktop:dev:isolated  # same, with its own data, passwords and app identity
 # Build unsigned local installers without the project's updater signing key
 bun tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
-bun run check       # run the version, type, lint, test, build and Rust checks
+bun run check                 # run version, i18n, generated types, typecheck, lint, test, build and Rust checks
 ```
 
 See [docs/development/README.md](docs/development/README.md) for the full list of commands.
 
 ## Privacy & Data
 
-- **Your mail is stored locally.** Headers, downloaded messages, drafts and attachments are kept in a local database and files. There is no MailX account, cloud relay or telemetry; the mail cache itself is not encrypted by MailX.
-- **Passwords live in the system keychain** — macOS Keychain, Windows Credential Manager or the Secret Service on Linux — and are never shown back in the app.
-- **Connections you control.** Each account can connect directly or through its own SOCKS5 or HTTP proxy, and if the proxy fails MailX stops rather than quietly connecting without it. MailX connects to your mail servers and checks GitHub for updates at launch and every hour; you can turn off automatic downloads; enabling avatar lookups or allowing remote images also makes requests to the relevant image services. Avatar lookups are off by default, and remote images ask first.
+| Data | Where it lives or goes | Control |
+| --- | --- | --- |
+| Mail, drafts & attachments | Local database & files (unencrypted cache) | No MailX account, cloud relay, or telemetry |
+| Passwords & API keys | System keychain (Keychain / Credential Manager / Secret Service) | Never displayed back in the app |
+| Mail connections & updates | Your mail servers; GitHub (launch & hourly update checks) | Per-account SOCKS5/HTTP proxy (no direct fallback); auto-download can be disabled |
+| Remote images & avatars | External image hosts | Remote images ask first; avatar lookups are off by default |
+| Translation | Your chosen translation service (subject & body text only) | Sent only after you agree; saved translations stay local |
+| AI assistant & summaries | Your configured model provider (or local Ollama) | Sent only after first-time consent; attachments & image contents are never sent |
+| Local MCP server | Connected local MCP clients | Off by default; disabling revokes access; cannot delete mail |
+
 - **Mail you send carries its own images.** Pictures inserted into the body travel inside the message; displaying them does not require downloading from an external image server.
-- **Translation sends text only when you ask.** After you agree, translating a message sends its subject and text to the service you chose, and nothing else; a key of your own stays in the system keychain, and an optional proxy is used for translation only. Saved translations stay on this computer.
-- **AI sends mail only to the provider you set up, after you agree.** MailX has no AI of its own: the assistant, summaries and writing help use a model provider you add yourself, and nothing is sent until you agree the first time. Then what you type and the text, subject, sender, recipients, date and attachment names of the mail or drafts involved go to that provider; the contents of attachments and pictures do not. The assistant may read several messages to answer, only in the mailboxes you allow. Opening AI settings also downloads a public model list from models.dev. Your API key stays in the system keychain, an optional proxy is used for AI only, and with local models such as Ollama your mail goes only to this computer. Chats and summaries are saved on this computer; you can take back your agreement in Settings.
-- **MCP is off by default.** Enabling it grants connected local clients access to all accounts, draft management, local file attachments, attachment export and direct sending without per-message confirmation. A client may forward mail content to its AI provider. Disable MCP in Settings to revoke access; MCP cannot delete mail.
+- **AI details:** After consent, your prompt along with the text, subject, sender, recipients, date, and attachment names of involved mail or drafts are sent to the provider you configured (scoped to the mailboxes you allow). Opening AI settings also fetches a public model catalog from [models.dev](https://models.dev). Chats and summaries stay on this computer, and consent can be withdrawn in Settings.
+- **MCP details:** Enabling MCP grants connected local clients access to all accounts, draft management, local file attachments, attachment export, and direct sending without per-message confirmation (a client may forward mail content to its AI provider).
+
+See the [privacy guide](docs/guides/en/privacy.md) for the full breakdown.
 
 ## Known Limitations
 
@@ -133,15 +154,12 @@ See [docs/development/README.md](docs/development/README.md) for the full list o
 
 ## Documentation
 
-Design and development documentation is written in Chinese; the user guide, contributing, security and conduct documents are available in both English and Chinese.
+Design and development documentation is written in Chinese; the user guide, contributing, security, and conduct documents are available in both English and Chinese.
 
-- [Documentation index](docs/README.md)
-- [Getting started](docs/guides/README.md) · [简体中文](docs/guides/zh-CN/README.md)
-- [Architecture overview](docs/architecture/overview.md)
-- [Product scope](docs/product/README.md)
-- [AI design](docs/ai-runtime/README.md)
-- [Development guide](docs/development/README.md)
-- [Roadmap](docs/roadmap/README.md)
+| Audience | Documents |
+| --- | --- |
+| **Users** | [Online docs](https://mailxapp.com/en/docs/) · [Getting started](docs/guides/README.md) ([简体中文](docs/guides/zh-CN/README.md)) · [Privacy](docs/guides/en/privacy.md) |
+| **Contributors** | [Documentation index](docs/README.md) · [Architecture overview](docs/architecture/overview.md) · [Product scope](docs/product/README.md) · [AI design](docs/ai-runtime/README.md) · [Development guide](docs/development/README.md) · [Roadmap](docs/roadmap/README.md) |
 
 ## Contributing
 
