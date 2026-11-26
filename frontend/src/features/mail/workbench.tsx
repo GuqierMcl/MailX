@@ -177,6 +177,8 @@ export function Workbench({ client }: { client: MailxClient }) {
   const navCollapsed = settingsQuery.data?.settings.layout.navCollapsed ?? false
   const previewLines = settingsQuery.data?.settings.appearance.previewLines ?? 'one'
   const mailboxLabel = settingsQuery.data?.settings.appearance.mailboxLabel ?? 'name'
+  const groupByDate = settingsQuery.data?.settings.appearance.groupByDate ?? true
+  const weekStartsOn = settingsQuery.data?.settings.appearance.weekStartsOn ?? 'monday'
   const listWidth = clampListWidth(settingsQuery.data?.settings.layout.listWidth ?? LIST_DEFAULT)
   const layoutReady = !settingsQuery.isPending
   const assistant = useAssistantUsable(client)
@@ -1142,6 +1144,8 @@ export function Workbench({ client }: { client: MailxClient }) {
               selectedId={highlighted}
               previewLines={previewLines}
               mailboxLabel={mailboxLabel}
+              groupByDate={groupByDate}
+              weekStartsOn={weekStartsOn}
               onFilterChange={setFilter}
               onSelect={openEmail}
               onFlag={(email, flag, wanted) => void setFlag(email, flag, wanted)}

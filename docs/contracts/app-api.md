@@ -304,6 +304,8 @@ HTML、原始 MIME、凭证及文件路径不经 IPC 返回。
 
 `now`（`NowSettings`，设计见[「此刻」页面 4.3](../architecture/now-page.md#43-模块与排布)）记录「此刻」页的模块偏好：`arrangement`（`auto` 默认 / `fixed`，序列化为 camelCase）、`order`（固定顺序的模块 id 数组，空表示默认顺序）、`hidden`（永久隐藏的模块 id 数组）。模块 id 由界面定义，核心不认识具体模块：保存时丢弃格式不对的项（小写字母开头的 ASCII 字母串，最长 32 字符），去重并保持顺序，每个数组最多 32 项，**不认识但格式正确的 id 保留**，使降级后再升级不丢设置，不返回 `validation`。旧文件缺少该节时补默认值；手工编辑的文件里类型错误的字段单独回到默认值（与 `badge` 相同）。该节随 `settings_update` 的 `now` 整节替换，由“设置 → 外观 → 此刻”修改，页面上的“不再显示”也写入 `hidden`；“今天先不看”只存在本机 `localStorage`（`mailx.now.snoozed`），不进入设置文件。
 
+`appearance.groupByDate` 是布尔值，默认 `true`。`appearance.weekStartsOn` 是 `WeekStartsOn`，取 `monday`（默认）、`tuesday`、`wednesday`、`thursday`、`friday`、`saturday` 或 `sunday`。旧设置文件缺少这些字段时分别补默认值，外观设置提交时随 `appearance` 整节保存。两个字段均用于前端展示，邮件查询及游标继续按原顺序分页。日期边界与显示规则见[界面设计](../architecture/ui-design.md#邮件列表按日期分组)。
+
 `layout.assistantWidth` 是 AI 对话岛的宽度，320–560（默认 380）；越界返回 `validation`，加载时钳制到范围内，旧文件缺少该字段时补默认值。
 
 `layout.readingMode` 取 `split`（分屏视图，默认）或 `single`（单栏视图）。设置文件缺少该字段或其值无效时，加载为 `split`。通过现有 `LayoutSettingsPatch` 提交该字段，非法值返回 `validation`，`field` 为 `layout.readingMode`。`layout.listWidth` 与 `layout.readerCollapsed` 独立保存，用于恢复分屏视图。

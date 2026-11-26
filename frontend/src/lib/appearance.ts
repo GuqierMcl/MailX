@@ -1,5 +1,5 @@
 import { syncWindowTheme } from '@/features/window-chrome/window-host'
-import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ThemeMode } from '@/generated/accounts'
+import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ThemeMode, WeekStartsOn } from '@/generated/accounts'
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   theme: 'system',
@@ -10,6 +10,8 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   fontSize: 'default',
   previewLines: 'one',
   mailboxLabel: 'name',
+  groupByDate: true,
+  weekStartsOn: 'monday',
 }
 
 /** Used only when the user leaves the interface font empty. Keep in sync with `index.css`. */
@@ -158,6 +160,7 @@ const MAIL_THEMES: readonly string[] = ['follow', 'light'] satisfies MailTheme[]
 const FONT_SIZES: readonly string[] = ['small', 'default', 'large'] satisfies FontSize[]
 const MAILBOX_LABELS: readonly string[] = ['name', 'icon'] satisfies MailboxLabel[]
 const PREVIEW_LINES: readonly string[] = ['none', 'one', 'two', 'three'] satisfies PreviewLines[]
+const WEEK_STARTS: readonly string[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] satisfies WeekStartsOn[]
 
 /**
  * The core's `settings.json` is the source of truth; this copy only lets the
@@ -177,6 +180,8 @@ export function cachedAppearance(): AppearanceSettings {
         fontSize: FONT_SIZES.includes(cached.fontSize as string) ? (cached.fontSize as FontSize) : 'default',
         previewLines: PREVIEW_LINES.includes(cached.previewLines as string) ? (cached.previewLines as PreviewLines) : 'one',
         mailboxLabel: MAILBOX_LABELS.includes(cached.mailboxLabel as string) ? (cached.mailboxLabel as MailboxLabel) : 'name',
+        groupByDate: typeof cached.groupByDate === 'boolean' ? cached.groupByDate : DEFAULT_APPEARANCE.groupByDate,
+        weekStartsOn: WEEK_STARTS.includes(cached.weekStartsOn as string) ? (cached.weekStartsOn as WeekStartsOn) : DEFAULT_APPEARANCE.weekStartsOn,
       }
     }
   } catch {

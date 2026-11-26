@@ -101,8 +101,21 @@ pub enum MailTheme {
     Light,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum WeekStartsOn {
+    Sunday,
+    #[default]
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+}
+
 /// Empty strings mean "use the built-in default".
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppearanceSettings {
     pub theme: ThemeMode,
@@ -116,6 +129,25 @@ pub struct AppearanceSettings {
     pub font_size: FontSize,
     pub preview_lines: PreviewLines,
     pub mailbox_label: MailboxLabel,
+    pub group_by_date: bool,
+    pub week_starts_on: WeekStartsOn,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            theme: ThemeMode::default(),
+            accent_color: String::new(),
+            interface_font: String::new(),
+            mail_font: String::new(),
+            mail_theme: MailTheme::default(),
+            font_size: FontSize::default(),
+            preview_lines: PreviewLines::default(),
+            mailbox_label: MailboxLabel::default(),
+            group_by_date: true,
+            week_starts_on: WeekStartsOn::default(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1515,6 +1547,23 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
         .get_mut("settings")
         .and_then(serde_json::Value::as_object_mut)
     {
+        if let Some(appearance) = settings
+            .get_mut("appearance")
+            .and_then(serde_json::Value::as_object_mut)
+        {
+            if appearance
+                .get("groupByDate")
+                .is_some_and(|value| !value.is_boolean())
+            {
+                appearance.remove("groupByDate");
+            }
+            if appearance
+                .get("weekStartsOn")
+                .is_some_and(|value| serde_json::from_value::<WeekStartsOn>(value.clone()).is_err())
+            {
+                appearance.remove("weekStartsOn");
+            }
+        }
         if let Some(mail) = settings.get_mut("mail") {
             if let Some(mail) = mail.as_object_mut() {
                 if mail

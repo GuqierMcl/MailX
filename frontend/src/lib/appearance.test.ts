@@ -43,7 +43,7 @@ describe('font families', () => {
 
 describe('applyAppearance', () => {
   it('applies the theme, accent, font and size, and resets them', () => {
-    applyAppearance({ theme: 'dark', accentColor: '#facc15', interfaceFont: 'Georgia', mailFont: '', mailTheme: 'follow', fontSize: 'large', previewLines: 'one', mailboxLabel: 'name' })
+    applyAppearance({ ...DEFAULT_APPEARANCE, theme: 'dark', accentColor: '#facc15', interfaceFont: 'Georgia', fontSize: 'large' })
     expect(root()).toHaveClass('dark')
     expect(root().style.getPropertyValue('--primary')).toBe('#facc15')
     expect(root().style.getPropertyValue('--mail-selection-accent')).toBe('#facc15')
@@ -83,7 +83,7 @@ describe('applyAppearance', () => {
 
 describe('first-paint cache', () => {
   it('round-trips and tolerates corrupt or partial data', () => {
-    const appearance = { ...DEFAULT_APPEARANCE, theme: 'light' as const, interfaceFont: 'Georgia' }
+    const appearance = { ...DEFAULT_APPEARANCE, theme: 'light' as const, interfaceFont: 'Georgia', groupByDate: false, weekStartsOn: 'sunday' as const }
     cacheAppearance(appearance)
     expect(cachedAppearance()).toEqual(appearance)
 
