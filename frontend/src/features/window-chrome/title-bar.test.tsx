@@ -121,8 +121,9 @@ describe('TitleBar', () => {
     const desktop = vi.spyOn(tauri, 'isTauri').mockReturnValue(true)
     const windows = vi.spyOn(menuDesktop, 'listMenuWindows').mockResolvedValue([])
     const events = vi.spyOn(menuDesktop, 'listenToMenuEvent').mockReturnValue(() => {})
+    let unmount: (() => void) | undefined
     try {
-      render(<Commands />)
+      ({ unmount } = render(<Commands />))
       await screen.findByRole('button', { name: '应用菜单' })
       const input = screen.getByRole('textbox', { name: '主题' })
       input.focus()
@@ -132,6 +133,7 @@ describe('TitleBar', () => {
       expect(quit).not.toHaveBeenCalled()
       expect(perform).not.toHaveBeenCalled()
     } finally {
+      unmount?.()
       events.mockRestore()
       windows.mockRestore()
       desktop.mockRestore()
