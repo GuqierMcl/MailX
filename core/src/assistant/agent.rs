@@ -245,6 +245,7 @@ pub(crate) async fn chat(
     conversation: ActiveConversation,
     mut messages: Vec<ChatMessage>,
     context: Option<ChatContext>,
+    continuing: bool,
 ) {
     let _end = EndGuard {
         inner: inner.clone(),
@@ -255,7 +256,16 @@ pub(crate) async fn chat(
     let mut save = SaveGuard::new(inner.clone(), conversation);
     let id = save.id();
     let mut extras = RunExtras::default();
-    let outcome = chat_loop(&inner, &run_id, &id, &mut messages, &mut extras, context).await;
+    let outcome = chat_loop(
+        &inner,
+        &run_id,
+        &id,
+        &mut messages,
+        &mut extras,
+        context,
+        continuing,
+    )
+    .await;
     save.finish(match &outcome {
         Outcome::Finished(reason) => End::finished(*reason),
         Outcome::Failed(code) => End::failed(*code),
@@ -288,6 +298,7 @@ async fn chat_loop(
     messages: &mut Vec<ChatMessage>,
     extras: &mut RunExtras,
     context: Option<ChatContext>,
+    continuing: bool,
 ) -> Outcome {
     let definitions = definitions(&inner.tools);
     let definitions_cost = estimate(
@@ -335,6 +346,14 @@ async fn chat_loop(
             with_tools,
         );
         system.push_str(view_note.as_deref().unwrap_or_default());
+        // Going on with a cut-off reply: said once, in the turn that resumes it.
+        if continuing && turn_number == 1 {
+            system.push_str(
+                "\n\nThe user asked you to go on with your previous reply, which was cut off \
+                 (stopped, or too long for the output limit). Continue it exactly where it stopped: \
+                 no greeting, no repetition of what you already wrote, and finish the thought.",
+            );
+        }
         let tools_cost = if with_tools { definitions_cost } else { 0 };
         let cost =
             estimate(&system) + tools_cost + estimate_messages(messages, &origin(&ready.target));

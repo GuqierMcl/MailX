@@ -22,7 +22,7 @@ const reply = (over: Partial<ChatTurn>): ChatMessage => ({ id: 'r', role: 'assis
 function view(children: React.ReactNode) {
   const env: ChatEnv = {
     client: testClient(), accounts: [], folders: [], onOpenFolder: vi.fn(), undone: new Set(),
-    onOpenEmail: vi.fn(), onOpenDraft: vi.fn(), respond: vi.fn(), retry: vi.fn(), focusInput: vi.fn(), markUndone: vi.fn(),
+    onOpenEmail: vi.fn(), onOpenDraft: vi.fn(), respond: vi.fn(), retry: vi.fn(), focusInput: vi.fn(), markUndone: vi.fn(), regenerate: vi.fn(), continueReply: vi.fn(), onEdit: vi.fn(),
   }
   return <TooltipProvider><ChatEnvContext value={env}>{children}</ChatEnvContext></TooltipProvider>
 }

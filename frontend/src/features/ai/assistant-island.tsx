@@ -19,6 +19,7 @@ import { ChatHistory } from './chat-history'
 import { ChatInput } from './chat-input'
 import { ChatMessages } from './chat-messages'
 import { useSharedAssistantChat } from './assistant-chat-context'
+import { toast } from '@/components/ui/toast'
 import { useStickToBottom } from './use-stick-to-bottom'
 
 /** What the user is looking at, as the island offers it to the next message. */
@@ -43,6 +44,13 @@ function placeholder(view: AssistantView | null) {
 }
 
 const WAITING_CARD = '[data-slot="confirm-card"][data-status="waiting"]'
+
+/** What was asked when consent was missing: repeated once the user agrees. */
+type Waiting =
+  | { kind: 'send'; message: string; context: ChatContext | null }
+  | { kind: 'regenerate' }
+  | { kind: 'continue' }
+  | { kind: 'edit'; messageId: string; message: string; context: ChatContext | null }
 
 function Pill({ onClick, children }: { onClick: () => void; children: ReactNode }) {
   return (
@@ -268,7 +276,8 @@ function AssistantIslandView({ client, chat, service, view, width, overlay, onWi
   useTranslation()
   const reduced = usePrefersReducedMotion()
   const [input, setInput] = useState<HTMLTextAreaElement | null>(null)
-  const [waiting, setWaiting] = useState<{ message: string; context: ChatContext | null } | null>(null)
+  /** The run that stopped for consent; `restore` puts a typed message back if the user declines. */
+  const [waiting, setWaiting] = useState<Waiting | null>(null)
   const granted = useRef(false)
   const [restore, setRestore] = useState<{ text: string; key: number } | null>(null)
   const [dismissed, setDismissed] = useState<string | null>(null)
@@ -301,9 +310,32 @@ function AssistantIslandView({ client, chat, service, view, width, overlay, onWi
 
   const send = useCallback((message: string, context: ChatContext | null) => {
     void chat.send(message, context).then((result) => {
-      if (result === 'consent') { granted.current = false; setWaiting({ message, context }) }
+      if (result === 'consent') setWaiting({ kind: 'send', message, context })
     })
   }, [chat])
+
+  const regenerate = useCallback(() => {
+    void chat.regenerate().then((result) => {
+      if (result === 'consent') setWaiting({ kind: 'regenerate' })
+      else if (result === 'failed') toast.error(t('ai:chat.redoFailed'))
+    })
+  }, [chat])
+
+  const continueReply = useCallback(() => {
+    void chat.continueReply().then((result) => {
+      if (result === 'consent') setWaiting({ kind: 'continue' })
+      else if (result === 'failed') toast.error(t('ai:chat.redoFailed'))
+    })
+  }, [chat])
+
+  // Reworded about what is on screen now, as a newly typed message would be.
+  const editContext = activeView?.context ?? null
+  const editMessage = useCallback((messageId: string, message: string, context: ChatContext | null = editContext) => {
+    void chat.edit(messageId, message, context).then((result) => {
+      if (result === 'consent') setWaiting({ kind: 'edit', messageId, message, context })
+      else if (result === 'failed') toast.error(t('ai:chat.redoFailed'))
+    })
+  }, [chat, editContext])
 
   const newChat = useCallback(() => { chat.reset(); focusInput() }, [chat, focusInput])
 
@@ -331,8 +363,9 @@ function AssistantIslandView({ client, chat, service, view, width, overlay, onWi
   const env = useMemo<ChatEnv>(() => ({
     client, onOpenEmail, onOpenDraft, accounts, folders, onOpenFolder: (folder) => onSelectMailbox({ kind: 'folder', folder }),
     respond: (approved) => { void chat.respond(approved) }, retry: () => { void chat.retry() },
+    regenerate, continueReply, onEdit: editMessage,
     focusInput, undone: chat.undone, markUndone: chat.markUndone,
-  }), [accounts, chat, client, focusInput, folders, onOpenDraft, onOpenEmail, onSelectMailbox])
+  }), [accounts, chat, client, continueReply, editMessage, focusInput, folders, onOpenDraft, onOpenEmail, onSelectMailbox, regenerate])
 
   // Esc anywhere in the island stops a reply; the mail behind it stays as it is (the workbench leaves Esc from here alone).
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -432,9 +465,20 @@ function AssistantIslandView({ client, chat, service, view, width, overlay, onWi
           if (open) return
           const asked = waiting
           setWaiting(null)
-          queueMicrotask(() => { if (asked && !granted.current) setRestore({ text: asked.message, key: Date.now() }) })
+          queueMicrotask(() => {
+            const agreed = granted.current
+            granted.current = false
+            if (asked?.kind === 'send' && !agreed) setRestore({ text: asked.message, key: Date.now() })
+          })
         }}
-        onGranted={() => { granted.current = true; if (waiting) send(waiting.message, waiting.context) }}
+        onGranted={() => {
+          granted.current = true
+          const asked = waiting
+          if (asked?.kind === 'send') send(asked.message, asked.context)
+          else if (asked?.kind === 'regenerate') regenerate()
+          else if (asked?.kind === 'continue') continueReply()
+          else if (asked?.kind === 'edit') editMessage(asked.messageId, asked.message, asked.context)
+        }}
       />
     </Island>
   )

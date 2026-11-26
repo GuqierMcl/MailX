@@ -55,6 +55,11 @@ const NEW_DRAFT_TOOLS: &[&str] = &["draft_create", "draft_reply"];
 const DRAFT_CHANGE_TOOLS: &[&str] = &["draft_update", "draft_delete", "draft_attachments"];
 const SEND_TOOLS: &[&str] = &["outbox_send", "outbox_cancel"];
 
+/// Whether the tool only reads: running it again changes nothing.
+pub(crate) fn is_read(tool: &str) -> bool {
+    READ_TOOLS.contains(&tool)
+}
+
 /// Whether the tool changes an existing draft, so the loop must look the
 /// draft up before deciding.
 pub(crate) fn needs_draft(tool: &str) -> bool {

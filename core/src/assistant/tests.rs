@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 use super::{
-    conversations::{Conversations, MAX_CONVERSATIONS, STOPPED_MARKER, ToolRecord},
+    conversations::{Conversations, MAX_CONVERSATIONS, RunExtras, STOPPED_MARKER, ToolRecord},
     runs::{KEEP_FINISHED_FOR, KEEP_FINISHED_RUNS, MAX_ACTIVE_RUNS, Runs},
     *,
 };
@@ -335,6 +335,9 @@ fn chat_request(conversation_id: Option<&str>, message: &str) -> StartRun {
             conversation_id: conversation_id.map(str::to_owned),
             message: message.into(),
             context: None,
+            regenerate: None,
+            continuation: None,
+            edit: None,
         },
     }
 }
@@ -2643,6 +2646,116 @@ fn a_dropped_guard_leaves_history_ending_with_the_assistant() {
     assert_eq!(store.history(&id).unwrap().len(), 2);
 }
 
+#[test]
+fn a_reply_that_changed_nothing_can_be_gone_over_and_its_history_taken_back() {
+    let store = Arc::new(Conversations::default());
+    let (guard, _) = store.begin(None, "q".into()).unwrap();
+    let id = guard.id.clone();
+    let mut messages = store.history(&id).unwrap();
+    messages.push(ChatMessage::Assistant {
+        text: "first answer".into(),
+        tool_calls: Vec::new(),
+        reasoning: None,
+    });
+    store.commit(&id, &messages, &RunExtras::default());
+    drop(guard);
+
+    // Going over it takes the reply back and leaves the question.
+    let (guard, history) = store.begin_regenerate(&id).unwrap();
+    assert_eq!(history.len(), 1);
+    assert!(matches!(&history[0], ChatMessage::User(text) if text == "q"));
+    assert_eq!(store.history(&id).unwrap().len(), 1);
+    // The new run never started: the old reply comes back as it was.
+    guard.rollback();
+    let history = store.history(&id).unwrap();
+    assert_eq!(history.len(), 2);
+    assert!(matches!(&history[1], ChatMessage::Assistant { text, .. } if text == "first answer"));
+    assert!(store.begin_regenerate(&id).is_ok());
+}
+
+#[test]
+fn a_reply_that_changed_mail_is_never_gone_over() {
+    let store = Arc::new(Conversations::default());
+    let (guard, _) = store.begin(None, "archive it".into()).unwrap();
+    let id = guard.id.clone();
+    let mut messages = store.history(&id).unwrap();
+    messages.push(ChatMessage::Assistant {
+        text: String::new(),
+        tool_calls: vec![crate::ai::client::stream::ToolCallRequest {
+            id: "a".into(),
+            name: "mail_archive".into(),
+            arguments: serde_json::json!({ "emailIds": ["e"], "archive": true }),
+        }],
+        reasoning: None,
+    });
+    messages.push(ChatMessage::ToolResult {
+        call_id: "a".into(),
+        content: "{}".into(),
+        is_error: false,
+    });
+    messages.push(ChatMessage::Assistant {
+        text: "done".into(),
+        tool_calls: Vec::new(),
+        reasoning: None,
+    });
+    store.commit(&id, &messages, &RunExtras::default());
+    drop(guard);
+    assert!(matches!(
+        store.begin_regenerate(&id),
+        Err(error) if error.code == ErrorCode::Conflict
+    ));
+    // A read-only call does not stand in the way.
+    let store = Arc::new(Conversations::default());
+    let (guard, _) = store.begin(None, "search".into()).unwrap();
+    let id = guard.id.clone();
+    let mut messages = store.history(&id).unwrap();
+    messages.push(ChatMessage::Assistant {
+        text: String::new(),
+        tool_calls: vec![crate::ai::client::stream::ToolCallRequest {
+            id: "a".into(),
+            name: "mail_search".into(),
+            arguments: serde_json::json!({ "query": "x" }),
+        }],
+        reasoning: None,
+    });
+    messages.push(ChatMessage::ToolResult {
+        call_id: "a".into(),
+        content: "{}".into(),
+        is_error: false,
+    });
+    messages.push(ChatMessage::Assistant {
+        text: "found".into(),
+        tool_calls: Vec::new(),
+        reasoning: None,
+    });
+    store.commit(&id, &messages, &RunExtras::default());
+    drop(guard);
+    assert!(store.begin_regenerate(&id).is_ok());
+}
+
+#[test]
+fn going_on_keeps_the_history_and_needs_a_reply_to_go_on_with() {
+    let store = Arc::new(Conversations::default());
+    let (guard, _) = store.begin(None, "q".into()).unwrap();
+    let id = guard.id.clone();
+    let mut messages = store.history(&id).unwrap();
+    messages.push(ChatMessage::Assistant {
+        text: "half a".into(),
+        tool_calls: Vec::new(),
+        reasoning: None,
+    });
+    store.commit(&id, &messages, &RunExtras::default());
+    drop(guard);
+    let (guard, history) = store.begin_continue(&id).unwrap();
+    assert_eq!(history.len(), 2, "the history is left as it ends");
+    assert_eq!(store.history(&id).unwrap().len(), 2);
+    // Rolling a continuation back keeps what it went on with, as it was.
+    guard.rollback();
+    let history = store.history(&id).unwrap();
+    assert_eq!(history.len(), 2);
+    assert!(matches!(&history[1], ChatMessage::Assistant { text, .. } if text == "half a"));
+}
+
 // ------------------------------------------------------ saved conversations
 
 impl Fx {
@@ -3688,6 +3801,9 @@ fn chat_about(message: &str, context: crate::ChatContext) -> StartRun {
             conversation_id: None,
             message: message.into(),
             context: Some(context),
+            regenerate: None,
+            continuation: None,
+            edit: None,
         },
     }
 }
@@ -3853,4 +3969,129 @@ async fn a_draft_view_says_it_may_be_open_and_bad_contexts_are_rejected() {
             .unwrap_err();
         assert_eq!(error.field.as_deref(), Some("context"));
     }
+}
+
+fn answered(store: &Arc<Conversations>, id: Option<&str>, question: &str, answer: &str) -> String {
+    let (guard, _) = store.begin(id, question.into()).unwrap();
+    let id = guard.id.clone();
+    let mut messages = store.history(&id).unwrap();
+    messages.push(ChatMessage::Assistant {
+        text: answer.into(),
+        tool_calls: Vec::new(),
+        reasoning: None,
+    });
+    store.commit(&id, &messages, &RunExtras::default());
+    drop(guard);
+    id
+}
+
+fn said(history: &[ChatMessage]) -> Vec<&str> {
+    history
+        .iter()
+        .map(|message| match message {
+            ChatMessage::User(text) => text.as_str(),
+            ChatMessage::Assistant { text, .. } => text.as_str(),
+            ChatMessage::ToolResult { content, .. } => content.as_str(),
+        })
+        .collect()
+}
+
+#[test]
+fn an_edited_message_takes_the_place_of_it_and_all_after_it() {
+    let store = Arc::new(Conversations::default());
+    let id = answered(&store, None, "first", "a1");
+    answered(&store, Some(&id), "second", "a2");
+    answered(&store, Some(&id), "third", "a3");
+
+    let (guard, history) = store.begin_edit(&id, 1, "second, reworded".into()).unwrap();
+    assert_eq!(said(&history), ["first", "a1", "second, reworded"]);
+    // The run never started: everything comes back as it was.
+    guard.rollback();
+    assert_eq!(
+        said(&store.history(&id).unwrap()),
+        ["first", "a1", "second", "a2", "third", "a3"]
+    );
+    assert!(matches!(
+        store.begin_edit(&id, 3, "none".into()),
+        Err(error) if error.field.as_deref() == Some("edit")
+    ));
+}
+
+#[test]
+fn nothing_that_changed_mail_is_edited_away() {
+    let store = Arc::new(Conversations::default());
+    let id = answered(&store, None, "first", "a1");
+    let (guard, _) = store.begin(Some(&id), "archive it".into()).unwrap();
+    let mut messages = store.history(&id).unwrap();
+    messages.push(ChatMessage::Assistant {
+        text: String::new(),
+        tool_calls: vec![crate::ai::client::stream::ToolCallRequest {
+            id: "a".into(),
+            name: "mail_archive".into(),
+            arguments: serde_json::json!({ "emailIds": ["e"], "archive": true }),
+        }],
+        reasoning: None,
+    });
+    messages.push(ChatMessage::ToolResult {
+        call_id: "a".into(),
+        content: "{}".into(),
+        is_error: false,
+    });
+    store.commit(&id, &messages, &RunExtras::default());
+    drop(guard);
+    answered(&store, Some(&id), "third", "a3");
+    // Before the archive: it would go from history but not from the mailbox.
+    assert!(matches!(
+        store.begin_edit(&id, 0, "x".into()),
+        Err(error) if error.code == ErrorCode::Conflict
+    ));
+    // After it: nothing that changed mail goes.
+    assert!(store.begin_edit(&id, 2, "third, reworded".into()).is_ok());
+}
+
+#[tokio::test]
+async fn an_edit_is_saved_over_the_old_message_and_reads_back_without_it() {
+    let fx = Fx::new().await;
+    fx.model(vec![say("a1"), say("a2"), say("a3"), say("a2, again")]);
+    let id = fx.chat_and_wait("first").await.conversation_id.unwrap();
+    for message in ["second", "third"] {
+        let run = fx
+            .assistant
+            .start(chat_request(Some(&id), message))
+            .await
+            .unwrap();
+        fx.finished(&run.run_id).await;
+    }
+    let edited = fx
+        .assistant
+        .start(StartRun {
+            kind: RunKind::Chat {
+                conversation_id: Some(id.clone()),
+                message: "second, reworded".into(),
+                context: None,
+                regenerate: None,
+                continuation: None,
+                edit: Some(1),
+            },
+        })
+        .await
+        .unwrap();
+    fx.finished(&edited.run_id).await;
+    // The model was asked with the history up to the reworded message only.
+    let sent = fx.request(3)["messages"].as_array().unwrap().clone();
+    let last = sent.last().unwrap();
+    assert_eq!(last["content"], "second, reworded");
+    assert!(!sent.iter().any(|m| m["content"] == "third"));
+
+    // Read back from storage, not memory.
+    fx.assistant.inner.conversations.remove(&id);
+    let detail = fx.assistant.mail_conversation(&id).await.unwrap();
+    let texts: Vec<_> = detail
+        .turns
+        .iter()
+        .map(|turn| match turn {
+            ChatTurn::User { text, .. } | ChatTurn::Assistant { text, .. } => text.as_str(),
+        })
+        .collect();
+    assert_eq!(texts, ["first", "a1", "second, reworded", "a2, again"]);
 }

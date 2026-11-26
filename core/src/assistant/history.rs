@@ -208,17 +208,25 @@ pub(crate) struct Loaded {
     pub stamps: Vec<String>,
     /// Rows read, including closing rows.
     pub rows: u32,
+    /// The row of each user message, by its index in `messages`.
+    pub user_rows: std::collections::BTreeMap<usize, u32>,
 }
 
 /// `StorageIncompatible` when a row cannot be read.
 pub(crate) fn load(rows: &[StoredRow]) -> Result<Loaded, AppError> {
     let mut messages = Vec::new();
     let mut stamps = Vec::new();
-    for stored in rows {
+    let mut user_rows = std::collections::BTreeMap::new();
+    for (row, stored) in rows.iter().enumerate() {
         let content: Content = serde_json::from_str(&stored.content)
             .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
         let message = match content {
-            Content::User { text } => ChatMessage::User(text),
+            Content::User { text } => {
+                if let Ok(row) = u32::try_from(row) {
+                    user_rows.insert(messages.len(), row);
+                }
+                ChatMessage::User(text)
+            }
             Content::Assistant {
                 text,
                 tool_calls,
@@ -254,6 +262,7 @@ pub(crate) fn load(rows: &[StoredRow]) -> Result<Loaded, AppError> {
         messages,
         stamps,
         rows: u32::try_from(rows.len()).unwrap_or(u32::MAX),
+        user_rows,
     })
 }
 

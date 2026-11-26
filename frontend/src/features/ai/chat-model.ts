@@ -24,8 +24,49 @@ export type ChatTurn = {
 }
 
 export type ChatMessage =
-  | { id: string; role: 'user'; text: string }
-  | { id: string; role: 'assistant'; turn: ChatTurn }
+  | { id: string; role: 'user'; text: string; at?: number }
+  | { id: string; role: 'assistant'; turn: ChatTurn; at?: number }
+
+/** When a message was said: a reply when it finished, a message when it was sent. */
+export function messageTime(message: ChatMessage): Date | null {
+  const at = message.role === 'assistant' ? message.turn.finishedAt ?? (message.at ? new Date(message.at) : null) : message.at ? new Date(message.at) : null
+  return at && !Number.isNaN(at.getTime()) ? at : null
+}
+
+/** Whether a reply changed mail: re-running it would do it a second time, so it is not offered. */
+export function turnChangedMail(turn: ChatTurn): boolean {
+  const changed = turn.tools.some((tool) => tool.summary.type === 'changed' || tool.summary.type === 'draft' || tool.summary.type === 'outbox')
+  return changed || turn.confirms.length > 0 || (turn.saved?.outcomes.length ?? 0) > 0
+}
+
+/** Whether a reply stopped short and can be gone on with: stopped, or cut off by a limit. */
+export function turnCanContinue(turn: ChatTurn): boolean {
+  return turn.state === 'canceled' || turn.finishedReason === 'limit' || turn.finishedReason === 'length'
+}
+
+/**
+ * A reply that was gone on with, shown as one: the new run's parts follow the old ones, its text
+ * after the old text (offsets and thinking stretches moved along), its state the new run's.
+ */
+export function joinTurns(before: ChatTurn, after: ChatTurn): ChatTurn {
+  const shift = before.text.length
+  const segments = Math.max(-1, ...(before.reasoning ?? []).map((thought) => thought.segment)) + 1
+  const outcomes = before.saved?.outcomes ?? []
+  return {
+    ...after,
+    text: before.text + after.text,
+    tools: [...before.tools, ...after.tools.map((tool) => ({ ...tool, at: tool.at + shift }))],
+    reasoning: [
+      ...(before.reasoning ?? []),
+      ...(after.reasoning ?? []).map((thought) => ({
+        ...thought, segment: thought.segment + segments, at: thought.at + shift, toolsBefore: thought.toolsBefore + before.tools.length,
+      })),
+    ],
+    confirms: [...before.confirms, ...after.confirms.map((confirm) => ({ ...confirm, at: confirm.at + shift }))],
+    answers: { ...before.answers, ...after.answers },
+    ...(outcomes.length > 0 ? { saved: { outcomes } } : { saved: undefined }),
+  }
+}
 
 /** The parts of a reply in the order they came. */
 export type Fragment =
@@ -113,7 +154,10 @@ function savedReply(turn: Extract<SavedTurn, { role: 'assistant' }>): ChatTurn {
 
 /** The messages of a saved conversation, oldest first, in the model the live chat renders. */
 export function savedMessages(detail: ConversationDetail): ChatMessage[] {
-  return detail.turns.map((turn, index): ChatMessage => turn.role === 'user'
-    ? { id: `saved-${index}`, role: 'user', text: turn.text }
-    : { id: `saved-${index}`, role: 'assistant', turn: savedReply(turn) })
+  return detail.turns.map((turn, index): ChatMessage => {
+    const at = Date.parse(turn.at)
+    return turn.role === 'user'
+      ? { id: `saved-${index}`, role: 'user', text: turn.text, ...(Number.isNaN(at) ? {} : { at }) }
+      : { id: `saved-${index}`, role: 'assistant', turn: savedReply(turn), ...(Number.isNaN(at) ? {} : { at }) }
+  })
 }

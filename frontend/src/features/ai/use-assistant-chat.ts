@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatContext, PendingConfirmation } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
-import { savedMessages, type ChatMessage, type ChatTurn } from './chat-model'
+import { joinTurns, savedMessages, type ChatMessage, type ChatTurn } from './chat-model'
 import { useAssistantRun, type AssistantRun } from './use-assistant-run'
 
 /** How a `send` ended: `consent` means nothing was sent and the user must agree first. */
@@ -25,8 +25,17 @@ export type AssistantChat = {
   stop: () => void
   /** Answers the pending confirmation. */
   respond: (approved: boolean) => Promise<void>
-  /** Asks again after a failure: the same message, a new reply in place of the failed one. */
+  /** Asks again after a failure: a new reply in place of the failed one. */
   retry: () => Promise<SendResult>
+  /** Answers the last message again in place of its reply; refused when that reply changed mail. */
+  regenerate: () => Promise<SendResult>
+  /** Goes on with a reply that stopped short (stopped, or cut off by a limit); shown as one reply. */
+  continueReply: () => Promise<SendResult>
+  /**
+   * Rewords an earlier message of yours: it and everything after it are replaced, and the reworded
+   * message is answered. Refused (`failed`) when a reply after it changed mail.
+   */
+  edit: (messageId: string, text: string, context?: ChatContext | null) => Promise<SendResult>
   /** Starts over with an empty conversation. */
   reset: () => void
   /** The saved conversation this one belongs to; null until the first answer of a new conversation brings its id. */
@@ -72,12 +81,20 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
   const counter = useRef(0)
   const sending = useRef(false)
   const [turnNo, setTurnNo] = useState(0)
+  /** The reply the live run goes on with, shown before it as one reply. */
+  const [carried, setCarried] = useState<ChatTurn | null>(null)
+  /** The last message reached the host (its run started), so asking again needs no new message. */
+  const started = useRef(false)
 
   const live = useMemo(
-    () => (open ? turnOf(run, answers) : null),
+    () => {
+      if (!open) return null
+      const turn = turnOf(run, answers)
+      return carried ? joinTurns(carried, turn) : turn
+    },
     // The run object is new every render; its parts are what changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [open, run.state, run.text, run.tools, run.reasoning, run.confirms, run.pending, run.error, run.finishedReason, run.finishedAt, answers],
+    [open, carried, run.state, run.text, run.tools, run.reasoning, run.confirms, run.pending, run.error, run.finishedReason, run.finishedAt, answers],
   )
   const latest = useRef({ run, live, open })
   useEffect(() => { latest.current = { run, live, open } })
@@ -119,11 +136,13 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     const userId = `user-${counter.current}`
     const { live: previous, open: wasOpen } = latest.current
     const settled: ChatMessage[] = wasOpen && previous ? [{ id: `reply-${counter.current - 1}`, role: 'assistant', turn: previous }] : []
-    setHistory((list) => [...list, ...settled, { id: userId, role: 'user', text: message }])
+    setHistory((list) => [...list, ...settled, { id: userId, role: 'user', text: message, at: Date.now() }])
+    setCarried(null)
     setOpen(true)
     lastMessage.current = message
     lastContext.current = context
     const result = await begin(message, context).finally(() => { sending.current = false })
+    started.current = result === 'sent'
     if (result === 'consent') {
       // Nothing went out: the message is not part of the conversation yet.
       setHistory((list) => list.filter((entry) => entry.id !== userId))
@@ -134,14 +153,87 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     return result
   }, [begin])
 
+  /** What is on screen, live reply included: what asking again starts from and goes back to. */
+  const shown = useRef<ChatMessage[]>([])
+
+  /**
+   * Starts a run in place of earlier history: the view becomes `next` at once, and goes back to what
+   * it was if the run does not start (no consent, refused, unreachable); the host keeps its history then too.
+   */
+  const redo = useCallback(async (
+    kind: ({ regenerate: true } | { continuation: true } | { edit: number; message: string }) & { context?: ChatContext },
+    next: { history: ChatMessage[]; carried: ChatTurn | null },
+  ): Promise<SendResult> => {
+    const id = conversation.current
+    if (!id || (latest.current.run.active && latest.current.open) || sending.current) return 'busy'
+    sending.current = true
+    const before = shown.current
+    counter.current += 1
+    setTurnNo(counter.current)
+    setHistory(next.history)
+    setCarried(next.carried)
+    setOpen(true)
+    try {
+      const snapshot = await latest.current.run.start({ type: 'chat', conversationId: id, message: '', ...kind })
+      const result: SendResult = !snapshot || snapshot.state === 'failed' ? 'failed' : snapshot.state === 'awaitingConsent' ? 'consent' : 'sent'
+      if (result === 'sent') started.current = true
+      else {
+        setHistory(before)
+        setCarried(null)
+        setOpen(false)
+      }
+      return result
+    } finally {
+      sending.current = false
+    }
+  }, [])
+
+  const regenerate = useCallback((): Promise<SendResult> => {
+    const list = shown.current
+    const history = list.at(-1)?.role === 'assistant' ? list.slice(0, -1) : list
+    // About what the last message was about (the view is for one run only).
+    const context = lastContext.current
+    return redo({ regenerate: true, ...(context ? { context } : {}) }, { history, carried: null })
+  }, [redo])
+
+  const continueReply = useCallback(async (): Promise<SendResult> => {
+    const list = shown.current
+    const last = list.at(-1)
+    if (last?.role !== 'assistant') return 'failed'
+    const context = lastContext.current
+    return redo({ continuation: true, ...(context ? { context } : {}) }, { history: list.slice(0, -1), carried: last.turn })
+  }, [redo])
+
+  const edit = useCallback(async (messageId: string, text: string, context: ChatContext | null = null): Promise<SendResult> => {
+    const message = text.trim()
+    if (message === '') return 'empty'
+    const list = shown.current
+    const at = list.findIndex((entry) => entry.id === messageId)
+    if (at < 0 || list[at].role !== 'user') return 'failed'
+    const index = list.slice(0, at).filter((entry) => entry.role === 'user').length
+    const history: ChatMessage[] = [...list.slice(0, at), { id: `user-${counter.current + 1}`, role: 'user', text: message, at: Date.now() }]
+    const result = await redo({ edit: index, message, ...(context ? { context } : {}) }, { history, carried: null })
+    if (result === 'sent') {
+      lastMessage.current = message
+      lastContext.current = context
+    }
+    return result
+  }, [redo])
+
   const retry = useCallback(async (): Promise<SendResult> => {
+    // The failed message is in the host's history already: answer it again rather than say it twice.
+    if (started.current && conversation.current) {
+      const result = await regenerate()
+      return result === 'consent' ? 'failed' : result
+    }
     const message = lastMessage.current
     if (!message || (latest.current.run.active && latest.current.open) || sending.current) return 'busy'
     sending.current = true
     // Asked again about what it was asked about then, even if the screen moved on.
     const result = await begin(message, lastContext.current).finally(() => { sending.current = false })
+    started.current = result === 'sent'
     return result === 'consent' ? 'failed' : result
-  }, [begin])
+  }, [begin, regenerate])
 
   const stop = useCallback(() => latest.current.run.cancel(), [])
 
@@ -165,7 +257,10 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     setConversationId(null)
     setViewKey((key) => key + 1)
     lastMessage.current = null
+    lastContext.current = null
+    started.current = false
     setHistory([])
+    setCarried(null)
     setOpen(false)
     setAnswers({})
     setUndone(new Set())
@@ -189,7 +284,10 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     conversation.current = id
     setConversationId(id)
     lastMessage.current = null
+    lastContext.current = null
+    started.current = false
     setHistory(savedMessages(detail))
+    setCarried(null)
     setOpen(false)
     setAnswers({})
     setUndone(new Set())
@@ -215,5 +313,9 @@ export function useAssistantChat(client: MailxClient): AssistantChat {
     () => (live ? [...history, { id: `reply-${turnNo}`, role: 'assistant', turn: live }] : history),
     [history, live, turnNo],
   )
-  return { messages, busy: open && run.active, pending: open ? run.pending : null, toolsAvailable: !noTools, send, stop, respond, retry, reset, conversationId, viewKey, openConversation, undone, markUndone }
+  useEffect(() => { shown.current = messages })
+  return {
+    messages, busy: open && run.active, pending: open ? run.pending : null, toolsAvailable: !noTools,
+    send, stop, respond, retry, regenerate, continueReply, edit, reset, conversationId, viewKey, openConversation, undone, markUndone,
+  }
 }
