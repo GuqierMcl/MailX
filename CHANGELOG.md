@@ -14,7 +14,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
-- Group messages by date by default, with a switch to turn grouping off and a choice of which day starts the week. / 邮件列表默认按日期分组，可在设置中关闭分组并选择每周第一天。
+- Group messages by date by default, with a switch to turn grouping off and a choice of which day starts the week. / 邮件列表默认按日期分组，可在设置中关闭分组并选择每周第一天。 ([#190](https://github.com/GuqierMcl/MailX/pull/190))
 - Now page sections can be hidden for today or for good, and arranged automatically or in a fixed order. / 「此刻」页的模块可以今天先不看或不再显示，并可选择自动排列或固定顺序。 ([#187](https://github.com/GuqierMcl/MailX/pull/187))
 - Hover a message in the assistant to see when it was said and copy it; edit one of your messages in place to ask again from there, ask for another version of the last reply, or let a stopped reply keep writing. / 鼠标停在助手对话中的一条消息上可以看到发送时间，也可以复制；自己的消息可以原位编辑后从那里重新提问，最后一条回复可以重新生成，被停止或截断的回复可以继续生成。
 
