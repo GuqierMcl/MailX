@@ -12,9 +12,10 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Delayed } from '@/components/ui/delayed'
 import { Spinner } from '@/components/ui/spinner'
-import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ReadingMode, ThemeMode } from '@/generated/accounts'
+import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ReadingMode, ThemeMode, WeekStartsOn } from '@/generated/accounts'
 import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, DEFAULT_MAIL_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
 import { NowGroup } from './now-group'
@@ -38,6 +39,15 @@ export function AppearancePane({ client }: { client: MailxClient }) {
   const FONT_SIZE_LABELS: Record<FontSize, string> = { small: t('settings:fontSmall'), default: t('settings:fontDefault'), large: t('settings:fontLarge') }
   const MAIL_THEME_LABELS: Record<MailTheme, string> = { follow: t('settings:mailThemeFollow'), light: t('settings:mailThemeLight') }
   const READING_MODE_LABELS: Record<ReadingMode, string> = { split: t('settings:readingModeSplit'), single: t('settings:readingModeSingle') }
+  const WEEK_START_LABELS: Record<WeekStartsOn, string> = {
+    monday: t('settings:weekdayMonday'),
+    tuesday: t('settings:weekdayTuesday'),
+    wednesday: t('settings:weekdayWednesday'),
+    thursday: t('settings:weekdayThursday'),
+    friday: t('settings:weekdayFriday'),
+    saturday: t('settings:weekdaySaturday'),
+    sunday: t('settings:weekdaySunday'),
+  }
   const settings = useSettings(client)
   const update = useUpdateAppearance(client)
   const updateLayout = useUpdateLayout(client)
@@ -121,6 +131,19 @@ export function AppearancePane({ client }: { client: MailxClient }) {
             </SelectContent>
           </Select>
         </SettingsRow>
+        <SettingsRow label={t('settings:groupByDate')} htmlFor="appearance.groupByDate">
+          <Switch id="appearance.groupByDate" checked={appearance.groupByDate}
+            onCheckedChange={(groupByDate) => change({ groupByDate })} />
+        </SettingsRow>
+        <SettingsRow label={t('settings:weekStartsOn')} htmlFor="appearance.weekStartsOn">
+          <Select value={appearance.weekStartsOn} items={WEEK_START_LABELS} disabled={!appearance.groupByDate}
+            onValueChange={(weekStartsOn: WeekStartsOn | null) => { if (weekStartsOn) change({ weekStartsOn }) }}>
+            <SelectTrigger id="appearance.weekStartsOn" className="w-36"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {Object.entries(WEEK_START_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
         <SettingsRow label={t('settings:previewLines')} htmlFor="appearance.previewLines">
           <Select value={appearance.previewLines} items={PREVIEW_LINE_LABELS}
             onValueChange={(previewLines: PreviewLines | null) => { if (previewLines) change({ previewLines }) }}>
@@ -139,7 +162,7 @@ export function AppearancePane({ client }: { client: MailxClient }) {
             </SelectContent>
           </Select>
         </SettingsRow>
-        <SettingsSaveError update={update} fields={['previewLines', 'mailboxLabel']} message={t('settings:saveFailed')} />
+        <SettingsSaveError update={update} fields={['groupByDate', 'weekStartsOn', 'previewLines', 'mailboxLabel']} message={t('settings:saveFailed')} />
         <SettingsSaveError update={updateLayout} message={t('settings:saveFailed')} />
       </SettingsGroup>
 

@@ -368,6 +368,51 @@ fn mailbox_label_persists_and_a_document_without_it_loads_as_name() {
 }
 
 #[test]
+fn date_grouping_defaults_and_persists_appearance_choices() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join(SETTINGS_FILE_NAME);
+    fs::write(
+        &path,
+        r#"{"version":1,"settings":{"appearance":{"theme":"dark"}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    let mut appearance = store.get().unwrap().settings.appearance;
+    assert!(appearance.group_by_date);
+    assert_eq!(appearance.week_starts_on, WeekStartsOn::Monday);
+
+    appearance.group_by_date = false;
+    appearance.week_starts_on = WeekStartsOn::Sunday;
+    store
+        .patch(SettingsPatch {
+            appearance: Some(appearance.clone()),
+            ..Default::default()
+        })
+        .unwrap();
+    let saved = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(saved.settings.appearance, appearance);
+
+    fs::write(
+        &path,
+        r#"{"version":1,"settings":{"appearance":{"theme":"dark","groupByDate":null,"weekStartsOn":"invalid"}}}"#,
+    )
+    .unwrap();
+    let repaired = SettingsStore::open(directory.path())
+        .unwrap()
+        .get()
+        .unwrap();
+    assert_eq!(repaired.settings.appearance.theme, ThemeMode::Dark);
+    assert!(repaired.settings.appearance.group_by_date);
+    assert_eq!(
+        repaired.settings.appearance.week_starts_on,
+        WeekStartsOn::Monday
+    );
+}
+
+#[test]
 fn snapshot_serializes_as_camel_case_for_the_frontend() {
     let directory = TempDir::new().unwrap();
     let store = SettingsStore::open(directory.path()).unwrap();
@@ -387,7 +432,9 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "mailTheme": "follow",
                     "fontSize": "default",
                     "previewLines": "one",
-                    "mailboxLabel": "name"
+                    "mailboxLabel": "name",
+                    "groupByDate": true,
+                    "weekStartsOn": "monday"
                 },
                 "security": { "remoteImages": "ask", "senderAvatars": false },
                 "layout": { "navWidth": 256, "navCollapsed": false, "listWidth": 420, "readerCollapsed": false, "readingMode": "split", "assistantWidth": 380, "accountOrder": [] },

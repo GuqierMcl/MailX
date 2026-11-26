@@ -172,6 +172,27 @@ describe('settings dialog', () => {
     }))
   })
 
+  it('enables date grouping with Monday by default and remembers a different week start when disabled', async () => {
+    const { client } = renderDialog()
+    const toggle = await screen.findByRole('switch', { name: '按日期分组' })
+    const weekStart = screen.getByRole('combobox', { name: '每周第一天' })
+    expect(toggle).toBeChecked()
+    expect(weekStart).toHaveTextContent('周一')
+
+    await userEvent.click(weekStart)
+    expect(await screen.findAllByRole('option')).toHaveLength(7)
+    await userEvent.click(screen.getByRole('option', { name: '周日' }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({
+      appearance: { ...DEFAULT_APPEARANCE, weekStartsOn: 'sunday' },
+    }))
+    await userEvent.click(toggle)
+    await waitFor(() => expect(weekStart).toBeDisabled())
+    expect(weekStart).toHaveTextContent('周日')
+    expect(client.updateSettings).toHaveBeenLastCalledWith({
+      appearance: { ...DEFAULT_APPEARANCE, weekStartsOn: 'sunday', groupByDate: false },
+    })
+  })
+
   it('starts with split view and patches only the reading mode', async () => {
     const { client } = renderDialog()
     const layout = await screen.findByRole('combobox', { name: '邮件布局' })

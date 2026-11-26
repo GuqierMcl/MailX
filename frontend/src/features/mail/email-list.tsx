@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ContextMenu as ContextMenuPrimitive } from '@base-ui/react/context-menu'
 import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { ArrowLeft01Icon, InboxIcon, Search01Icon } from '@hugeicons/core-free-icons'
-import type { Account, EmailSummary, MailboxLabel, PreviewLines } from '@/generated/accounts'
+import type { Account, EmailSummary, MailboxLabel, PreviewLines, WeekStartsOn } from '@/generated/accounts'
 import { Button } from '@/components/ui/button'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDelayedFlag } from '@/hooks/use-delayed-flag'
 import { anchorContextMenuAt } from '@/lib/context-menu-anchor'
 import { cn } from '@/lib/utils'
+import { dateGroupBoundaries, emailDateGroup, formatGroupedListTime, type DateGroup } from './date-groups'
 import { EmailCard, type RowClick } from './email-card'
 import { EmailContextMenuContent } from './email-context-menu'
 import type { EmailMenuCallbacks, RespondKind } from './email-menu-actions'
@@ -74,6 +75,8 @@ type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' |
   /** Lines of body preview per row, from the appearance settings. */
   previewLines: PreviewLines
   mailboxLabel?: MailboxLabel
+  groupByDate?: boolean
+  weekStartsOn?: WeekStartsOn
   /** Asks for the previews of the listed rows; the complete wanted set every time. */
   onRequestPreviews?: (emailIds: string[]) => void
   verification?: VerificationCodes
@@ -190,7 +193,7 @@ function useSelectionKeys(selection: ListSelection | undefined, actions: Selecti
   }, [exit, selectAll])
 }
 
-function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, mailboxLabel, onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection, reveal }: EmailListProps) {
+function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, mailboxLabel, groupByDate = true, weekStartsOn = 'monday', onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection, reveal }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -259,6 +262,7 @@ function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, o
   return (
     <VirtualRows
       sentView={sentView} emails={emails} accounts={accounts} stale={stale} selectedId={selectedId} previewLines={previewLines} mailboxLabel={mailboxLabel} onRequestPreviews={onRequestPreviews}
+      groupByDate={groupByDate} weekStartsOn={weekStartsOn}
       onFlag={onFlag} onArchive={onArchive} onDelete={onDelete} onRemoveLocal={onRemoveLocal} canArchive={canArchive} onRespond={onRespond}
       hasMore={hasMore} loadingMore={loadingMore} refreshing={refreshing} loadMoreError={loadMoreError}
       windowCapped={syncStatus.windowCapped} searchHint={search ? t('mail:searchedBodies', { count: indexedBodies }) : null} onSelect={onSelect} onLoadMore={onLoadMore}
@@ -275,16 +279,53 @@ function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, o
 // Row: py-3 (1.5rem) + sender line text-sm (1.25rem) + gap-1 (0.25rem) + subject
 // line text-xs (1rem) = 4rem; with a preview, gap-2 (0.5rem) + one 1rem per line.
 const PREVIEW_ROWS: Record<PreviewLines, number> = { none: 0, one: 1, two: 2, three: 3 }
+const DATE_HEADING_REM = 1.25 // h-5
 const ROW_GAP = 8
 const LIST_PADDING = 12
 const OVERSCAN = 8
 /** Ask for the next page once the last visible row is this close to the end. */
 const LOAD_MORE_THRESHOLD = 10
 
-function rowHeight(previewLines: PreviewLines) {
-  const rootFontSize = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
-  const rem = 4 + (previewLines === 'none' ? 0 : 0.5 + PREVIEW_ROWS[previewLines])
-  return rem * rootFontSize
+function rootPixels(rem: number) {
+  return rem * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16)
+}
+
+const DATE_GROUP_LABELS = {
+  today: 'mail:dateGroupToday',
+  yesterday: 'mail:dateGroupYesterday',
+  thisWeek: 'mail:dateGroupThisWeek',
+  lastWeek: 'mail:dateGroupLastWeek',
+  earlier: 'mail:dateGroupEarlier',
+  future: 'mail:dateGroupFuture',
+} as const satisfies Record<DateGroup, string>
+
+type ListRow = { heading: DateGroup; key: string }
+  | { email: EmailSummary; position: number; group: DateGroup | null; startsGroup: boolean; key: string }
+
+function useDateBoundaries(weekStartsOn: WeekStartsOn) {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    let timeout: number
+    function schedule(current: Date) {
+      const { tomorrow } = dateGroupBoundaries(current, weekStartsOn)
+      timeout = window.setTimeout(refresh, tomorrow - current.getTime())
+    }
+    function refresh() {
+      const current = new Date()
+      window.clearTimeout(timeout)
+      setNow(current)
+      schedule(current)
+    }
+    schedule(new Date())
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.clearTimeout(timeout)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [weekStartsOn])
+  return useMemo(() => dateGroupBoundaries(now, weekStartsOn), [now, weekStartsOn])
 }
 
 type VirtualRowsProps = {
@@ -295,6 +336,8 @@ type VirtualRowsProps = {
   selectedId: string | null
   previewLines: PreviewLines
   mailboxLabel?: MailboxLabel
+  groupByDate: boolean
+  weekStartsOn: WeekStartsOn
   onRequestPreviews?: (emailIds: string[]) => void
   verification?: VerificationCodes
   onFlag?: (email: EmailSummary, flag: 'read' | 'starred', wanted: boolean) => void
@@ -320,8 +363,28 @@ type VirtualRowsProps = {
   reveal?: RevealRequest | null
 } & Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' | 'isAggregated'>
 
-function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, mailboxLabel, onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset, reveal }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, mailboxLabel, groupByDate, weekStartsOn, onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset, reveal }: VirtualRowsProps) {
+  const { i18n } = useTranslation()
+  const dates = useDateBoundaries(weekStartsOn)
+  const boundaries = groupByDate ? dates : null
+  const { rows, indexes: rowIndexes } = useMemo(() => {
+    const rows: ListRow[] = []
+    const indexes = new Map<string, number>()
+    let previousGroup: DateGroup | null = null
+    for (const [position, email] of emails.entries()) {
+      const group = boundaries ? emailDateGroup(email.receivedAt, boundaries) : null
+      const startsGroup = group !== null && group !== previousGroup
+      if (startsGroup) rows.push({ heading: group, key: `date:${group}:${email.id}` })
+      indexes.set(email.id, rows.length)
+      rows.push({ email, position, group, startsGroup, key: email.id })
+      previousGroup = group
+    }
+    return { rows, indexes }
+  }, [emails, boundaries])
   const viewportRef = useRef<HTMLDivElement>(null)
+  const searchHintRef = useRef<HTMLParagraphElement>(null)
+  const dateLayout = groupByDate ? `${weekStartsOn}:${dates.today}` : ''
+  const scrollAnchor = useRef<{ layout: string; id: string; index: number; position: number } | null>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   // One right-click menu serves the whole list. The snapshot outlives the open
   // state so the closing animation keeps its content.
@@ -338,24 +401,26 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
   const pinned = useMemo(() => {
     const indexes: number[] = []
     for (const id of [selectedId, focusedId, menuOpenId]) {
-      const index = id === null ? -1 : emails.findIndex((email) => email.id === id)
-      if (index >= 0) indexes.push(index)
+      const index = id === null ? undefined : rowIndexes.get(id)
+      if (index !== undefined) indexes.push(index)
     }
     return indexes
-  }, [emails, selectedId, focusedId, menuOpenId])
+  }, [rowIndexes, selectedId, focusedId, menuOpenId])
   const rangeExtractor = useCallback(
     (range: Range) => [...new Set([...defaultRangeExtractor(range), ...pinned])].sort((a, b) => a - b),
     [pinned],
   )
+  const emailRem = 4 + (previewLines === 'none' ? 0 : 0.5 + PREVIEW_ROWS[previewLines])
+  const estimateSize = (index: number) => rootPixels('heading' in rows[index] ? DATE_HEADING_REM : emailRem)
   // The React Compiler cannot memoize the virtualizer, which is fine: nothing here relies on it.
   // eslint-disable-next-line react-hooks/incompatible-library
-  const virtualizer = useVirtualizer({
-    count: emails.length,
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: rows.length,
     getScrollElement: () => viewportRef.current,
-    getItemKey: (index) => emails[index].id,
-    estimateSize: () => rowHeight(previewLines),
+    getItemKey: (index) => rows[index].key,
+    estimateSize,
     // A row that is not laid out (zero height) keeps the estimate instead of collapsing.
-    measureElement: (element) => element.getBoundingClientRect().height || rowHeight(previewLines),
+    measureElement: (element) => element.getBoundingClientRect().height || estimateSize(Number(element.dataset.index)),
     gap: ROW_GAP,
     paddingStart: LIST_PADDING,
     paddingEnd: LIST_PADDING,
@@ -365,16 +430,40 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
     initialOffset: initialScrollTop,
   })
 
+  // Keep the same visible message at the same offset when dates are regrouped.
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    const previous = scrollAnchor.current
+    let offset = viewport.scrollTop
+    if (previous && previous.layout !== dateLayout && offset > 0) {
+      const index = rowIndexes.get(previous.id)
+      const row = index === undefined ? undefined : rows[index]
+      if (index !== undefined && row && 'email' in row) {
+        const mailDelta = row.position - previous.position
+        const headingDelta = index - previous.index - mailDelta
+        offset += mailDelta * (rootPixels(emailRem) + ROW_GAP) + headingDelta * (rootPixels(DATE_HEADING_REM) + ROW_GAP)
+        virtualizer.scrollToOffset(offset)
+      }
+    }
+    const localOffset = offset - (searchHintRef.current?.offsetHeight ?? 0)
+    const first = virtualizer.getVirtualItemForOffset(Math.max(0, localOffset))
+    let index = first ? first.index + Number(first.end <= localOffset) : 0
+    if (rows[index] && 'heading' in rows[index]) index++
+    const row = rows[index]
+    scrollAnchor.current = row && 'email' in row ? { layout: dateLayout, id: row.email.id, index, position: row.position } : null
+  })
+
   // A keyboard move brings its row into view, scrolling only as far as needed.
   // Only a new request scrolls; the list refreshing under it does not.
-  const latestEmails = useRef(emails)
+  const latestIndexes = useRef(rowIndexes)
   useEffect(() => {
-    latestEmails.current = emails
-  })
+    latestIndexes.current = rowIndexes
+  }, [rowIndexes])
   useEffect(() => {
     if (!reveal) return
-    const index = latestEmails.current.findIndex((email) => email.id === reveal.id)
-    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'auto' })
+    const index = latestIndexes.current.get(reveal.id)
+    if (index !== undefined) virtualizer.scrollToIndex(index, { align: 'auto' })
   }, [reveal, virtualizer])
 
   // Report the scroll offset so the caller can come back to it later.
@@ -407,20 +496,30 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
   // Load the next page before the user reaches the end. A failed load is retried
   // only by the button, never automatically.
   const lastVisible = virtualizer.range?.endIndex ?? -1
+  const lastVisibleRow = rows[lastVisible]
+  const previousVisibleRow = rows[lastVisible - 1]
+  const lastVisibleEmail = lastVisibleRow && 'email' in lastVisibleRow ? lastVisibleRow.position
+    : previousVisibleRow && 'email' in previousVisibleRow ? previousVisibleRow.position : -1
   useEffect(() => {
-    if (hasMore && !loadingMore && !refreshing && !loadMoreError && lastVisible >= emails.length - LOAD_MORE_THRESHOLD) onLoadMore()
-  }, [hasMore, loadingMore, refreshing, loadMoreError, lastVisible, emails.length, onLoadMore])
+    if (hasMore && !loadingMore && !refreshing && !loadMoreError && lastVisibleEmail >= emails.length - LOAD_MORE_THRESHOLD) onLoadMore()
+  }, [hasMore, loadingMore, refreshing, loadMoreError, lastVisibleEmail, emails.length, onLoadMore])
 
   // Previews are fetched for the rows that are rendered (visible plus overscan).
   const virtualItems = virtualizer.getVirtualItems()
-  const rendered = virtualItems.map((item) => emails[item.index])
+  const rendered = virtualItems.flatMap((item) => {
+    const row = rows[item.index]
+    return 'email' in row ? [row.email] : []
+  })
   usePreviewRequests(onRequestPreviews, rendered, previewLines)
   useGaveUpVersion()
   // Unlike mounted overscan/pinned rows, only the actual viewport requests new
   // code recognition. A sender group is never treated as its representative mail.
   const codeTargetsKey = JSON.stringify(stale || selection?.active ? [] : virtualItems
     .filter((item) => item.index >= (virtualizer.range?.startIndex ?? 0) && item.index <= (virtualizer.range?.endIndex ?? -1))
-    .map((item) => emails[item.index])
+    .flatMap((item) => {
+      const row = rows[item.index]
+      return 'email' in row ? [row.email] : []
+    })
     .filter((email) => !email.senderGroup && !email.localOnly)
     .map((email) => ({ emailId: email.id, bodyState: email.bodyState })))
   const codeTargets = useMemo(() => JSON.parse(codeTargetsKey) as VerificationTarget[], [codeTargetsKey])
@@ -451,7 +550,7 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
       className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]]:!overflow-x-hidden [&_[data-slot=scroll-area-viewport]>div]:!block"
     >
       {searchHint && (
-        <p className="px-4 pt-3 text-xs text-muted-foreground">
+        <p ref={searchHintRef} className="px-4 pt-3 text-xs text-muted-foreground">
           {windowCapped ? `${searchHint} ${t('mail:syncCoverageLimited')}` : searchHint}
         </p>
       )}
@@ -470,8 +569,9 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
             stale && 'pointer-events-none opacity-50',
           )}
           onFocus={(event) => {
-            const row = (event.target as HTMLElement).closest<HTMLElement>('[data-index]')
-            setFocusedId(row ? emails[Number(row.dataset.index)]?.id ?? null : null)
+            const element = (event.target as HTMLElement).closest<HTMLElement>('[data-index]')
+            const row = element ? rows[Number(element.dataset.index)] : undefined
+            setFocusedId(row && 'email' in row ? row.email.id : null)
           }}
           onBlur={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedId(null)
@@ -480,27 +580,41 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
             // The native page menu stays blocked by the global guard; this only
             // decides whether the message menu opens, and for which row.
             const row = (event.target as HTMLElement).closest<HTMLElement>('[data-index]')
-            const email = row ? emails[Number(row.dataset.index)] : undefined
-            if (menuDisabled || !row || !email) {
+            const item = row ? rows[Number(row.dataset.index)] : undefined
+            if (menuDisabled || !row || !item || 'heading' in item) {
               event.preventBaseUIHandler()
               return
             }
             if (anchorContextMenuAt(event, row)) return
             const active = document.activeElement
             menuReturnFocus.current = active instanceof HTMLElement && active !== document.body ? active : null
-            setMenu({ email, open: false })
+            setMenu({ email: item.email, open: false })
           }}
         >
           {virtualItems.map((item) => {
-            const email = emails[item.index]
+            const row = rows[item.index]
+            const style = { transform: `translateY(${item.start}px)` }
+            if ('heading' in row) {
+              return (
+                <div key={item.key} data-index={item.index} ref={virtualizer.measureElement} aria-hidden
+                  data-slot="email-date-heading" style={style}
+                  className="absolute inset-x-7 flex h-5 items-end text-xs font-medium text-muted-foreground">
+                  {t(DATE_GROUP_LABELS[row.heading])}
+                </div>
+              )
+            }
+            const { email, position, group, startsGroup } = row
             return (
               <EmailCard
                 key={item.key}
                 ref={virtualizer.measureElement}
                 index={item.index}
+                position={position}
                 count={emails.length}
-                style={{ transform: `translateY(${item.start}px)` }}
+                style={style}
                 email={email}
+                timeLabel={group && boundaries ? formatGroupedListTime(email.receivedAt, group, boundaries, i18n.resolvedLanguage ?? 'zh-CN') : undefined}
+                dateGroupLabel={startsGroup && group ? t(DATE_GROUP_LABELS[group]) : undefined}
                 sentView={sentView}
                 account={accounts?.find((account) => account.id === email.accountId) ?? null}
                 selected={!email.senderGroup && email.id === selectedId}
