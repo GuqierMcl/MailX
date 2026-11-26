@@ -56,8 +56,7 @@ function Pill({ onClick, children }: { onClick: () => void; children: ReactNode 
   )
 }
 
-/** Pointer rest before the capsule opens up, and the grace before it folds again. */
-const OPEN_DELAY_MS = 150
+/** The grace before the opened capsule folds again, so a pointer moving onto a suggestion keeps it. */
 const CLOSE_DELAY_MS = 300
 /** Time between one suggestion's entrance and the next. */
 const STAGGER_MS = 40
@@ -94,9 +93,9 @@ export function AssistantCapsule({ view, raised, onOpen, facts, onAsk }: {
     setPicks(capsuleSuggestions(context, facts))
     setOpen(true)
   }
-  const later = (next: boolean) => {
+  const fold = () => {
     clear()
-    timer.current = setTimeout(() => { timer.current = null; if (next) show(); else setOpen(false) }, next ? OPEN_DELAY_MS : CLOSE_DELAY_MS)
+    timer.current = setTimeout(() => { timer.current = null; setOpen(false) }, CLOSE_DELAY_MS)
   }
   // What is on screen changed: the suggestions were for something else.
   const key = viewKey(view)
@@ -124,10 +123,10 @@ export function AssistantCapsule({ view, raised, onOpen, facts, onAsk }: {
     <div
       ref={root}
       data-slot="assistant-capsule-area"
-      onPointerEnter={() => later(true)}
-      onPointerLeave={() => later(false)}
+      onPointerEnter={() => { clear(); show() }}
+      onPointerLeave={fold}
       onFocus={() => { clear(); show() }}
-      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) later(false) }}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) fold() }}
       onKeyDown={onKeyDown}
       className={cn(
         'absolute right-4 z-20 flex max-w-[calc(100%-2rem)] flex-col items-end gap-1.5 transition-[bottom] duration-(--motion-medium) ease-(--ease-out-soft)',
