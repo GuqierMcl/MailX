@@ -170,7 +170,3 @@ bun run check                 # 运行版本、i18n、类型生成、类型、Li
 MailX 采用 [Apache License 2.0](LICENSE) 许可。
 
 Copyright 2026 GuqierMcl and MailX contributors.
-
----
-
-MailX 与 Unix 的 `mailx` 命令无关。

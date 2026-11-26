@@ -2,7 +2,7 @@
 
 This file records user-facing changes to MailX, in English and Chinese on the same line. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
-- For a user-facing change, add one line under `## [Unreleased]` in the PR, in one of the five categories below (leave out a category with nothing in it). Every entry starts with `- `. Keep the category headings exactly as written, emoji included: `### 🚀 Feature`, `### ✨ Optimization`, `### 🩹 Fixed`, `### 🔐 Security`, `### 🔄 Changed`.
+- For a user-facing change, add one line under `## [Unreleased]` in the PR, in one of the five categories below (leave out a category with nothing in it). Every entry starts with `- `. Keep the category headings and their order exactly as listed, emoji included: `### 🚀 Feature`, `### ✨ Optimization`, `### 🩹 Fixed`, `### 🔐 Security`, `### 🔄 Changed`.
 - Write entries for users, one sentence per line. Do not list tests, CI, refactors or documentation. End with the PR link, for example `- 修复远程图片加载失败后无法重试 ([#25](https://github.com/GuqierMcl/MailX/pull/25))`.
 - Write every entry in both languages on one line, separated by ` / `: English first, then Chinese, then the link or reference. Match the wording the app itself uses. Keep the two halves saying the same thing.
 - `Changed` covers incompatible behaviour, user-facing data formats, configuration changes and removed features. Improvements that keep behaviour the same go under `Optimization`.
