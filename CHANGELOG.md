@@ -12,6 +12,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-27
+
 ### 🚀 Feature
 
 - The Now page adds "While you were away" and "Clean up" sections, recent attachments fold into one line, and the automatic order now adapts to time and mailbox state. / 「此刻」页新增“你不在的时候”和“一键清理”，最近的附件折叠成一行，自动排列会随时间和邮箱情况调整。 ([#192](https://github.com/GuqierMcl/MailX/pull/192))
@@ -291,7 +293,8 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 - 0.1.0-alpha.1 and 0.1.0-alpha.2 have no in-app updater, so you need to download and install a build with the updater once; in-app updates work from 0.1.0-alpha.3 onwards. / 0.1.0-alpha.1、0.1.0-alpha.2 不含应用内更新，需要手动下载安装带更新器的版本一次；自 0.1.0-alpha.3 起支持应用内更新。
 - From 0.1.0-alpha.2 the app identifier is `com.mailxapp.desktop`, the user data directory is `MailX` (macOS: `~/Library/Application Support/MailX`, Windows: `%APPDATA%\MailX`, Linux: `~/.local/share/MailX`) and the system credential entry uses the service name `MailX`. Upgrading from alpha.1 does not move the old directory or credentials automatically; move the data and enter each account password or authorization code again. Anyone on alpha.2 or later does not need to migrate again. / 自 0.1.0-alpha.2 起，应用标识为 `com.mailxapp.desktop`，用户数据目录为 `MailX`（macOS：`~/Library/Application Support/MailX`，Windows：`%APPDATA%\MailX`，Linux：`~/.local/share/MailX`），系统凭据条目使用服务名 `MailX`。从 alpha.1 升级时，旧目录中的数据和旧凭据不会自动迁移，需要迁移数据并重新输入各账号的密码或授权码；已使用 alpha.2 或更新版本的用户无需重复迁移。
 
-[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/GuqierMcl/MailX/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/GuqierMcl/MailX/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/GuqierMcl/MailX/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/GuqierMcl/MailX/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/GuqierMcl/MailX/compare/v0.3.0...v0.4.0
