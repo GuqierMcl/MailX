@@ -43,7 +43,7 @@
 
 `CHANGELOG.md` 采用 Keep a Changelog 格式，是发布说明的唯一来源。
 
-- 面向用户的改动，在 PR 里把一行写到 `## [Unreleased]` 之下，分到 `### Feature`（新功能）、`### Optimization`（行为不变的改进）、`### Fixed`（缺陷修复）、`### Security`（HTML 隔离、凭证、权限、代理等加固）、`### Changed`（不兼容的行为、数据格式、配置变化与移除的功能）之一；没有内容的分类不写。每条以 `- ` 开头，脚本只认这个前缀，不校验分类名。
+- 面向用户的改动，在 PR 里把一行写到 `## [Unreleased]` 之下，按以下固定顺序分到对应分类（没有内容的分类不写）：`### Feature`（新功能）、`### Optimization`（行为不变的改进）、`### Fixed`（缺陷修复）、`### Security`（HTML 隔离、凭证、权限、代理等加固）、`### Changed`（不兼容的行为、数据格式、配置变化与移除的功能）。每条以 `- ` 开头，脚本只认这个前缀，不校验分类名与顺序。
 - 条目写给用户看，一行一句；测试、CI、重构、文档等内部改动不写。结尾带 PR 的完整链接，例如 `([#25](https://github.com/GuqierMcl/MailX/pull/25))`：`#25` 这种简写在 Release 页面里会被 GitHub 自动链接，但在仓库的 `.md` 文件里不会，完整链接两处都可点击。
 - **预发布版**不新增小节，发布说明取自 `[Unreleased]`，并自动加上“预发布版本”提示。
 - **正式版**：`version:bump` / `version:set` 把 `[Unreleased]` 归并为 `## [x.y.z] - 日期`、留下新的空 `[Unreleased]` 并更新底部对比链接。`[Unreleased]` 为空会被拒绝；确需跳过用 `--no-changelog`。

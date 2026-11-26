@@ -170,7 +170,3 @@ Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first;
 MailX is licensed under the [Apache License 2.0](LICENSE).
 
 Copyright 2026 GuqierMcl and MailX contributors.
-
----
-
-MailX is not related to the Unix `mailx` command.
