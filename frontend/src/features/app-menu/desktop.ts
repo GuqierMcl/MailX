@@ -32,6 +32,7 @@ export function currentMenuWindow() {
 }
 
 export function listenToMenuEvent<T>(event: string, listener: (payload: T) => void, onSubscribed?: () => void) {
+  if (!isTauri()) return () => undefined
   let disposed = false
   let unlisten: (() => void) | undefined
   void getCurrentWebviewWindow().listen<T>(event, ({ payload }) => listener(payload))
