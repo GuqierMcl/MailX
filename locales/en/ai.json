@@ -191,5 +191,44 @@
         "expired": "No answer"
       }
     }
+  },
+  "suggest": {
+    "label": "Suggested questions",
+    "mail": {
+      "latestFrom": "Show the latest mail from {{name}}",
+      "deadlines": "Check my inbox for upcoming deadlines",
+      "archiveOld": "Archive read mail older than two weeks",
+      "important": "Which unread emails matter most?",
+      "needReply": "Which emails are waiting for my reply?",
+      "today": "Summarize what came in today",
+      "attachments": "Find this week's emails with attachments",
+      "starred": "List starred emails I haven't read"
+    },
+    "email": {
+      "summarize": "Summarize this email",
+      "todo": "What does this email need from me?",
+      "reply": "Draft a reply",
+      "deadline": "Is there a deadline in this email?",
+      "keyPoints": "List the key points",
+      "explain": "Explain this email in plain words",
+      "moreFrom": "Show other recent mail from {{name}}"
+    },
+    "emails": {
+      "summarize_one": "Summarize the selected email",
+      "summarize_other": "Summarize the {{count}} selected emails",
+      "needReply": "Find the ones that need my reply",
+      "todos": "Pull a to-do list from these",
+      "common": "What do these emails have in common?",
+      "archive": "Archive these emails",
+      "markRead": "Mark these as read"
+    },
+    "draft": {
+      "review": "Review this draft",
+      "formal": "Make the tone more formal",
+      "shorter": "Make it more concise",
+      "missing": "What is this draft missing?",
+      "subject": "Suggest a subject",
+      "typos": "Any typos or grammar slips?"
+    }
   }
 }

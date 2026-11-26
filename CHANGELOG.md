@@ -33,6 +33,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
+- Rest the pointer on the AI capsule (or focus it) to see three suggested questions picked for what is on screen; choosing one asks it right away. / 鼠标停在 AI 胶囊上（或用键盘聚焦）时会升起三条按当前内容挑选的推荐问题，点一下就直接发问。
 - Add setup entries for Sina Free Mail, Feishu Mail (China) and Lark Mail (International), each with its official icon, encrypted server settings and client credential guidance. / 新增新浪免费邮箱、飞书邮箱（中国版）和 Lark 邮箱（国际版）独立添加入口，各自显示官方图标、预填加密收发服务器并指引获取客户端凭证。 ([#168](https://github.com/GuqierMcl/MailX/pull/168))
 - Use the macOS menu bar or the down-chevron beside Minimize on Windows to access mail and window commands, and open Settings with Cmd+, or Ctrl+,. / macOS 可从系统菜单栏、Windows 可从最小化按钮左侧的下箭头访问邮件和窗口命令，并可用 ⌘, 或 Ctrl+, 打开设置。 ([#171](https://github.com/GuqierMcl/MailX/pull/171))
 - Summarize the email you are reading with AI: choose short, detailed or bullet-point summaries in a chosen language from the reading toolbar, keep them on this computer, and optionally summarize every opened email or always summarize mail from chosen senders (off by default). / 阅读邮件时可用 AI 总结：在阅读区工具栏选择简短、详细或要点摘要和输出语言，摘要保存在本机，还可选择自动总结打开的邮件或总是总结指定发件人的邮件（默认关闭）。 ([#164](https://github.com/GuqierMcl/MailX/pull/164))

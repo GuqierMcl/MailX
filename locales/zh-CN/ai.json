@@ -187,5 +187,43 @@
         "expired": "没有回应"
       }
     }
+  },
+  "suggest": {
+    "label": "推荐的问题",
+    "mail": {
+      "latestFrom": "显示来自 {{name}} 的最新邮件",
+      "deadlines": "检查收件箱里即将到期的截止日期",
+      "archiveOld": "归档两周前已读的邮件",
+      "important": "未读邮件里哪些最重要？",
+      "needReply": "有哪些邮件在等我回复？",
+      "today": "总结一下今天收到的邮件",
+      "attachments": "找出本周收到的带附件的邮件",
+      "starred": "列出标了星但还没读的邮件"
+    },
+    "email": {
+      "summarize": "总结这封邮件",
+      "todo": "这封邮件需要我做什么？",
+      "reply": "帮我起草一封回复",
+      "deadline": "这封邮件里有截止日期吗？",
+      "keyPoints": "列出这封邮件的要点",
+      "explain": "用简单的话解释这封邮件",
+      "moreFrom": "显示 {{name}} 最近发来的其他邮件"
+    },
+    "emails": {
+      "summarize_other": "总结选中的 {{count}} 封邮件",
+      "needReply": "找出其中需要我回复的",
+      "todos": "从这些邮件里整理出待办",
+      "common": "这些邮件有什么共同点？",
+      "archive": "把这些邮件归档",
+      "markRead": "把这些邮件标为已读"
+    },
+    "draft": {
+      "review": "帮我检查这份草稿",
+      "formal": "让语气更正式一些",
+      "shorter": "帮我把它写得更简洁",
+      "missing": "这份草稿还缺什么？",
+      "subject": "给它起一个合适的主题",
+      "typos": "有没有错别字或语病？"
+    }
   }
 }
