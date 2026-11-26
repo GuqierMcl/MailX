@@ -1,17 +1,30 @@
 ---
 title: 欢迎使用 MailX
-description: MailX 的使用指南。
+description: MailX 的使用指南：从安装、添加邮箱到日常收发、翻译与 AI 助手。
 sidebar:
   label: 欢迎
-  order: 1
 ---
 
-MailX 把你的所有邮箱放进一个收件箱，邮件保存在你自己的电脑上，还能让你选的 AI 帮你读信、写信。
+这份指南会带你从安装、添加邮箱开始，快速上手 MailX 的各项功能。还没有安装？先到[下载页](/zh-CN/download/)选择你的系统。
 
-还没有安装？先到[下载页](https://mailxapp.com/zh-CN/download/)选择你的系统。
+## 什么是 MailX？
 
-完整的使用指南正在重新编写。在它完成之前，添加账号、写信、翻译、AI 等功能的说明请看 GitHub 上的[使用入门](https://github.com/GuqierMcl/MailX/blob/main/docs/guides/zh-CN/README.md)。
+MailX 是一款免费、开源的桌面邮件应用，适用于 macOS、Windows 和 Linux，没有广告，也不需要注册 MailX 账号。
+
+- **所有邮箱，放进一个收件箱**：工作、个人、学校的邮箱都能加进来一起看，不用在多个应用和网页之间来回切换。
+- **邮件留在你自己的电脑上**：MailX 没有自己的邮件服务器，你的邮件和密码只保存在本机，断网也能翻看已经下载的邮件。
+- **需要时，再让 AI 和翻译帮忙**：一键翻译外文邮件，也可以接入你选择的 AI 服务商或本机模型来总结长信、辅助写信；不使用 AI 时，其他功能完全不受影响。
+
+## 从这里开始
+
+- [安装与更新](/zh-CN/docs/install/)：在不同系统上安装 MailX，了解应用内如何更新。
+- [添加邮箱](/zh-CN/docs/add-account/)：接入你的常用邮箱，包括怎么获取授权码或应用专用密码。
+- [看信与整理](/zh-CN/docs/reading/)：认识“此刻”页、统一收件箱、按日期分组、验证码一键复制和搜索。
+- [写信与发送](/zh-CN/docs/writing/)：写信、插图与附件、草稿、撤销发送和发件箱。
+- [翻译邮件](/zh-CN/docs/translation/)：就地翻译外文邮件，排版不变，随时切回原文。
+- [使用 AI 助手](/zh-CN/docs/ai/)：接入 AI 服务商或本机模型，帮你找邮件、总结长信、辅助写信。
+- [隐私](/zh-CN/docs/privacy/)：看看 MailX 把什么留在你的电脑上，又会在什么时候连接网络。
 
 ## 需要帮助？
 
-遇到问题或有建议，可以在 [GitHub](https://github.com/GuqierMcl/MailX/issues) 告诉我们。请不要贴出密码、真实邮件内容或邮箱地址。
+遇到问题或有建议，可以先看看[常见问题与排查](/zh-CN/docs/troubleshooting/)，或在 [GitHub](https://github.com/GuqierMcl/MailX/issues) 告诉我们。反馈时请不要贴出密码、授权码、真实邮件内容或邮箱地址。
