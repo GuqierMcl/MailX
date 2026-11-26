@@ -49,7 +49,7 @@ body::before {
   transition: background-color 250ms;
 }
 .scrolled .page > .header::before { background: var(--mx-glass-strong); }
-.site-title img { height: 26px; width: auto; }
+.site-title :is(img, svg) { height: 26px; width: auto; }
 .social-icons { gap: 0.1rem; }
 .social-icons::after { border: 0; }
 button[data-open-modal] { border-radius: 12px; border-color: var(--mx-ring); background: var(--mx-glass); }

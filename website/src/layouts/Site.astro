@@ -1,7 +1,7 @@
 ---
 import '../styles/site.css'
-import logoBlack from '../assets/brand/logo-horizontal-black.svg?url'
-import logoWhite from '../assets/brand/logo-horizontal-white.svg?url'
+import LogoBlack from '../assets/brand/logo-horizontal-black.svg'
+import LogoWhite from '../assets/brand/logo-horizontal-white.svg'
 import { LOCALES, LOCALE_LABELS, LOCALE_SHORT, STRINGS, localePath, otherLocale, type Locale } from '../i18n'
 import { setLanguageCookie } from '../lib/locale.mjs'
 import { themeScript } from '../lib/theme.mjs'
@@ -58,8 +58,8 @@ const nav = [
     <header class="site-header wrap">
       <div class="bar glass">
         <a class="logo" href={localePath(locale, '/')} aria-label="MailX">
-          <img class="only-light" src={logoBlack} alt="" height="26" />
-          <img class="only-dark" src={logoWhite} alt="" height="26" />
+          <LogoBlack class="only-light" height={26} width={74} aria-hidden="true" />
+          <LogoWhite class="only-dark" height={26} width={74} aria-hidden="true" />
         </a>
         <nav>
           {nav.map((item) => <a class:list={{ roomy: item.path === '/changelog/', home: item.path === '/' }} href={item.href} aria-current={item.path === path ? 'page' : undefined}>{item.label}</a>)}

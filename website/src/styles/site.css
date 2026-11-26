@@ -85,7 +85,7 @@ code { font-size: 0.9em; background: var(--mx-ring); border-radius: 6px; padding
 .site-header { position: sticky; top: 12px; z-index: 20; margin-top: 12px; }
 .site-header .bar { display: flex; align-items: center; gap: 1rem; padding: 8px 8px 8px 16px; border-radius: 18px; }
 .site-header .logo { display: flex; margin-right: auto; border-radius: 8px; }
-.site-header .logo img { height: 26px; width: auto; }
+.site-header .logo :is(img, svg) { height: 26px; width: auto; }
 .site-header nav { display: flex; align-items: center; gap: 2px; }
 .site-header nav a {
   display: inline-flex;

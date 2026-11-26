@@ -29,7 +29,10 @@ export default defineConfig({
       },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/GuqierMcl/MailX' }],
       sidebar,
-      components: { SocialIcons: './src/components/DocsLinks.astro' },
+      components: {
+        SiteTitle: './src/components/SiteTitle.astro',
+        SocialIcons: './src/components/DocsLinks.astro',
+      },
       customCss: ['./src/styles/tokens.css', './src/styles/starlight.css'],
       head: [
         { tag: 'link', attrs: { rel: 'icon', href: '/favicon.ico', sizes: '32x32' } },
