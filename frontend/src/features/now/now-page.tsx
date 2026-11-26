@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Alert02Icon, CheckmarkCircle02Icon, MailUpload01Icon } from '@hugeicons/core-free-icons'
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Account, AccountSyncState, CodeCandidate, Folder, OutboxItem, OverviewCode, OverviewContact } from '@/generated/accounts'
+import type { Account, AccountSyncState, CodeCandidate, Folder, OutboxItem, OverviewCode } from '@/generated/accounts'
 import { ErrorNotice } from '@/components/error-notice'
 import { toast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
@@ -58,7 +58,7 @@ export type NowPageProps = {
   /** The unified inbox with the Unread filter on. */
   onOpenUnread: () => void
   /** One person's mail across folders and accounts, in the workbench's contact view. */
-  onOpenContact: (contact: OverviewContact) => void
+  onOpenContact: (contact: { address: string; name: string | null }) => void
   onOpenAccount: (accountId: string) => void
   /** Shows the message in the reader, in the view it belongs to. */
   onOpenEmail: (email: { id: string; accountId: string }) => void
@@ -159,6 +159,8 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
     inbox: { newMail, unread, starredUnread, rows: unreadRows },
     attachments,
     activity: data?.activity,
+    away: { sinceTime: Date.parse(since), ms: now.getTime() - Date.parse(since), total: newMail, senders: data?.newMail.senders ?? [] },
+    unreadSenders: data?.unreadSenders ?? [],
   }
   const sync = syncSummary(accounts, syncStates)
 
@@ -212,6 +214,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
     sinceTime,
     verification,
     contactAccountId: accounts[0]?.id ?? '',
+    client,
     actions: { onSelectMailbox, onOpenUnread, onOpenContact, onOpenAccount, onOpenEmail },
   }
   // A failed overview is reported once, where its first module would be.
@@ -233,7 +236,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
     }
     if (!module.hasContent(moduleData)) continue
     blocks.push(
-      <ModuleSection key={module.id} title={module.title()} mode={mode} index={next()} menu={module.hideable ? { onHideToday: () => hideToday(module), onHideForever: () => hideForever(module) } : undefined}>
+      <ModuleSection key={module.id} title={module.title()} compact={module.compact} mode={mode} index={next()} menu={module.hideable ? { onHideToday: () => hideToday(module), onHideForever: () => hideForever(module) } : undefined}>
         {module.render(env)}
       </ModuleSection>,
     )

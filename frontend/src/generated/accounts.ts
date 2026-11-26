@@ -380,7 +380,13 @@ accounts: Array<AccountMailCount>,
 /**
  * The newest five, newest first.
  */
-latest: Array<EmailSummary>, };
+latest: Array<EmailSummary>,
+/**
+ * The senders of that new mail by lowercased address, in the scope of
+ * `total`: most messages first, then the most recent, at most five.
+ * Empty without `since`.
+ */
+senders: Array<OverviewSender>, };
 
 export type CodeCandidate = { emailId: string, accountId: string, folderId: string, from: MailAddress,
 /**
@@ -417,6 +423,17 @@ export type DayActivity = {
 start: string, received: number, };
 
 export type OverviewContact = {
+/**
+ * Lowercased.
+ */
+address: string,
+/**
+ * The most recent non-empty display name among the counted messages.
+ * Untrusted text.
+ */
+name: string | null, count: number, };
+
+export type OverviewSender = {
 /**
  * Lowercased.
  */
@@ -488,6 +505,12 @@ export type MailOverview = { newMail: NewMailOverview,
  * Starred unread messages, in the Starred view's scope.
  */
 starredUnread: number,
+/**
+ * Senders with at least three unread messages in the unified inbox
+ * (locally archived mail left out), most unread first, then the most
+ * recent; at most five.
+ */
+unreadSenders: Array<OverviewSender>,
 /**
  * Newest first, at most three, from the last fifteen minutes.
  */

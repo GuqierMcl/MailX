@@ -27,6 +27,7 @@ import type {
   MailAddress,
   MailStateChanged,
   OverviewActivity,
+  OverviewSender,
   RouteConfig,
   TranslationProviderId,
   TranslationStatus,
@@ -798,7 +799,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           total: fresh.length,
           accounts: [...perAccount].sort(([a], [b]) => a.localeCompare(b)).map(([accountId, count]) => ({ accountId, count })),
           latest: fresh.slice(0, 5).map((email) => email.summary),
+          senders: mockSenders(fresh, 1),
         },
+        unreadSenders: mockSenders(inbox.filter((email) => !email.summary.isRead), 3),
         starredUnread: emails.filter((email) => email.summary.isStarred && !email.summary.isRead && role(email) !== 'junk' && role(email) !== 'trash').length,
         verificationCodes: inbox.filter((email) => within(email, 15 * 60_000)).flatMap((email) => {
           const found = code(email)
@@ -1662,6 +1665,21 @@ const DEFAULT_SEEDS: Seed[] = [
     text: '有新的评论等待你回复。\n\n> 在 Windows 上关闭按钮的悬停颜色看起来正确，Linux 还需要测试。',
     hoursAgo: 1.5,
   },
+  // Three unread from one sender, so the Now page offers "Clean up".
+  {
+    account: WORK,
+    from: { name: 'GitHub', address: 'notifications@github.example' },
+    subject: '[MailX] Issue #14: sync stalls after wake',
+    text: '有人在 Issue #14 下留言。',
+    hoursAgo: 2.2,
+  },
+  {
+    account: WORK,
+    from: { name: 'GitHub', address: 'notifications@github.example' },
+    subject: '[MailX] Pull request #2: fix(sync): resume after sleep',
+    text: '有新的提交推送到这个拉取请求。',
+    hoursAgo: 4.1,
+  },
   {
     account: WORK,
     from: { name: '王芳', address: 'wang.fang@example.com' },
@@ -1981,6 +1999,30 @@ function buildEmails({ seeds, me: addresses, htmlFirst, lazyPreviews }: MockData
       })),
     }
   })
+}
+
+/**
+ * The overview's sender groups with the core's rules (storage/messages/overview.rs):
+ * by lowercased address, `min` messages at least, most first, then the most recent,
+ * at most five; the name is the newest non-empty one among the counted messages.
+ */
+function mockSenders(mails: EmailDetail[], min: number): OverviewSender[] {
+  const groups = new Map<string, { count: number; last: string; name: { at: string; value: string } | null }>()
+  for (const { summary } of mails) {
+    const address = summary.from.address.toLowerCase()
+    if (!address) continue
+    const group = groups.get(address) ?? { count: 0, last: '', name: null }
+    group.count += 1
+    if (group.last < summary.receivedAt) group.last = summary.receivedAt
+    const name = summary.from.name?.trim()
+    if (name && (group.name === null || group.name.at < summary.receivedAt)) group.name = { at: summary.receivedAt, value: name }
+    groups.set(address, group)
+  }
+  return [...groups]
+    .filter(([, group]) => group.count >= min)
+    .sort(([a, x], [b, y]) => y.count - x.count || y.last.localeCompare(x.last) || a.localeCompare(b))
+    .slice(0, 5)
+    .map(([address, group]) => ({ address, name: group.name?.value ?? null, count: group.count }))
 }
 
 /**

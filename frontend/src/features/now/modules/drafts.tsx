@@ -10,7 +10,7 @@ export const draftsModule: NowModule = {
   zone: 'act',
   hideable: true,
   title: () => t('now:draftsTitle'),
-  score: () => 0,
+  score: () => 300,
   signature: ({ draftCount }) => String(draftCount),
   hasContent: ({ draftCount }) => draftCount > 0,
   render: ({ data, actions }) => (

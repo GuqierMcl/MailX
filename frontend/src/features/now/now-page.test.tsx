@@ -10,6 +10,7 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { useVerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
 import { daySegment, localDay } from './greeting'
 import { ENTRANCE_KEY, LAST_VISIT_KEY } from './visit'
+import { ATTACHMENTS_OPEN_KEY } from './modules/attachments-view'
 import { dayStarts } from './activity'
 import { NowPage, type NowPageProps } from './now-page'
 import { SNOOZED_KEY } from './modules/snooze'
@@ -45,7 +46,7 @@ function activityOf(overrides: Partial<OverviewActivity> = {}): OverviewActivity
   }
 }
 
-const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], codeCandidates: [], recentAttachments: [], generatedAt: new Date().toISOString() }
+const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [], senders: [] }, starredUnread: 0, unreadSenders: [], verificationCodes: [], codeCandidates: [], recentAttachments: [], generatedAt: new Date().toISOString() }
 
 function overviewCode(emailId: string, code: string, overrides: Partial<OverviewCode> = {}): OverviewCode {
   return {
@@ -179,7 +180,7 @@ describe('Now page', () => {
   describe('inbox', () => {
     it('opens new mail, unread with the Unread filter, and starred unread', async () => {
       const { onSelectMailbox, onOpenUnread } = setup({
-        overview: { ...empty, newMail: { total: 3, accounts: [{ accountId: account.id, count: 3 }], latest: [] }, starredUnread: 2 },
+        overview: { ...empty, newMail: { total: 3, accounts: [{ accountId: account.id, count: 3 }], latest: [], senders: [] }, starredUnread: 2 },
         props: { folders: [inbox(7)] },
       })
       const section = await screen.findByRole('region', { name: '收件箱' })
@@ -474,15 +475,132 @@ describe('Now page', () => {
     expect(screen.queryByRole('region', { name: '验证码' })).not.toBeInTheDocument()
   })
 
-  it('lists recent attachments by file name, or a generic label', async () => {
-    const named = email('a1', { hasAttachment: true })
-    const unnamed = email('a2', { hasAttachment: true })
-    const { onOpenEmail } = setup({ overview: { ...empty, recentAttachments: [{ email: named, fileNames: ['合同.pdf', '附录.docx'] }, { email: unnamed, fileNames: [] }] } })
-    const section = await screen.findByRole('region', { name: '最近的附件' })
-    expect(within(section).getByText('合同.pdf')).toBeInTheDocument()
-    expect(within(section).getByText('等 1 个文件')).toBeInTheDocument()
-    await userEvent.click(within(section).getByRole('button', { name: /^附件/ }))
-    expect(onOpenEmail).toHaveBeenCalledWith(unnamed)
+  describe('recent attachments', () => {
+    const overview = () => {
+      const named = email('a1', { hasAttachment: true })
+      const unnamed = email('a2', { hasAttachment: true })
+      return { named, unnamed, overview: { ...empty, recentAttachments: [{ email: named, fileNames: ['合同.pdf', '附录.docx'] }, { email: unnamed, fileNames: [] }] } }
+    }
+
+    it('is one muted line without a title, collapsed until opened', async () => {
+      setup({ overview: overview().overview })
+      const section = await screen.findByRole('region', { name: '最近的附件' })
+      expect(within(section).queryByRole('heading')).not.toBeInTheDocument()
+      const toggle = within(section).getByRole('button', { name: '最近 7 天有 2 封邮件带附件' })
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      expect(within(section).queryByText('合同.pdf')).not.toBeInTheDocument()
+      // Its menu is still there for the keyboard.
+      expect(within(section).getByRole('button', { name: '「最近的附件」的更多操作' })).toBeInTheDocument()
+    })
+
+    it('opens to the list, by file name or a generic label, and remembers it', async () => {
+      const { named, unnamed, overview: data } = overview()
+      const { onOpenEmail } = setup({ overview: data })
+      const section = await screen.findByRole('region', { name: '最近的附件' })
+      await userEvent.click(within(section).getByRole('button', { name: /^最近 7 天有/ }))
+      expect(within(section).getByRole('button', { name: /^最近 7 天有/ })).toHaveAttribute('aria-expanded', 'true')
+      expect(within(section).getByText('合同.pdf')).toBeInTheDocument()
+      expect(within(section).getByText('等 1 个文件')).toBeInTheDocument()
+      expect(localStorage.getItem(ATTACHMENTS_OPEN_KEY)).toBe('1')
+      await userEvent.click(within(section).getByRole('button', { name: /^附件/ }))
+      expect(onOpenEmail).toHaveBeenCalledWith(unnamed)
+      expect(named.id).toBe('a1')
+      // The next visit starts open; closing is remembered too.
+      cleanup()
+      setup({ overview: data })
+      const again = await screen.findByRole('region', { name: '最近的附件' })
+      expect(within(again).getByRole('button', { name: /^最近 7 天有/ })).toHaveAttribute('aria-expanded', 'true')
+      await userEvent.click(within(again).getByRole('button', { name: /^最近 7 天有/ }))
+      expect(localStorage.getItem(ATTACHMENTS_OPEN_KEY)).toBe('0')
+    })
+
+    it('says "at least" when the overview list is full', async () => {
+      const rows = Array.from({ length: 5 }, (_, index) => ({ email: email(`a${index}`, { hasAttachment: true }), fileNames: [] }))
+      setup({ overview: { ...empty, recentAttachments: rows } })
+      expect(await screen.findByRole('button', { name: '最近 7 天至少有 5 封邮件带附件' })).toHaveAttribute('aria-expanded', 'false')
+    })
+  })
+
+  describe('while you were away', () => {
+    const SENDERS = [{ address: 'ann@example.com', name: 'Ann', count: 7 }, { address: 'bob@example.com', name: null, count: 3 }]
+    const away = (total = 12) => ({ ...empty, newMail: { total, accounts: [], latest: [], senders: SENDERS } })
+    const hoursAgo = (hours: number) => localStorage.setItem(LAST_VISIT_KEY, new Date(Date.now() - hours * 3_600_000).toISOString())
+
+    it('says how long and how many, lists who wrote most, and opens that person', async () => {
+      hoursAgo(5)
+      const { onOpenContact } = setup({ overview: away() })
+      const section = await screen.findByRole('region', { name: '你不在的时候' })
+      expect(within(section).getByText('离开了 5 小时，来了 12 封新邮件')).toBeInTheDocument()
+      expect(within(section).getByText('7 封')).toBeInTheDocument()
+      // No name: the address stands in.
+      expect(within(section).getByText('bob@example.com')).toBeInTheDocument()
+      await userEvent.click(within(section).getByRole('button', { name: /Ann/ }))
+      expect(onOpenContact).toHaveBeenCalledWith({ address: 'ann@example.com', name: 'Ann' })
+    })
+
+    it('counts days once the time is long', async () => {
+      hoursAgo(80)
+      setup({ overview: away(4) })
+      expect(await screen.findByText('离开了 3 天，来了 4 封新邮件')).toBeInTheDocument()
+    })
+
+    it('stays away for under three hours, and without new mail', async () => {
+      hoursAgo(2)
+      setup({ overview: away() })
+      await screen.findByRole('region', { name: '收件箱' })
+      expect(screen.queryByRole('region', { name: '你不在的时候' })).not.toBeInTheDocument()
+      cleanup()
+      hoursAgo(9)
+      setup({ overview: away(0) })
+      await loaded()
+      expect(screen.queryByRole('region', { name: '你不在的时候' })).not.toBeInTheDocument()
+    })
+
+    it('can be hidden like the others', async () => {
+      hoursAgo(5)
+      setup({ overview: away(), now: { hidden: ['away'] } })
+      await screen.findByRole('region', { name: '收件箱' })
+      expect(screen.queryByRole('region', { name: '你不在的时候' })).not.toBeInTheDocument()
+    })
+  })
+
+  describe('clean up', () => {
+    const SHOP = { address: 'shop@example.com', name: 'Shop', count: 4 }
+    const overview = { ...empty, unreadSenders: [SHOP, { address: 'news@example.com', name: null, count: 3 }] }
+    const item = (id: string) => ({ id, accountId: account.id, folderId: 'inbox', isRead: false, isStarred: false, archived: false, localOnly: false })
+
+    it('lists the senders with their unread counts', async () => {
+      setup({ overview })
+      const section = await screen.findByRole('region', { name: '一键清理' })
+      expect(within(section).getByText('Shop')).toBeInTheDocument()
+      expect(within(section).getByText('4 封未读')).toBeInTheDocument()
+      expect(within(section).getByText('news@example.com')).toBeInTheDocument()
+    })
+
+    it("opens the sender's mail", async () => {
+      const { onOpenContact } = setup({ overview })
+      await userEvent.click(await screen.findByRole('button', { name: '查看Shop的来信' }))
+      expect(onOpenContact).toHaveBeenCalledWith({ address: 'shop@example.com', name: 'Shop' })
+    })
+
+    it("marks the sender's unread mail read through the bulk write-back, and undoes it", async () => {
+      const { client } = setup({ overview })
+      client.selectEmails.mockResolvedValue({ items: ['u1', 'u2', 'u3', 'u4'].map(item), truncated: false })
+      await userEvent.click(await screen.findByRole('button', { name: '全部标为已读：Shop' }))
+      await waitFor(() => expect(client.setFlags).toHaveBeenCalledWith(['u1', 'u2', 'u3', 'u4'], 'read', true))
+      expect(client.selectEmails).toHaveBeenCalledWith(expect.objectContaining({ folderRole: 'inbox', archive: 'exclude', unread: true, fromAddress: 'shop@example.com' }))
+      expect(await screen.findByText('已将 4 封标为已读')).toBeInTheDocument()
+      await userEvent.click(screen.getByRole('button', { name: '撤销' }))
+      await waitFor(() => expect(client.setFlags).toHaveBeenLastCalledWith(['u1', 'u2', 'u3', 'u4'], 'read', false))
+    })
+
+    it('says so when the write fails', async () => {
+      const { client } = setup({ overview })
+      client.selectEmails.mockResolvedValue({ items: [item('u1')], truncated: false })
+      client.setFlags.mockRejectedValueOnce(new Error('boom'))
+      await userEvent.click(await screen.findByRole('button', { name: '全部标为已读：Shop' }))
+      expect((await screen.findAllByText('无法更改已读状态')).length).toBeGreaterThan(0)
+    })
   })
 
   it('refreshes relative times once a minute', async () => {
@@ -513,7 +631,7 @@ describe('Now page', () => {
   it('plays a lighter entrance on a later visit the same day: a short rise, no count-up, quick bars', async () => {
     localStorage.setItem(ENTRANCE_KEY, localDay(new Date()))
     const raf = vi.spyOn(window, 'requestAnimationFrame')
-    setup({ overview: { ...empty, newMail: { total: 12, accounts: [], latest: [] }, starredUnread: 2, activity: activityOf() } })
+    setup({ overview: { ...empty, newMail: { total: 12, accounts: [], latest: [], senders: [] }, starredUnread: 2, activity: activityOf() } })
     const section = await screen.findByRole('region', { name: '收件箱' })
     const header = screen.getByRole('heading', { level: 1 }).parentElement!
     expect(header).toHaveClass('animate-now-rise')
@@ -566,7 +684,7 @@ describe('Now page', () => {
       addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
     }))
     const raf = vi.spyOn(window, 'requestAnimationFrame')
-    setup({ overview: { ...empty, newMail: { total: 12, accounts: [], latest: [] }, activity: activityOf() } })
+    setup({ overview: { ...empty, newMail: { total: 12, accounts: [], latest: [], senders: [] }, activity: activityOf() } })
     const section = await screen.findByRole('region', { name: '收件箱' })
     expect(section).not.toHaveClass('animate-in')
     expect(screen.getByRole('heading', { level: 1 }).parentElement).not.toHaveClass('animate-in')
@@ -581,9 +699,9 @@ describe('Now page', () => {
 
   describe('modules', () => {
     /** Names of the module regions, top to bottom. */
-    const regions = () => [...document.querySelectorAll('[data-slot="now-content"] > section > div > h2')].map((heading) => heading.textContent)
+    const regions = () => [...document.querySelectorAll('[data-slot="now-content"] > section')].map((section) => section.getAttribute('aria-label') ?? section.querySelector('h2')?.textContent)
     const everything = {
-      overview: { ...empty, verificationCodes: [overviewCode('c1', '482913')], newMail: { total: 2, accounts: [], latest: [] }, activity: activityOf(), recentAttachments: [{ email: email('a1', { hasAttachment: true }), fileNames: ['合同.pdf'] }] } satisfies MailOverview,
+      overview: { ...empty, verificationCodes: [overviewCode('c1', '482913')], newMail: { total: 2, accounts: [], latest: [], senders: [] }, activity: activityOf(), recentAttachments: [{ email: email('a1', { hasAttachment: true }), fileNames: ['合同.pdf'] }] } satisfies MailOverview,
       props: { draftCount: 2, folders: [inbox(3)] },
       statuses: { c1: ready('482913') },
     }
@@ -591,7 +709,7 @@ describe('Now page', () => {
     it('shows drafts as their own module right after the codes', async () => {
       setup(everything)
       await screen.findByRole('region', { name: '草稿' })
-      await waitFor(() => expect(regions()).toEqual(['验证码', '草稿', '收件箱', '最近的附件', '近况']))
+      await waitFor(() => expect(regions()).toEqual(['验证码', '草稿', '收件箱', '近况', '最近的附件']))
     })
 
     it('gives only the modules that can be hidden a menu, shown to the keyboard', async () => {
@@ -643,7 +761,7 @@ describe('Now page', () => {
       await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ now: { arrangement: 'auto', order: [], hidden: ['codes'] } }))
       await waitFor(() => expect(screen.queryByRole('region', { name: '验证码' })).not.toBeInTheDocument())
       expect(await screen.findByText('不再显示「验证码」')).toBeInTheDocument()
-      expect(screen.getByText('可以在“设置 → 外观”里恢复')).toBeInTheDocument()
+      expect(screen.getByText('可以在“设置 → 此刻”里恢复')).toBeInTheDocument()
       await userEvent.click(screen.getByRole('button', { name: '撤销' }))
       await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ now: { arrangement: 'auto', order: [], hidden: [] } }))
       expect(await screen.findByRole('region', { name: '验证码' })).toBeInTheDocument()

@@ -91,6 +91,7 @@ fn main() {
         RecentAttachment,
         DayActivity,
         OverviewContact,
+        OverviewSender,
         TodayActivity,
         OverviewActivity,
         MailOverview,

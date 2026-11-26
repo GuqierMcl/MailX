@@ -6,7 +6,7 @@ import type { NowContext } from './types'
 
 const context = (codes: number): NowContext => ({
   now: new Date(2026, 10, 26, 9), awayMs: 0, firstToday: false,
-  data: { attention: [], draftCount: 0, codes: Array.from({ length: codes }, (_, i) => ({ emailId: `e${i}` }) as NowContext['data']['codes'][number]), inbox: { newMail: 0, unread: 0, starredUnread: 0, rows: [] }, attachments: [], activity: undefined },
+  data: { attention: [], draftCount: 0, codes: Array.from({ length: codes }, (_, i) => ({ emailId: `e${i}` }) as NowContext['data']['codes'][number]), inbox: { newMail: 0, unread: 0, starredUnread: 0, rows: [] }, attachments: [], activity: undefined, away: { sinceTime: 0, ms: 0, total: 0, senders: [] }, unreadSenders: [] },
 })
 const auto: NowSettings = { arrangement: 'auto', order: [], hidden: [] }
 
@@ -16,7 +16,7 @@ describe('useModuleOrder', () => {
     expect(result.current).toBeNull()
     rerender({ ready: true, settings: auto, ctx: context(0) })
     const first = result.current
-    expect(first).toEqual(['attention', 'codes', 'drafts', 'inbox', 'attachments', 'activity'])
+    expect(first).toEqual(['attention', 'codes', 'drafts', 'away', 'inbox', 'cleanup', 'activity', 'attachments'])
     // New data does not order again.
     rerender({ ready: true, settings: auto, ctx: context(2) })
     expect(result.current).toBe(first)
@@ -24,6 +24,6 @@ describe('useModuleOrder', () => {
     rerender({ ready: true, settings: { ...auto, hidden: ['codes'] }, ctx: context(2) })
     expect(result.current).toBe(first)
     rerender({ ready: true, settings: { arrangement: 'fixed', order: ['activity'], hidden: [] }, ctx: context(2) })
-    expect(result.current).toEqual(['attention', 'activity', 'codes', 'drafts', 'inbox', 'attachments'])
+    expect(result.current).toEqual(['attention', 'activity', 'codes', 'drafts', 'away', 'inbox', 'cleanup', 'attachments'])
   })
 })

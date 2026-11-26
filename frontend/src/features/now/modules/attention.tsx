@@ -6,13 +6,13 @@ import { AccountAvatar } from '@/features/accounts/account-avatar'
 import { rowClass } from '../mail-row-card'
 import type { NowModule } from './types'
 
-/** Stopped accounts and sends that failed or may not have gone. It cannot be hidden and always leads its zone. */
+/** Stopped accounts and sends that failed or may not have gone. It cannot be hidden and always leads (pinned in the arrangement). */
 export const attentionModule: NowModule = {
   id: 'attention',
   zone: 'act',
   hideable: false,
   title: () => t('now:attention'),
-  score: () => 100,
+  score: () => 400,
   signature: ({ attention }) => attention.map((item) => item.id).join('|'),
   hasContent: ({ attention }) => attention.length > 0,
   render: ({ data }) => (

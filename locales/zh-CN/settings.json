@@ -1,6 +1,7 @@
 {
   "title": "设置",
   "appearance": "外观",
+  "now": "此刻",
   "notifications": "通知",
   "compose": "发信",
   "security": "安全性",
@@ -474,7 +475,7 @@
   "assistantSummaryCacheDescription": "生成的摘要保存在这台电脑上，再次打开同一封邮件时直接显示。",
   "assistantSummaryCacheClear": "清除摘要",
   "assistantSummaryCacheCleared_other": "已清除 {{count}} 条摘要",
-  "nowGroup": "此刻",
+  "nowGroup": "模块",
   "nowArrangement": "模块排列",
   "nowArrangementDescription": "自动：按时间和邮箱里的情况排。固定顺序：按你定的顺序。",
   "nowAuto": "自动",

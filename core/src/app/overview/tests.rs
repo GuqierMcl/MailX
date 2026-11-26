@@ -1,6 +1,7 @@
 //! Also hosts the recipient suggestion tests, which need the same accounts,
 //! folders and local Sent copies.
 mod contact_suggestions;
+mod senders;
 
 use std::{collections::HashMap, sync::Arc};
 

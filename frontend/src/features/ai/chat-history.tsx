@@ -110,12 +110,13 @@ function Row({ item, current, asking, language, onOpen, onAsk, onCancel, onDelet
   )
 }
 
-function HistoryList({ client, chat, saveHistory, close, onStartOver }: {
+function HistoryList({ client, chat, saveHistory, close, onStartOver, onOpened }: {
   client: MailxClient
   chat: AssistantChat
   saveHistory: boolean
   close: () => void
   onStartOver: () => void
+  onOpened?: () => void
 }) {
   const { i18n } = useTranslation()
   const queryClient = useQueryClient()
@@ -151,12 +152,15 @@ function HistoryList({ client, chat, saveHistory, close, onStartOver }: {
 
   const open = useCallback(async (id: string) => {
     const result = await chat.openConversation(id)
-    if (result === 'opened') close()
+    if (result === 'opened') {
+      close()
+      onOpened?.()
+    }
     else if (result === 'failed') {
       toast.error(t('ai:history.openFailed'))
       void refetch()
     }
-  }, [chat, close, refetch])
+  }, [chat, close, onOpened, refetch])
 
   const remove = useCallback(async (id: string) => {
     const index = items.findIndex((item) => item.id === id)
@@ -258,11 +262,15 @@ function HistoryList({ client, chat, saveHistory, close, onStartOver }: {
  * dialog; Esc closes it and the focus goes back to the button. Deleting asks in the row itself.
  * The list is only mounted (and only fetched) while the panel is open.
  */
-export function ChatHistory({ client, chat, onStartOver }: {
+export function ChatHistory({ client, chat, onStartOver, onOpened, className }: {
   client: MailxClient
   chat: AssistantChat
   /** What 新对话 does; also what happens when the conversation on screen is deleted. */
   onStartOver: () => void
+  /** Called after a conversation from the list is on screen, for a host that must then show it. */
+  onOpened?: () => void
+  /** Extra classes for the button, for a host that wants it quieter. */
+  className?: string
 }) {
   useTranslation()
   const [open, setOpen] = useState(false)
@@ -272,12 +280,12 @@ export function ChatHistory({ client, chat, onStartOver }: {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={
-        <IconButton label={t('ai:history.title')} size="icon-lg">
+        <IconButton label={t('ai:history.title')} size="icon-lg" className={className}>
           <HugeiconsIcon icon={HistoryIcon} aria-hidden strokeWidth={2} />
         </IconButton>
       } />
       <PopoverContent align="end" aria-label={t('ai:history.title')} className="max-h-105 w-80 gap-0 p-1.5">
-        <HistoryList client={client} chat={chat} saveHistory={saveHistory} close={close} onStartOver={onStartOver} />
+        <HistoryList client={client} chat={chat} saveHistory={saveHistory} close={close} onStartOver={onStartOver} onOpened={onOpened} />
       </PopoverContent>
     </Popover>
   )

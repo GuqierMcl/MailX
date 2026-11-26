@@ -5,7 +5,7 @@
 //! current UIDVALIDITY generation, present on the server, not deleted locally.
 //! Inbox queries also leave out mail archived on this device, as the inbox
 //! list does; junk and trash are other folder roles and never match.
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{OptionalExtension, params, params_from_iter, types::Value};
 
 use super::{LOCAL_COPIES, SUMMARY_COLUMNS, VISIBLE_MESSAGES, archived_sql, body_state, summary};
 use crate::{
@@ -50,6 +50,14 @@ pub(crate) struct SentRecipient {
 /// and the newest `received_at`.
 pub(crate) type SenderCount = (String, u32, String);
 
+/// One sender of a group of inbox mail: lowercased address, the newest
+/// non-empty display name among the counted messages, and their count.
+pub(crate) struct TopSender {
+    pub address: String,
+    pub name: Option<String>,
+    pub count: u32,
+}
+
 /// A recent inbox message to run the verification-code detector on. Its
 /// `text` is never logged or returned as is.
 pub(crate) struct CodeSource {
@@ -90,6 +98,89 @@ impl Storage {
             .query_map(params![since, latest], summary)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok((counts, items))
+    }
+
+    /// The senders with the most messages in `scope` (a condition on the
+    /// `VISIBLE_MESSAGES` aliases whose placeholders are `?1..?n`, bound to
+    /// `values`), at least `min_count` each, most messages first, then the
+    /// most recently heard from, then by address; at most `limit`.
+    fn overview_top_senders(
+        &self,
+        scope: &str,
+        values: Vec<Value>,
+        min_count: u32,
+        limit: u32,
+    ) -> Result<Vec<TopSender>, AppError> {
+        let next = values.len() + 1;
+        let mut statement = self.db.prepare(&format!(
+            "SELECT lower(m.from_address), COUNT(*) {VISIBLE_MESSAGES} AND {scope}
+             AND m.from_address <> '' GROUP BY lower(m.from_address)
+             HAVING COUNT(*) >= ?{next}
+             ORDER BY COUNT(*) DESC, MAX(m.received_at) DESC, lower(m.from_address)
+             LIMIT ?{}",
+            next + 1
+        ))?;
+        let mut bound = values.clone();
+        bound.push(Value::from(i64::from(min_count)));
+        bound.push(Value::from(i64::from(limit)));
+        let groups = statement
+            .query_map(params_from_iter(bound), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        let mut names = self.db.prepare(&format!(
+            "SELECT TRIM(m.from_name) {VISIBLE_MESSAGES} AND {scope}
+             AND lower(m.from_address) = ?{next} AND COALESCE(TRIM(m.from_name), '') <> ''
+             ORDER BY m.received_at DESC, m.id DESC LIMIT 1"
+        ))?;
+        groups
+            .into_iter()
+            .map(|(address, count)| {
+                let mut bound = values.clone();
+                bound.push(Value::from(address.clone()));
+                let name = names
+                    .query_row(params_from_iter(bound), |row| row.get(0))
+                    .optional()?;
+                Ok(TopSender {
+                    address,
+                    name,
+                    count,
+                })
+            })
+            .collect()
+    }
+
+    /// The senders of inbox mail received strictly after `since`, in the
+    /// scope of [`Self::overview_new_mail`].
+    pub(crate) fn overview_new_senders(
+        &self,
+        since: &str,
+        limit: u32,
+    ) -> Result<Vec<TopSender>, AppError> {
+        self.overview_top_senders(
+            &format!("{INBOX} AND m.received_at > ?1"),
+            vec![Value::from(since.to_owned())],
+            1,
+            limit,
+        )
+    }
+
+    /// The senders of at least `min_count` unread inbox messages, in the
+    /// unified inbox's scope (locally archived mail left out). The literal
+    /// `is_read = 0` lets SQLite read the partial `messages_unread_by_sender`
+    /// index instead of every inbox row.
+    pub(crate) fn overview_unread_senders(
+        &self,
+        min_count: u32,
+        limit: u32,
+    ) -> Result<Vec<TopSender>, AppError> {
+        self.overview_top_senders(
+            &format!("{INBOX} AND m.is_read = 0"),
+            vec![],
+            min_count,
+            limit,
+        )
     }
 
     /// Starred unread messages in the Starred view's scope: every folder but

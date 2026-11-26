@@ -48,11 +48,11 @@ pub use app::{
     EmailFlagResult, FlagBatchItem, FlagBatchItemOutcome, FlagBatchOutcome, FlagChange,
     MailOverview, MailOverviewQuery, MailxCore, MessageFlag, NewMailOverview,
     OAuthBrowserAuthorization, OAuthSessionHandle, OAuthSessionRequest, OAuthSignInResult,
-    OverviewActivity, OverviewCode, OverviewContact, ProtocolVerification, RecentAttachment,
-    RemoteImageStatus, SaveAiConnection, SavedAiConnection, TodayActivity, TranslationCacheStats,
-    TranslationInfo, TranslationKeyState, TranslationProxyPasswordState, TranslationStatus,
-    TranslationTest, VerificationCodeCleanup, VerificationCodeCopyOutcome, VerificationCodeState,
-    VerificationCodeStatus, VerifyAccountConnection, VerifyDraftConnection,
+    OverviewActivity, OverviewCode, OverviewContact, OverviewSender, ProtocolVerification,
+    RecentAttachment, RemoteImageStatus, SaveAiConnection, SavedAiConnection, TodayActivity,
+    TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,
+    TranslationStatus, TranslationTest, VerificationCodeCleanup, VerificationCodeCopyOutcome,
+    VerificationCodeState, VerificationCodeStatus, VerifyAccountConnection, VerifyDraftConnection,
 };
 pub use app::{DiscoverEwsSettings, EwsDiscoveryStatus, EwsSettingsDiscovery};
 pub use assistant::{
