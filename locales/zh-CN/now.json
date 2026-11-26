@@ -144,5 +144,16 @@
   "aiSummarize": "用 AI 总结",
   "aiRefresh": "重新生成",
   "aiRetry": "AI 这次没写出来，再试一次",
-  "aiSummaryLabel": "AI 概述"
+  "aiSummaryLabel": "AI 概述",
+  "draftsTitle": "草稿",
+  "moduleMore": "「{{module}}」的更多操作",
+  "hideToday": "今天先不看",
+  "hideForever": "不再显示",
+  "hiddenToday": "今天先不看「{{module}}」",
+  "hidden": "不再显示「{{module}}」",
+  "hiddenHint": "可以在“设置 → 外观”里恢复",
+  "undo": "撤销",
+  "hideFailed": "没能保存，请再试一次",
+  "overviewFailed": "没能读取邮箱概况",
+  "retry": "重试"
 }

@@ -163,5 +163,16 @@
   "aiSummarize": "Summarize with AI",
   "aiRefresh": "Regenerate",
   "aiRetry": "AI couldn't write this one. Try again",
-  "aiSummaryLabel": "AI summary"
+  "aiSummaryLabel": "AI summary",
+  "draftsTitle": "Drafts",
+  "moduleMore": "More for {{module}}",
+  "hideToday": "Hide for today",
+  "hideForever": "Don't show again",
+  "hiddenToday": "{{module}} hidden for today",
+  "hidden": "{{module}} hidden",
+  "hiddenHint": "Bring it back in Settings > Appearance",
+  "undo": "Undo",
+  "hideFailed": "Couldn't save. Try again",
+  "overviewFailed": "Couldn't load the overview",
+  "retry": "Retry"
 }

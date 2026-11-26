@@ -1,41 +1,46 @@
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
-import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { Alert02Icon, Attachment01Icon, CheckmarkCircle02Icon, Copy01Icon, File01Icon, MailUpload01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
-import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import type { Account, AccountSyncState, CodeCandidate, Folder, OutboxItem, OverviewActivity, OverviewCode, OverviewContact } from '@/generated/accounts'
-import { IconButton } from '@/components/icon-button'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { Alert02Icon, CheckmarkCircle02Icon, MailUpload01Icon } from '@hugeicons/core-free-icons'
+import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { Account, AccountSyncState, CodeCandidate, Folder, OutboxItem, OverviewCode, OverviewContact } from '@/generated/accounts'
+import { ErrorNotice } from '@/components/error-notice'
+import { toast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
+import { errorDetail } from '@/i18n/errors'
+import { latestSettingsSnapshot } from '@/lib/settings-cache'
 import type { MailxClient } from '@/lib/mailx-client'
 import { mailKeys } from '@/lib/query-client'
 import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion'
-import { useSettings } from '@/features/settings/settings-queries'
-import { AccountAvatar } from '@/features/accounts/account-avatar'
+import { useSettings, useUpdateNow } from '@/features/settings/settings-queries'
 import { accountIssues, accountProblem } from '@/features/accounts/account-status'
 import { signInNeeded } from '@/features/accounts/sign-in-state'
-import { SenderAvatar } from '@/features/mail/sender-avatar'
-import { displayName, emailQuery } from '@/features/mail/format'
+import { emailQuery } from '@/features/mail/format'
 import type { Mailbox } from '@/features/mail/mailbox'
-import { readyVerificationCode, type ReadyVerificationCode, type VerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
-import { daySegment, lineContext, lineKey, type LineContext, type NowKey } from './greeting'
+import { readyVerificationCode, type VerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
+import { daySegment, lineContext, lineKey, localDay, type LineContext, type NowKey } from './greeting'
 import { useDayClock, useFirstVisitToday, useLastVisit, useMinuteClock } from './visit'
-import { entrance, entranceMode, useCountUp, type EntranceMode } from './motion'
+import { entranceMode, motionProps } from './motion'
 import { useFreshCodes } from './use-fresh-codes'
 import { GreetingIcon } from './greeting-icon'
 import { NowAmbient } from './now-ambient'
 import { relativeTime } from './relative-time'
-import { MailRowCard, rowClass } from './mail-row-card'
-import { compareWeeks, dayStarts, syncSummary } from './activity'
-import { ActivityChart } from './activity-chart'
+import { dayStarts, syncSummary } from './activity'
 import { SummaryLine } from './summary-line'
 import { useSharedAssistantChat } from '@/features/ai/assistant-chat-context'
 import { useAssistantUsable } from '@/features/ai/use-assistant-usable'
 import { NowChatShell } from './now-chat'
 import { useNowSummary } from './use-now-summary'
-
-/** Rows of unread inbox mail the page lists; more are a link away. */
-export const UNREAD_ROWS = 6
+import { suppressed } from './modules/arrange'
+import { OVERVIEW_CODES } from './modules/codes'
+import { DEFAULT_NOW } from './modules/defaults'
+import { UNREAD_ROWS } from './modules/inbox'
+import { ModuleSection } from './modules/module-section'
+import { moduleById } from './modules/registry'
+import { useSnoozed } from './modules/snooze'
+import type { AttentionItem, NowContext, NowData, NowModule, NowModuleId, NowRenderEnv, ShownCode } from './modules/types'
+import { useModuleOrder } from './modules/use-module-order'
 
 /** The unified inbox with the Unread filter, newest first, as the workbench asks for it. */
 const UNREAD_QUERY = emailQuery({ folderRole: 'inbox', archive: 'exclude', unread: true, limit: UNREAD_ROWS })
@@ -66,8 +71,6 @@ export type NowPageProps = {
   /** The workbench's shared verification-code controller: recognition and copying behave as in the list and reader. */
   verification: VerificationCodes
 }
-
-type AttentionItem = { id: string; icon: IconSvgElement; label: string; tone?: 'alert'; onClick: () => void; avatar?: Account }
 
 /**
  * The Now page (now-page.md): a greeting and what is going on in the mailbox,
@@ -126,7 +129,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
     return ready ? [{ emailId: code.emailId, accountId: code.accountId, from: code.from, receivedAt: code.receivedAt, ready }] : []
   }).sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt)).slice(0, OVERVIEW_CODES)
 
-  // Needs attention: accounts that stopped, sends that failed or may not have gone, drafts.
+  // Needs attention: accounts that stopped, sends that failed or may not have gone. Drafts are a module of their own.
   const attention: AttentionItem[] = accounts.flatMap((account): AttentionItem[] => {
     const sync = syncStates[account.id]
     if (accountProblem(account, sync) !== 'stopped') return []
@@ -139,9 +142,8 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   const unknown = outbox.filter((item) => item.state === 'unknown').length
   if (failed > 0) attention.push({ id: 'failed', icon: MailUpload01Icon, tone: 'alert', label: t('now:outboxFailed', { count: failed }), onClick: () => onSelectMailbox({ kind: 'outbox' }) })
   if (unknown > 0) attention.push({ id: 'unknown', icon: MailUpload01Icon, tone: 'alert', label: t('now:outboxUnknown', { count: unknown }), onClick: () => onSelectMailbox({ kind: 'outbox' }) })
-  // Drafts are listed but never set the "attention" line: they pile up and never clear themselves.
+  // Drafts never set the "attention" line: they pile up and never clear themselves.
   const urgent = attention.length > 0
-  if (draftCount > 0) attention.push({ id: 'drafts', icon: File01Icon, label: t('now:drafts', { count: draftCount }), onClick: () => onSelectMailbox({ kind: 'drafts' }) })
 
   // Unread in the unified inbox, as the sidebar counts it; unknown counts show nothing.
   const inboxes = folders.filter((folder) => folder.selectable && folder.role === 'inbox')
@@ -150,25 +152,92 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   const starredUnread = data?.starredUnread ?? 0
   const newMail = data?.newMail.total ?? 0
   const attachments = data?.recentAttachments ?? []
-  const activity = data?.activity
-  const showInbox = newMail > 0 || unread > 0 || starredUnread > 0 || unreadRows.length > 0
-  const showActivity = activity !== undefined
-    && (activity.days.some((day) => day.received > 0) || activity.sentLastWeek + activity.sentPreviousWeek > 0)
+  const moduleData: NowData = {
+    attention,
+    draftCount,
+    codes,
+    inbox: { newMail, unread, starredUnread, rows: unreadRows },
+    attachments,
+    activity: data?.activity,
+  }
   const sync = syncSummary(accounts, syncStates)
 
   const segment = daySegment(now)
   const context = lineContext(now, language, { attention: urgent, newMail, unread })
-  const nothingPending = data !== undefined && attention.length === 0 && newMail === 0 && unread === 0
+  const nothingPending = data !== undefined && attention.length === 0 && draftCount === 0 && newMail === 0 && unread === 0
     && starredUnread === 0 && codes.length === 0 && attachments.length === 0
 
   const defaultId = settings.data?.settings.compose.defaultAccountId
   const name = (accounts.find((account) => account.id === defaultId) ?? accounts[0])?.senderName?.trim() || null
   const greeting = name ? t(`now:greetingNamed.${segment}`, { name }) : t(`now:greeting.${segment}`)
   const date = new Intl.DateTimeFormat(language, { month: 'long', day: 'numeric', weekday: 'long' }).format(now)
-  const sinceTime = Date.parse(since)
 
+  // The order is worked out once for the stay; hiding and snoozing apply as they happen.
+  const nowSettings = settings.data?.settings.now ?? DEFAULT_NOW
+  const sinceTime = Date.parse(since)
+  const slots = useModuleOrder(shown && !settings.isPending, nowSettings, { now, awayMs: now.getTime() - sinceTime, firstToday, data: moduleData } satisfies NowContext)
+  const { snoozed, snooze, restore } = useSnoozed()
+  const today = localDay(now)
+  const updateNow = useUpdateNow(client)
+  const queryClient = useQueryClient()
+
+  const hideForever = (module: NowModule) => {
+    const current = latestSettingsSnapshot(queryClient)?.settings.now ?? nowSettings
+    if (current.hidden.includes(module.id)) return
+    const failure = () => toast.error(t('now:hideFailed'))
+    updateNow.mutate({ hidden: [...current.hidden, module.id] }, { onError: failure })
+    toast.info(t('now:hidden', { module: module.title() }), {
+      description: t('now:hiddenHint'),
+      action: {
+        label: t('now:undo'),
+        onClick: () => {
+          const latest = latestSettingsSnapshot(queryClient)?.settings.now ?? current
+          updateNow.mutate({ hidden: latest.hidden.filter((id) => id !== module.id) }, { onError: failure })
+        },
+      },
+    })
+  }
+  const hideToday = (module: NowModule) => {
+    snooze(module.id, module.signature(moduleData))
+    // The module's button is gone with it; the toast offers the way back.
+    toast.info(t('now:hiddenToday', { module: module.title() }), {
+      action: { label: t('now:undo'), onClick: () => restore(module.id) },
+    })
+  }
+  const env: NowRenderEnv = {
+    data: moduleData,
+    language,
+    minute,
+    mode,
+    sinceTime,
+    verification,
+    contactAccountId: accounts[0]?.id ?? '',
+    actions: { onSelectMailbox, onOpenUnread, onOpenContact, onOpenAccount, onOpenEmail },
+  }
+  // A failed overview is reported once, where its first module would be.
+  const overviewFailed = overview.isError && data === undefined
+  let overviewReported = false
   let index = 1
   const next = () => index++
+  const blocks: ReactNode[] = []
+  for (const id of slots ?? ([] as NowModuleId[])) {
+    const module = moduleById(id)
+    if (suppressed(module, nowSettings, snoozed, moduleData, today)) continue
+    if (overviewFailed && module.fromOverview && !overviewReported) {
+      overviewReported = true
+      blocks.push(
+        <div key="overview-error" {...motionProps(mode, next(), 'px-3')}>
+          <ErrorNotice message={t('now:overviewFailed')} detail={errorDetail(overview.error)} actionLabel={t('now:retry')} onAction={() => void overview.refetch()} actionDisabled={overview.isFetching} />
+        </div>,
+      )
+    }
+    if (!module.hasContent(moduleData)) continue
+    blocks.push(
+      <ModuleSection key={module.id} title={module.title()} mode={mode} index={next()} menu={module.hideable ? { onHideToday: () => hideToday(module), onHideForever: () => hideForever(module) } : undefined}>
+        {module.render(env)}
+      </ModuleSection>,
+    )
+  }
 
   // The conversation view keeps this much of the overview: the greeting and, when known, the unread count.
   const chatSummary = unread > 0 ? `${greeting} · ${t('ai:chat.summaryUnread', { count: unread })}` : greeting
@@ -204,85 +273,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
                 {nothingPending && context.kind !== 'clear' && <p className="mt-1 text-base text-muted-foreground">{t('now:allClear')}</p>}
               </header>
 
-              {attention.length > 0 && (
-                <Section title={t('now:attention')} mode={mode} index={next()}>
-                  <ul className="flex flex-col rounded-xl bg-muted/40 p-1">
-                    {attention.map((item) => (
-                      <li key={item.id}>
-                        <button type="button" onClick={item.onClick} className={rowClass}>
-                          {item.avatar ? (
-                            <AccountAvatar displayName={item.avatar.displayName} color={item.avatar.color} providerId={item.avatar.providerId} useProviderIcon={item.avatar.useProviderIcon} className="size-5 text-[10px]" />
-                          ) : <HugeiconsIcon icon={item.icon} className={cn('size-4 shrink-0 text-muted-foreground', item.tone === 'alert' && 'text-destructive')} />}
-                          <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                          {item.avatar && <HugeiconsIcon icon={Alert02Icon} className="size-4 shrink-0 text-destructive" />}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </Section>
-              )}
-
-              {codes.length > 0 && (
-                <Section title={t('now:codes')} mode={mode} index={next()}>
-                  <ul className="flex flex-col rounded-xl bg-muted/40 p-1">
-                    {codes.map((code) => (
-                      <CodeRow key={code.emailId} code={code} language={language} now={minute} verification={verification} onOpenEmail={onOpenEmail} />
-                    ))}
-                  </ul>
-                </Section>
-              )}
-
-              {showInbox && (
-                <Section title={t('now:inbox')} mode={mode} index={next()}>
-                  <div className="flex flex-wrap gap-2">
-                    {newMail > 0 && <StatButton value={newMail} label={t('now:statNew')} mode={mode} onClick={() => onSelectMailbox({ kind: 'unified', role: 'inbox' })} />}
-                    <StatButton value={unread} label={t('now:statUnread')} mode={mode} onClick={onOpenUnread} />
-                    {starredUnread > 0 && <StatButton value={starredUnread} label={t('now:starredUnread')} mode={mode} onClick={() => onSelectMailbox({ kind: 'starred' })} />}
-                  </div>
-                  {unreadRows.length > 0 && (
-                    <ul className="flex flex-col">
-                      {unreadRows.map((email) => (
-                        <li key={email.id}>
-                          <MailRowCard email={email} language={language} now={minute} isNew={Date.parse(email.receivedAt) > sinceTime} onOpen={onOpenEmail} />
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {unread > UNREAD_ROWS && (
-                    <button type="button" onClick={onOpenUnread} className={cn(linkClass, 'self-start')}>
-                      {t('now:viewAllUnread', { count: unread })}
-                    </button>
-                  )}
-                </Section>
-              )}
-
-              {showActivity && (
-                <Section title={t('now:recent')} mode={mode} index={next()}>
-                  <Activity activity={activity} language={language} mode={mode} contactAccountId={accounts[0]?.id ?? ''} onOpenContact={onOpenContact} />
-                </Section>
-              )}
-
-              {attachments.length > 0 && (
-                <Section title={t('now:attachments')} mode={mode} index={next()}>
-                  <ul className="flex flex-col">
-                    {attachments.map(({ email, fileNames }) => (
-                      <li key={email.id}>
-                        <button type="button" onClick={() => onOpenEmail(email)} className={rowClass}>
-                          <HugeiconsIcon icon={Attachment01Icon} className="size-4 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate">
-                              {fileNames[0] ?? t('now:attachment')}
-                              {fileNames.length > 1 && <span className="text-muted-foreground"> {t('now:moreFiles', { count: fileNames.length - 1 })}</span>}
-                            </span>
-                            <span className="block truncate text-xs text-muted-foreground">{displayName(email.from)}</span>
-                          </span>
-                          <span className="shrink-0 text-xs text-muted-foreground">{relativeTime(email.receivedAt, language, minute)}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </Section>
-              )}
+              {blocks}
 
               {sync && (
                 <p data-slot="now-sync" {...motionProps(mode, next(), 'flex items-center gap-1.5 px-3 text-xs text-muted-foreground')}>
@@ -330,58 +321,6 @@ function useInboxRefresh(folders: Folder[], syncStates: Record<string, AccountSy
   }, [revision, refetch])
 }
 
-/** The last two weeks: the daily chart, then a few plain sentences. */
-function Activity({ activity, language, mode, contactAccountId, onOpenContact }: {
-  activity: OverviewActivity
-  language: string
-  mode: EntranceMode
-  /** Any account; avatars are looked up by address. */
-  contactAccountId: string
-  onOpenContact: NowPageProps['onOpenContact']
-}) {
-  const complete = activity.previousWeekComplete
-  const received = compareWeeks(activity.receivedLastWeek, activity.receivedPreviousWeek, complete)
-  const sent = compareWeeks(activity.sentLastWeek, activity.sentPreviousWeek, complete)
-  const showSent = activity.sentLastWeek + activity.sentPreviousWeek > 0
-  const { today } = activity
-  return (
-    <div className="flex flex-col gap-4 px-3">
-      <ActivityChart days={activity.days} language={language} mode={mode} />
-      <div data-slot="now-activity-lines" className="flex flex-col gap-1.5 text-sm text-muted-foreground">
-        <p>{t(`now:receivedWeek.${received.kind}`, { count: activity.receivedLastWeek, diff: 'diff' in received ? received.diff : 0 })}</p>
-        {showSent && <p>{t(`now:sentWeek.${sent.kind}`, { count: activity.sentLastWeek, diff: 'diff' in sent ? sent.diff : 0 })}</p>}
-        {activity.topContacts.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
-            <span className="mr-1">{t('now:topContacts')}</span>
-            {activity.topContacts.map((contact) => (
-              <button
-                key={contact.address}
-                type="button"
-                onClick={() => onOpenContact(contact)}
-                className="flex max-w-48 items-center gap-1.5 rounded-full py-0.5 pr-2.5 pl-0.5 text-foreground outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <SenderAvatar sender={{ name: contact.name, address: contact.address }} accountId={contactAccountId} size="sm" className="size-5 text-[9px]" />
-                <span className="truncate">{contact.name?.trim() || contact.address}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        <p>
-          {today.received === 0 ? t('now:todayNone')
-            : today.unread > 0 ? t('now:todayUnread', { count: today.received, unread: today.unread })
-              : t('now:todayAllRead', { count: today.received })}
-        </p>
-      </div>
-    </div>
-  )
-}
-
-/** Most codes listed, as the overview caps its own list. */
-const OVERVIEW_CODES = 3
-
-/** A code the shared recognizer confirmed, whether the overview found it or only suspected it. */
-type ShownCode = Pick<OverviewCode, 'emailId' | 'accountId' | 'from' | 'receivedAt'> & { ready: ReadyVerificationCode }
-
 /** Asks the shared controller to recognize the codes and candidates; nothing while the page is gone. */
 function useCodeTargets(verification: VerificationCodes, codes: (OverviewCode | CodeCandidate)[]) {
   const key = JSON.stringify(codes.map((code): VerificationTarget => ({ emailId: code.emailId, bodyState: code.bodyState })))
@@ -389,78 +328,6 @@ function useCodeTargets(verification: VerificationCodes, codes: (OverviewCode | 
   const request = verification.requestVisible
   useEffect(() => { request(targets) }, [request, targets])
   useEffect(() => () => { request([]) }, [request])
-}
-
-/**
- * One code the shared recognizer confirmed. Copying goes through the shared
- * flow: the host writes the clipboard, the move-to-Trash setting applies and
- * the notices match the list and reader.
- */
-function CodeRow({ code, language, now, verification, onOpenEmail }: { code: ShownCode; language: string; now: number; verification: VerificationCodes; onOpenEmail: NowPageProps['onOpenEmail'] }) {
-  const { ready } = code
-  const shown = ready.code
-  const busy = verification.busy(code.emailId)
-  const copied = verification.copied(code.emailId, ready.recognitionId)
-  const label = busy ? t('mail:verificationCopying') : copied ? t('mail:verificationCopiedShort') : t('now:copyCode', { code: shown })
-  return (
-    <li className="flex items-center gap-3 rounded-lg px-3 py-2">
-      <p className="font-mono text-2xl font-semibold tracking-[0.18em] tabular-nums">
-        <span className="sr-only">{t('now:codeLabel', { code: shown })}</span>
-        <span aria-hidden>{shown}</span>
-      </p>
-      <div className="min-w-0 flex-1 text-sm">
-        <button
-          type="button"
-          className="max-w-full truncate rounded-sm text-left font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => onOpenEmail({ id: code.emailId, accountId: code.accountId })}
-        >
-          {displayName(code.from)}
-        </button>
-        <p className="text-xs text-muted-foreground">{relativeTime(code.receivedAt, language, now)}</p>
-      </div>
-      <IconButton
-        label={label}
-        size="icon-sm"
-        disabled={busy}
-        onClick={() => void verification.copy(code.emailId, ready.recognitionId)}
-      >
-        <HugeiconsIcon icon={copied ? Tick02Icon : Copy01Icon} />
-      </IconButton>
-    </li>
-  )
-}
-
-const linkClass = 'rounded-md px-3 py-1 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring'
-
-function motionProps(mode: EntranceMode, index: number, className?: string) {
-  const motion = entrance(mode, index)
-  return { className: cn(className, motion.className), style: motion.style }
-}
-
-function Section({ title, mode, index, children }: { title: string; mode: EntranceMode; index: number; children: ReactNode }) {
-  const id = useId()
-  return (
-    <section aria-labelledby={id} {...motionProps(mode, index, 'flex flex-col gap-2')}>
-      <h2 id={id} className="px-3 text-xs font-medium text-muted-foreground">{title}</h2>
-      {children}
-    </section>
-  )
-}
-
-/** A small count that leads somewhere; screen readers get the label and the number once. */
-function StatButton({ value, label, mode, onClick }: { value: number; label: string; mode: EntranceMode; onClick: () => void }) {
-  const shown = useCountUp(value, mode === 'first')
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={`${label} ${value}`}
-      className="flex items-baseline gap-1.5 rounded-lg bg-muted/40 px-3 py-1.5 text-sm outline-none hover:bg-foreground/5 focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-semibold tabular-nums">{shown}</span>
-    </button>
-  )
 }
 
 function summaryLine(now: Date, context: LineContext) {

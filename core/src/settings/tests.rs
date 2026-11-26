@@ -9,6 +9,7 @@ fn appearance(accent_color: &str, interface_font: &str) -> AppSettings {
         layout: LayoutSettings::default(),
         notifications: NotificationSettings::default(),
         badge: BadgeSettings::default(),
+        now: NowSettings::default(),
         mcp: McpSettings::default(),
         compose: ComposeSettings::default(),
         translation: TranslationSettings::default(),
@@ -398,6 +399,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                     "mutedAccounts": []
                 },
                 "badge": { "enabled": true, "excludedAccounts": [] },
+                "now": { "arrangement": "auto", "order": [], "hidden": [] },
                 "compose": { "defaultAccountId": "", "undoSendSeconds": 0, "openMode": "window" },
                 "mcp": { "enabled": false },
                 "assistant": {
@@ -2361,4 +2363,72 @@ fn the_assistant_width_has_a_default_a_range_and_survives_other_layout_edits() {
     .unwrap();
     let store = SettingsStore::open(directory.path()).unwrap();
     assert_eq!(store.get().unwrap().settings.layout.assistant_width, 560);
+}
+
+#[test]
+fn now_settings_default_for_old_files_patch_normalized_and_repair_per_field() {
+    let directory = TempDir::new().unwrap();
+    fs::write(
+        directory.path().join(SETTINGS_FILE_NAME),
+        r#"{"version":1,"settings":{"notifications":{"enabled":false}}}"#,
+    )
+    .unwrap();
+    let store = SettingsStore::open(directory.path()).unwrap();
+    assert_eq!(store.get().unwrap().settings.now, NowSettings::default());
+
+    let saved = store
+        .patch(SettingsPatch {
+            now: Some(NowSettings {
+                arrangement: NowArrangement::Fixed,
+                order: vec!["inbox".into(), "Bad".into(), "later".into(), "inbox".into()],
+                hidden: vec!["codes".into(), "x-y".into()],
+            }),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    assert_eq!(saved.settings.now.arrangement, NowArrangement::Fixed);
+    assert_eq!(saved.settings.now.order, ["inbox", "later"]);
+    assert_eq!(saved.settings.now.hidden, ["codes"]);
+    assert!(!saved.settings.notifications.enabled);
+    // A patch without `now` leaves it alone.
+    let other = store
+        .patch(SettingsPatch {
+            badge: Some(BadgeSettings::default()),
+            ..SettingsPatch::default()
+        })
+        .unwrap();
+    assert_eq!(other.settings.now, saved.settings.now);
+
+    for (text, arrangement, order, hidden) in [
+        (
+            r#"{"version":1,"settings":{"now":{"arrangement":7,"order":["a"],"hidden":["b"]},"layout":{"navWidth":300}}}"#,
+            NowArrangement::Auto,
+            vec!["a"],
+            vec!["b"],
+        ),
+        (
+            r#"{"version":1,"settings":{"now":{"arrangement":"fixed","order":["a",2],"hidden":["Bad","b"]},"layout":{"navWidth":300}}}"#,
+            NowArrangement::Fixed,
+            vec![],
+            vec!["b"],
+        ),
+        (
+            r#"{"version":1,"settings":{"now":"fixed","layout":{"navWidth":300}}}"#,
+            NowArrangement::Auto,
+            vec![],
+            vec![],
+        ),
+    ] {
+        let directory = TempDir::new().unwrap();
+        fs::write(directory.path().join(SETTINGS_FILE_NAME), text).unwrap();
+        let snapshot = SettingsStore::open(directory.path())
+            .unwrap()
+            .get()
+            .unwrap();
+        assert!(!snapshot.recovered, "{text}");
+        assert_eq!(snapshot.settings.layout.nav_width, 300, "{text}");
+        assert_eq!(snapshot.settings.now.arrangement, arrangement, "{text}");
+        assert_eq!(snapshot.settings.now.order, order, "{text}");
+        assert_eq!(snapshot.settings.now.hidden, hidden, "{text}");
+    }
 }

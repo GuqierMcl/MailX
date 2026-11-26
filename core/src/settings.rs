@@ -19,11 +19,15 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 mod assistant;
+mod now;
 use assistant::repair_assistant;
 pub use assistant::{
     AssistantMode, AssistantSendMode, AssistantSettings, EmailSummarySettings,
     MAX_INSTRUCTIONS_CHARS, MAX_SUMMARY_SENDERS, SummaryLanguage, SummaryStyle,
 };
+
+use now::repair_now;
+pub use now::{NowArrangement, NowSettings};
 
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
 const BACKUP_FILE_NAME: &str = "settings.json.bak";
@@ -928,6 +932,8 @@ pub struct SettingsPatch {
     pub translation: Option<TranslationSettings>,
     #[ts(optional)]
     pub assistant: Option<AssistantSettings>,
+    #[ts(optional)]
+    pub now: Option<NowSettings>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -944,6 +950,7 @@ pub struct AppSettings {
     pub mcp: McpSettings,
     pub translation: TranslationSettings,
     pub assistant: AssistantSettings,
+    pub now: NowSettings,
     /// Only the AI commands change it; `SettingsPatch` has no such field. The
     /// interface reads it through `ai_state`, so it is not part of the
     /// generated settings type.
@@ -1047,6 +1054,7 @@ impl AppSettings {
             badge,
             compose,
             mcp: self.mcp,
+            now: self.now.normalized(),
             translation: self.translation.normalized()?,
             assistant: self.assistant.normalized()?,
             ai: self.ai.normalized()?,
@@ -1101,6 +1109,7 @@ impl AppSettings {
             badge,
             compose,
             mcp: self.mcp,
+            now: self.now.normalized(),
             translation: self.translation.sanitized(),
             assistant: self.assistant.sanitized(),
             ai: self.ai.sanitized(),
@@ -1364,6 +1373,7 @@ impl SettingsStore {
                 },
                 None => state.settings.assistant.clone(),
             },
+            now: patch.now.unwrap_or_else(|| state.settings.now.clone()),
             ai: state.settings.ai.clone(),
         }
         .normalized()?;
@@ -1529,6 +1539,13 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                 repair_badge(badge);
             } else {
                 settings.remove("badge");
+            }
+        }
+        if let Some(now) = settings.get_mut("now") {
+            if now.is_object() {
+                repair_now(now);
+            } else {
+                settings.remove("now");
             }
         }
         if let Some(assistant) = settings.get_mut("assistant") {
