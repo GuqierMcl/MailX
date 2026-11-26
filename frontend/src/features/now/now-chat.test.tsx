@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { act, render, screen, waitFor } from '@/test/render'
+import { act, cleanup, render, screen, waitFor, within } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AiState, AssistantEvent, AssistantEventKind, ConfirmationRequest, EmailPage, MailOverview, RunSnapshot, StartRun } from '@/generated/accounts'
@@ -9,7 +9,7 @@ import { AssistantChatProvider } from '@/features/ai/assistant-chat-provider'
 import { NowPage, type NowPageProps } from './now-page'
 
 const account = exampleAccount({ displayName: '工作邮箱', senderName: '林夕' })
-const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], codeCandidates: [], recentAttachments: [], generatedAt: new Date().toISOString() }
+const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [], senders: [] }, starredUnread: 0, unreadSenders: [], verificationCodes: [], codeCandidates: [], recentAttachments: [], generatedAt: new Date().toISOString() }
 const noMail: EmailPage = { items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }
 const CONNECTION = { id: 'c1', providerId: 'openai', name: 'OpenAI', protocol: 'openaiCompatible' as const, baseUrl: 'https://api.openai.com/v1', useProxy: false, hasKey: true }
 const ready: AiState = {
@@ -80,6 +80,58 @@ const greeting = () => screen.queryByRole('heading', { level: 1 })
 afterEach(() => {
   localStorage.clear()
   vi.restoreAllMocks()
+})
+
+describe('Now page: history button on the overview', () => {
+  const past = { id: 'conv-old', title: '归档推广邮件', createdAt: '2026-11-20T10:00:00.000Z', updatedAt: '2026-11-20T10:00:00.000Z', turns: [{ role: 'user' as const, text: '把推广邮件归档', at: '2026-11-20T10:00:00.000Z' }] }
+  const withHistory = (options: Setup = {}) => {
+    const made = setup(options)
+    made.client.assistantListConversations.mockResolvedValue({ items: [{ id: 'conv-old', title: '归档推广邮件', updatedAt: '2026-11-20T10:00:00.000Z', messageCount: 1 }], nextCursor: null })
+    made.client.assistantGetConversation.mockResolvedValue(past)
+    return made
+  }
+
+  it('shows with the input, outside the scrolling column, quiet until hovered or focused', async () => {
+    withHistory()
+    const button = await screen.findByRole('button', { name: '历史对话' })
+    expect(button.closest('[data-slot="now-history"]')).toBeInTheDocument()
+    expect(button.closest('.overflow-y-auto')).toBeNull()
+    expect(button).toHaveClass('text-muted-foreground/60', 'hover:text-foreground', 'focus-visible:text-foreground', 'motion-reduce:transition-none')
+  })
+
+  it('is absent while the assistant is off, has no model, or no conversation is kept', async () => {
+    const off = withHistory({ enabled: false })
+    await screen.findByRole('heading', { level: 1 })
+    expect(screen.queryByRole('button', { name: '历史对话' })).not.toBeInTheDocument()
+    off.client.assistantListConversations.mockClear()
+    cleanup()
+    withHistory({ ai: { ...ready, defaultModel: null } })
+    await screen.findByRole('heading', { level: 1 })
+    expect(screen.queryByRole('button', { name: '历史对话' })).not.toBeInTheDocument()
+    cleanup()
+    withHistory({ withProvider: false })
+    await screen.findByRole('heading', { level: 1 })
+    expect(screen.queryByRole('button', { name: '历史对话' })).not.toBeInTheDocument()
+  })
+
+  it('shows the same empty state as the conversation view', async () => {
+    const { client } = setup()
+    client.assistantListConversations.mockResolvedValue({ items: [], nextCursor: null })
+    await userEvent.click(await screen.findByRole('button', { name: '历史对话' }))
+    const panel = await screen.findByRole('dialog', { name: '历史对话' })
+    expect(await within(panel).findByText('还没有历史对话')).toBeInTheDocument()
+  })
+
+  it('opens a saved conversation and switches the page to the conversation view', async () => {
+    const { client } = withHistory()
+    await userEvent.click(await screen.findByRole('button', { name: '历史对话' }))
+    const panel = await screen.findByRole('dialog', { name: '历史对话' })
+    await userEvent.click(await within(panel).findByRole('button', { name: /归档推广邮件/ }))
+    expect(client.assistantGetConversation).toHaveBeenCalledWith('conv-old')
+    const log = await screen.findByRole('log')
+    expect(await within(log).findByText('把推广邮件归档')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '返回' })).toBeInTheDocument()
+  })
 })
 
 describe('Now page: assistant input', () => {

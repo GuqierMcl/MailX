@@ -14,7 +14,10 @@ pub use self::activity::{DayActivity, OverviewActivity, OverviewContact, TodayAc
 use super::MailxCore;
 use crate::{
     AppError,
-    accounts::{AccountService, messages::normalized_time},
+    accounts::{
+        AccountService,
+        messages::{TopSender, normalized_time},
+    },
     mail::{
         BodyState, EmailSummary, MailAddress,
         verification_code::{self, Detection},
@@ -35,6 +38,10 @@ const CODE_CANDIDATES: u32 = 50;
 pub const OVERVIEW_ATTACHMENT_DAYS: i64 = 7;
 /// Most messages with attachments listed.
 pub const OVERVIEW_ATTACHMENTS: u32 = 5;
+/// Most senders listed in `newMail.senders` and in `unreadSenders`.
+pub const OVERVIEW_SENDERS: u32 = 5;
+/// Fewest unread messages that make a sender worth listing in `unreadSenders`.
+pub const OVERVIEW_UNREAD_SENDER_MIN: u32 = 3;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -58,6 +65,10 @@ pub struct MailOverview {
     pub new_mail: NewMailOverview,
     /// Starred unread messages, in the Starred view's scope.
     pub starred_unread: u32,
+    /// Senders with at least three unread messages in the unified inbox
+    /// (locally archived mail left out), most unread first, then the most
+    /// recent; at most five.
+    pub unread_senders: Vec<OverviewSender>,
     /// Newest first, at most three, from the last fifteen minutes.
     pub verification_codes: Vec<OverviewCode>,
     /// Inbox messages from the same fifteen minutes whose subject looks like
@@ -86,6 +97,32 @@ pub struct NewMailOverview {
     pub accounts: Vec<AccountMailCount>,
     /// The newest five, newest first.
     pub latest: Vec<EmailSummary>,
+    /// The senders of that new mail by lowercased address, in the scope of
+    /// `total`: most messages first, then the most recent, at most five.
+    /// Empty without `since`.
+    pub senders: Vec<OverviewSender>,
+}
+
+/// A sender and how many messages of a group came from them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct OverviewSender {
+    /// Lowercased.
+    pub address: String,
+    /// The most recent non-empty display name among the counted messages.
+    /// Untrusted text.
+    pub name: Option<String>,
+    pub count: u32,
+}
+
+impl From<TopSender> for OverviewSender {
+    fn from(group: TopSender) -> Self {
+        Self {
+            address: group.address,
+            name: group.name,
+            count: group.count,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
@@ -216,6 +253,11 @@ pub(crate) fn overview_at(
                     .map(|(account_id, count)| AccountMailCount { account_id, count })
                     .collect(),
                 latest,
+                senders: service
+                    .overview_new_senders(since, OVERVIEW_SENDERS)?
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
             }
         }
     };
@@ -273,6 +315,11 @@ pub(crate) fn overview_at(
     Ok(MailOverview {
         new_mail,
         starred_unread: service.overview_starred_unread()?,
+        unread_senders: service
+            .overview_unread_senders(OVERVIEW_UNREAD_SENDER_MIN, OVERVIEW_SENDERS)?
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         verification_codes,
         code_candidates,
         recent_attachments,

@@ -574,8 +574,10 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
 | `getMailOverview(query)` | `emails_overview`，`{ query: MailOverviewQuery }` | `MailxCore::mail_overview`（`core/src/app/overview.rs`） | `MailOverview` |
 
 - **参数。** `MailOverviewQuery { since: string | null, dayStarts?: string[] }` 拒绝未知字段。`since` 为 RFC 3339 时间（页面“上次查看时间”），规范化为 UTC 毫秒形式；不可解析返回 `validation`，`field` 为 `since`。`null` 表示不需要新邮件一节，`newMail` 返回空（`total` 为 0）；首次使用时统计起点（如本地今天零点）由调用方决定。验证码与附件的时间窗口以 core 的系统时钟为准，调用方不能指定“现在”。`dayStarts` 为本机最近 14 天每天零点（RFC 3339，升序，最后一个为今天零点，不晚于现在），由调用方按本机时区计算，core 不需要知道时区，夏令时当天为 23 或 25 小时；数量、格式、顺序不符或晚于现在返回 `validation`，`field` 为 `dayStarts`。省略时不返回 `activity`。
-- **结果。** `MailOverview { newMail, starredUnread, verificationCodes, codeCandidates, recentAttachments, activity?, generatedAt }`，`generatedAt` 为计算时 core 的时钟（RFC 3339）。
-  - `newMail: { total, accounts: [{ accountId, count }], latest: EmailSummary[] }`：`since` 之后（不含等于）到达的收件箱邮件，所有账号；`accounts` 只列有新邮件的账号，按账号 id 排序；`latest` 为最新 5 封，最新在前。
+- **结果。** `MailOverview { newMail, starredUnread, unreadSenders, verificationCodes, codeCandidates, recentAttachments, activity?, generatedAt }`，`generatedAt` 为计算时 core 的时钟（RFC 3339）。
+  - `newMail: { total, accounts: [{ accountId, count }], latest: EmailSummary[], senders: OverviewSender[] }`：`since` 之后（不含等于）到达的收件箱邮件，所有账号；`accounts` 只列有新邮件的账号，按账号 id 排序；`latest` 为最新 5 封，最新在前。`senders` 按发件地址（ASCII 小写）汇总这些邮件（与 `total` 同一范围与过滤，已读的也算，不含本机归档），按封数从多到少、再按最近到达排序，最多 5 位；没有 `since` 时为空。
+  - `OverviewSender { address, name, count }`：`address` 为小写地址，`name` 为计入邮件中最近一封非空的显示名（来自发件人，不可信，按纯文本显示），`count` 为封数。
+  - `unreadSenders: OverviewSender[]`：统一收件箱（不含本机归档）里按发件地址汇总的未读邮件，只列未读不少于 3 封的发件人，按未读从多到少、再按最近到达排序，最多 5 位；不依赖 `since`。「一键清理」据此显示；标为已读不需要新接口：页面用 `emails_select`（`folderRole: inbox`、`archive: exclude`、`unread: true`、`fromAddress`）取出该发件人的未读邮件 id（至多 500 封），再走既有的 `emails_set_flags` 批量写回，撤销则把同一批 id 标回未读。
   - `starredUnread`：星标且未读的邮件数，范围同星标视图（含本机归档，不含垃圾邮件与已删除）。收件箱未读数来自文件夹树，这里不重复提供。
   - `verificationCodes: [{ emailId, accountId, folderId, from, code, receivedAt }]`：最近 15 分钟内收件箱邮件中由[验证码识别](../architecture/verification-codes.md)的 `detect(主题, 正文)` 返回唯一结果（`Found`）的，最多 3 条，最新在前。正文已缓存时用缓存的纯文本正文，否则用已保存的预览；从不为此下载正文。缓存正文超过识别预算（64 KiB）、歧义、未找到或识别出错的邮件静默跳过；最多检查最近 50 封。验证码不写日志，`OverviewCode` 的调试输出隐藏码值。
   - `recentAttachments: [{ email: EmailSummary, fileNames }]`：最近 7 天带附件（`hasAttachment`）的收件箱邮件，最多 5 封，最新在前；`fileNames` 为已下载正文中非内嵌附件的文件名（按部件顺序，每封最多 20 个），正文未下载时为空数组。文件名来自发件人，按纯文本显示。
@@ -583,8 +585,8 @@ MailxClient 额外表达 `hostUnavailable`（普通浏览器无桌面宿主）�
   - `codeCandidates: [{ emailId, accountId, folderId, from, receivedAt, bodyState }]`：同一 15 分钟窗口内（同样只查最近 50 封）、主题通过 `verification_code::is_candidate_subject`（回复 / 转发主题不算）、但本次没有出现在 `verificationCodes` 的收件箱邮件，最新在前，最多 5 条，可见性与本机归档规则同其他概况查询。这是新邮件还没有预览和缓存正文时的情形：概况从不下载正文，页面把候选和 `verificationCodes` 一起交给共用的验证码识别（`allowFetch: true`，core 可为像验证码的主题下载正文），识别返回 `ready` 才显示为验证码。候选不带主题与正文，只含页面定位邮件所需的字段。
   - `activity?: { days: [{ start, received }], receivedLastWeek, receivedPreviousWeek, sentLastWeek, sentPreviousWeek, previousWeekComplete, topContacts: [{ address, name, count }], today: { received, unread } }`（仅在传入 `dayStarts` 时返回）：第 i 天为 `[dayStarts[i], dayStarts[i+1])`，今天为 `[dayStarts[13], 现在]`；前 7 天为第 0–6 天，近 7 天为第 7–13 天。`days` 为每天收到的收件箱邮件数，含本机归档。发信数与“已发送”视图同口径：已发送角色文件夹的邮件加未与服务器副本对上的本机已发送副本，对上后只算一次。`previousWeekComplete` 仅当每个账号都有收件箱，且每个收件箱和已发送文件夹的当前代际都完成过一轮未超同步上限的同步（游标 `history_complete`，迁移 0031，后续每轮进行期间保持不变）、同步窗口起点不晚于 `dayStarts[0]` 前一天时为真。`topContacts` 最多 3 人：近 7 天收到其来信数加你发给对方的邮件数（每封按收件人计，同一封中重复的地址只算一次），只算本机缓存中你发过信的地址，不含自己账号的地址，地址按 ASCII 小写合并，按数量、最近往来时间排序，`name` 为最近一次出现的显示名。`today.received` / `today.unread` 为今天收到的收件箱邮件（不含本机归档）及其中未读数。
 - **范围与隔离。** 所有统计与 `emails_list` 走同一可见行条件：账号当前邮箱来源（`mailbox_source_id`）、文件夹当前 UIDVALIDITY generation、服务器上仍存在、未在本机删除、文件夹可选。“收件箱邮件”指收件箱角色文件夹中未在本机归档的邮件，垃圾邮件、已删除、已发送等其他角色不计入；本机已发送副本不参与。草稿、发件箱与同步问题已有各自接口，这里不提供。
-- **代价。** 只读本地数据库、不访问网络、不改变已读或星标；每项都有上限，可在每次同步事件后调用。星标未读计数使用部分索引 `messages_starred_unread`（迁移 0030）。命令只开放给主窗口，与 `emails_list` 相同的来源与启动 Ready 准入。
-- **TypeScript。** 类型由 Rust 生成（`MailOverviewQuery`、`MailOverview`、`NewMailOverview`、`AccountMailCount`、`OverviewCode`、`RecentAttachment`、`OverviewActivity`、`DayActivity`、`OverviewContact`、`TodayActivity`）；`mock-client` 按同样范围规则从模拟数据计算，验证码只认模拟数据自己的措辞。
+- **代价。** 只读本地数据库、不访问网络、不改变已读或星标；每项都有上限，可在每次同步事件后调用。星标未读计数使用部分索引 `messages_starred_unread`（迁移 0030），未读发件人汇总使用部分索引 `messages_unread_by_sender`（迁移 0036）。命令只开放给主窗口，与 `emails_list` 相同的来源与启动 Ready 准入。
+- **TypeScript。** 类型由 Rust 生成（`MailOverviewQuery`、`MailOverview`、`NewMailOverview`、`OverviewSender`、`AccountMailCount`、`OverviewCode`、`RecentAttachment`、`OverviewActivity`、`DayActivity`、`OverviewContact`、`TodayActivity`）；`mock-client` 按同样范围规则从模拟数据计算，验证码只认模拟数据自己的措辞。
 
 ### 联系人聚合（主窗口）
 

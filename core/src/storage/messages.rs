@@ -19,7 +19,7 @@ use crate::{
 mod overview;
 mod sent_copies;
 
-pub(crate) use overview::{CodeSource, NewMailRows, SenderCount, SentRecipient};
+pub(crate) use overview::{CodeSource, NewMailRows, SenderCount, SentRecipient, TopSender};
 
 /// Identity captured before network I/O; every write checks it again in its transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -18,7 +18,6 @@ import { Spinner } from '@/components/ui/spinner'
 import type { AppearanceSettings, FontSize, MailboxLabel, MailTheme, PreviewLines, ReadingMode, ThemeMode, WeekStartsOn } from '@/generated/accounts'
 import { ACCENT_PRESETS, DEFAULT_INTERFACE_FONTS, DEFAULT_MAIL_FONTS, fontFamilyCss, parseFontFamilies } from '@/lib/appearance'
 import { clientFailure, type MailxClient } from '@/lib/mailx-client'
-import { NowGroup } from './now-group'
 import { SettingsGroup, SettingsLoadError, SettingsPage, SettingsRow, SettingsSaveError } from './settings-layout'
 import { useSettings, useUpdateAppearance, useUpdateLayout } from './settings-queries'
 
@@ -165,8 +164,6 @@ export function AppearancePane({ client }: { client: MailxClient }) {
         <SettingsSaveError update={update} fields={['groupByDate', 'weekStartsOn', 'previewLines', 'mailboxLabel']} message={t('settings:saveFailed')} />
         <SettingsSaveError update={updateLayout} message={t('settings:saveFailed')} />
       </SettingsGroup>
-
-      <NowGroup client={client} now={settings.data.settings.now} />
     </SettingsPage>
   )
 }

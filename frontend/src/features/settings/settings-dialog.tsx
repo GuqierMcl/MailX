@@ -3,7 +3,7 @@ import { t } from '@/i18n'
 import { useState } from 'react'
 import { ScrollArea as ScrollAreaPrimitive } from '@base-ui/react/scroll-area'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { AiMagicIcon, ComputerIcon, InboxIcon, InformationCircleIcon, KeyboardIcon, LanguagesIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
+import { AiMagicIcon, ComputerIcon, InboxIcon, InformationCircleIcon, KeyboardIcon, LanguagesIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon, SunriseIcon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -23,6 +23,7 @@ import { AiPane } from './ai-pane'
 import { TranslationPane } from './translation-pane'
 import { AppearancePane } from './appearance-pane'
 import { NotificationsPane } from './notifications-pane'
+import { NowPane } from './now-pane'
 import { ComposePane } from './compose-pane'
 import { ContactsPane } from './contacts-pane'
 import { GeneralPane } from './general-pane'
@@ -31,7 +32,7 @@ import { McpPane } from './mcp-pane'
 import { AboutPane } from './about-pane'
 import { ShortcutsPane } from './shortcuts-pane'
 
-export type SettingsSection = 'general' | 'appearance' | 'shortcuts' | 'notifications' | 'compose' | 'contacts' | 'mailEnhancements' | 'security' | 'translation' | 'ai' | 'mcp' | 'about'
+export type SettingsSection = 'general' | 'appearance' | 'now' | 'shortcuts' | 'notifications' | 'compose' | 'contacts' | 'mailEnhancements' | 'security' | 'translation' | 'ai' | 'mcp' | 'about'
 /** Where the dialog opens. */
 export type SettingsTarget = { section: SettingsSection }
 
@@ -54,6 +55,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
       items: [
         { id: 'general', name: t('settings:general'), icon: ComputerIcon },
         { id: 'appearance', name: t('settings:appearance'), icon: PaintBoardIcon },
+        { id: 'now', name: t('settings:now'), icon: SunriseIcon },
         { id: 'shortcuts', name: t('settings:shortcuts'), icon: KeyboardIcon },
         { id: 'notifications', name: t('settings:notifications'), icon: Notification03Icon },
         { id: 'about', name: t('settings:about'), icon: InformationCircleIcon },
@@ -122,6 +124,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
               {section === 'general' && <GeneralPane client={client} />}
               {section === 'appearance' && <AppearancePane client={client} />}
+              {section === 'now' && <NowPane client={client} />}
               {section === 'shortcuts' && <ShortcutsPane client={client} />}
               {section === 'notifications' && <NotificationsPane client={client} />}
               {section === 'compose' && <ComposePane client={client} />}

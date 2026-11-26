@@ -1,11 +1,9 @@
 import type { NowSettings } from '@/generated/accounts'
 import type { Snoozed } from './snooze'
-import type { NowContext, NowData, NowModule, NowModuleId, NowZone } from './types'
+import type { NowContext, NowData, NowModule, NowModuleId } from './types'
 
 /** The module that stays first and ignores the fixed order. */
 export const PINNED_ID: NowModuleId = 'attention'
-
-const ZONE_ORDER: Record<NowZone, number> = { act: 0, flow: 1, review: 2 }
 
 /**
  * The fixed order of the ids a registry knows: the user's order first (ids
@@ -26,9 +24,10 @@ export function fixedOrder(ids: readonly string[], order: readonly string[]): st
 
 /**
  * Every module in the order this visit shows them, whether or not it has
- * content now (the page fills slots as content arrives). Automatic: zones in
- * their fixed order, inside a zone by score, highest first, then registry
- * order. Fixed: the user's order with the pinned module first.
+ * content now (the page fills slots as content arrives). Automatic: by score,
+ * highest first, then registry order; the pinned module needs no score and
+ * leads (a zone's base only keeps scores close to it, see now-page.md 4.3).
+ * Fixed: the user's order with the pinned module first.
  */
 export function orderModules(modules: readonly NowModule[], context: NowContext, settings: Pick<NowSettings, 'arrangement' | 'order'>): NowModuleId[] {
   if (settings.arrangement === 'fixed') {
@@ -37,8 +36,8 @@ export function orderModules(modules: readonly NowModule[], context: NowContext,
     return [...pinned, ...fixedOrder(ids, settings.order)] as NowModuleId[]
   }
   return modules
-    .map((module, position) => ({ module, position, score: module.score(context) }))
-    .sort((a, b) => ZONE_ORDER[a.module.zone] - ZONE_ORDER[b.module.zone] || b.score - a.score || a.position - b.position)
+    .map((module, position) => ({ module, position, score: module.id === PINNED_ID ? Infinity : module.score(context) }))
+    .sort((a, b) => (a.score === b.score ? a.position - b.position : b.score - a.score))
     .map(({ module }) => module.id)
 }
 

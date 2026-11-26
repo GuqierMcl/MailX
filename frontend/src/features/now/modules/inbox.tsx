@@ -5,6 +5,8 @@ import type { NowModule } from './types'
 
 /** Rows of unread inbox mail the page lists; more are a link away. */
 export const UNREAD_ROWS = 6
+/** This much new mail since the last visit puts the inbox ahead of "while you were away". */
+export const BUSY_NEW_MAIL = 20
 
 /** New, unread and starred mail, and the newest unread messages. */
 export const inboxModule: NowModule = {
@@ -13,7 +15,7 @@ export const inboxModule: NowModule = {
   hideable: true,
   fromOverview: true,
   title: () => t('now:inbox'),
-  score: () => 0,
+  score: ({ data }) => (data.inbox.newMail >= BUSY_NEW_MAIL ? 295 : 260),
   signature: ({ inbox }) => `${inbox.newMail}|${inbox.unread}|${inbox.starredUnread}`,
   hasContent: ({ inbox }) => inbox.newMail > 0 || inbox.unread > 0 || inbox.starredUnread > 0 || inbox.rows.length > 0,
   render: ({ data, language, minute, mode, sinceTime, actions }) => {

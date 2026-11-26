@@ -215,6 +215,18 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
         className={cn('absolute inset-0', overviewHidden && 'invisible', phase && 'pointer-events-none will-change-[transform,opacity]', phase === 'to-conversation' && 'animate-view-out-up', phase === 'to-overview' && 'animate-view-in-down')}
       >
         {children}
+        {/* Fixed at the island's top right, outside the scrolling column; it goes with the overview into the swap. */}
+        {chatOn && chat && (
+          <div data-slot="now-history" className="absolute top-2 right-3 z-10 sm:right-5">
+            <ChatHistory
+              client={client}
+              chat={chat}
+              onStartOver={newChat}
+              onOpened={() => go('conversation')}
+              className="text-muted-foreground/60 transition-colors duration-150 hover:text-foreground focus-visible:text-foreground data-popup-open:text-foreground motion-reduce:transition-none"
+            />
+          </div>
+        )}
       </div>
       {showConversation && chat && env && (
         <div

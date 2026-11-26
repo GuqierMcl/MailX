@@ -770,7 +770,7 @@ describe('mock mail overview', () => {
     expect(await client.getVerificationCode(overview.codeCandidates[0].emailId, true)).toMatchObject({ state: 'ready', code: '706152' })
     expect(overview.recentAttachments.length).toBe(2)
     expect(overview.recentAttachments.some((row) => row.fileNames.length === 0)).toBe(true)
-    expect((await client.getMailOverview({ since: null })).newMail).toEqual({ total: 0, accounts: [], latest: [] })
+    expect((await client.getMailOverview({ since: null })).newMail).toEqual({ total: 0, accounts: [], latest: [], senders: [] })
     await expect(client.getMailOverview({ since: 'yesterday' })).rejects.toMatchObject({ failure: { code: 'validation', field: 'since' } })
   })
 

@@ -4,7 +4,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 
 use super::{AccountService, validate_email_id, validate_uuid};
 pub(crate) use crate::storage::messages::{
-    CodeSource, FolderSyncCursor, NewMailRows, SenderCount, SentRecipient, SyncTarget,
+    CodeSource, FolderSyncCursor, NewMailRows, SenderCount, SentRecipient, SyncTarget, TopSender,
 };
 use crate::{
     AppError,
@@ -99,6 +99,24 @@ impl AccountService {
         latest: u32,
     ) -> Result<NewMailRows, AppError> {
         self.storage.overview_new_mail(since, latest)
+    }
+
+    /// The top senders of inbox mail received after `since`.
+    pub(crate) fn overview_new_senders(
+        &self,
+        since: &str,
+        limit: u32,
+    ) -> Result<Vec<TopSender>, AppError> {
+        self.storage.overview_new_senders(since, limit)
+    }
+
+    /// The top senders with at least `min_count` unread inbox messages.
+    pub(crate) fn overview_unread_senders(
+        &self,
+        min_count: u32,
+        limit: u32,
+    ) -> Result<Vec<TopSender>, AppError> {
+        self.storage.overview_unread_senders(min_count, limit)
     }
 
     pub(crate) fn overview_starred_unread(&self) -> Result<u32, AppError> {

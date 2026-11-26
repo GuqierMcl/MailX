@@ -12,7 +12,7 @@ export const codesModule: NowModule = {
   hideable: true,
   fromOverview: true,
   title: () => t('now:codes'),
-  score: ({ data }) => (data.codes.length > 0 ? 10 : 0),
+  score: ({ data }) => (data.codes.length > 0 ? 320 : 300),
   signature: ({ codes }) => codes.map((code) => code.emailId).join('|'),
   hasContent: ({ codes }) => codes.length > 0,
   render: ({ data, language, minute, verification, actions }) => (

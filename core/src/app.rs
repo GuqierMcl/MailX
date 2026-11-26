@@ -71,7 +71,8 @@ pub use organize::{
 };
 pub use overview::{
     AccountMailCount, CodeCandidate, DayActivity, MailOverview, MailOverviewQuery, NewMailOverview,
-    OverviewActivity, OverviewCode, OverviewContact, RecentAttachment, TodayActivity,
+    OverviewActivity, OverviewCode, OverviewContact, OverviewSender, RecentAttachment,
+    TodayActivity,
 };
 pub use translation::{
     TranslationCacheStats, TranslationInfo, TranslationKeyState, TranslationProxyPasswordState,

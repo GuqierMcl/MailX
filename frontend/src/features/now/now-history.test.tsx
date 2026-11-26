@@ -8,7 +8,7 @@ import { AssistantChatProvider } from '@/features/ai/assistant-chat-provider'
 import { NowPage, type NowPageProps } from './now-page'
 
 const account = exampleAccount({ displayName: '工作邮箱', senderName: '林夕' })
-const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [] }, starredUnread: 0, verificationCodes: [], codeCandidates: [], recentAttachments: [], generatedAt: new Date().toISOString() }
+const empty: MailOverview = { newMail: { total: 0, accounts: [], latest: [], senders: [] }, starredUnread: 0, unreadSenders: [], verificationCodes: [], codeCandidates: [], recentAttachments: [], generatedAt: new Date().toISOString() }
 const noMail: EmailPage = { items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }
 const CONNECTION = { id: 'c1', providerId: 'openai', name: 'OpenAI', protocol: 'openaiCompatible' as const, baseUrl: 'https://api.openai.com/v1', useProxy: false, hasKey: true }
 const ready: AiState = {
@@ -188,7 +188,8 @@ describe('history button and panel', () => {
     await userEvent.click(within(panel).getByRole('button', { name: '删除对话' }))
     await userEvent.click(within(panel).getByRole('button', { name: '确定' }))
     await waitFor(() => expect(client.assistantDeleteConversation).toHaveBeenCalledWith('conv-live'))
-    await waitFor(() => expect(screen.queryByRole('button', { name: '历史对话' })).not.toBeInTheDocument())
+    // Back on the overview: the conversation header is gone; the overview has its own history button.
+    await waitFor(() => expect(screen.queryByRole('button', { name: '返回' })).not.toBeInTheDocument())
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument()
   })
 

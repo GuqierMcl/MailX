@@ -10,6 +10,8 @@ import { ArrowDown01Icon, ArrowUp01Icon, DragDropVerticalIcon } from '@hugeicons
 import { Radio } from '@base-ui/react/radio'
 import { RadioGroup } from '@base-ui/react/radio-group'
 import { Button } from '@/components/ui/button'
+import { Delayed } from '@/components/ui/delayed'
+import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion'
 import type { NowArrangement, NowSettings } from '@/generated/accounts'
@@ -20,16 +22,30 @@ import { fixedOrder } from '@/features/now/modules/arrange'
 import { DEFAULT_NOW } from '@/features/now/modules/defaults'
 import { HIDEABLE_MODULES, moduleById } from '@/features/now/modules/registry'
 import type { NowModuleId } from '@/features/now/modules/types'
-import { SettingsGroup, SettingsRow, SettingsSaveError } from './settings-layout'
-import { useUpdateNow } from './settings-queries'
+import { SettingsGroup, SettingsLoadError, SettingsPage, SettingsRow, SettingsSaveError } from './settings-layout'
+import { useSettings, useUpdateNow } from './settings-queries'
 
 const controlledSorting: NonNullable<Parameters<typeof useSortable>[0]['plugins']> =
   (defaults) => defaults.filter((plugin) => plugin !== OptimisticSortingPlugin)
 
 const title = (id: string) => moduleById(id as NowModuleId).title()
 
-/** Settings → Appearance → Now: how the page arranges its modules and which ones it shows. */
-export function NowGroup({ client, now }: { client: MailxClient; now: NowSettings }) {
+/** Settings → Now: how the page arranges its modules and which ones it shows. */
+export function NowPane({ client }: { client: MailxClient }) {
+  useTranslation()
+  const settings = useSettings(client)
+  if (settings.isPending) {
+    return <Delayed><div className="flex justify-center p-10"><Spinner className="size-5 text-muted-foreground" /></div></Delayed>
+  }
+  if (settings.isError) return <SettingsLoadError error={settings.error} onRetry={() => void settings.refetch()} disabled={settings.isFetching} />
+  return (
+    <SettingsPage>
+      <NowGroup client={client} now={settings.data.settings.now} />
+    </SettingsPage>
+  )
+}
+
+function NowGroup({ client, now }: { client: MailxClient; now: NowSettings }) {
   useTranslation()
   const update = useUpdateNow(client)
   const fixed = now.arrangement === 'fixed'

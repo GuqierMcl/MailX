@@ -13,21 +13,36 @@ async function renderPane(now?: Partial<NowSettings>) {
   client.listFolders.mockResolvedValue([])
   if (now) await client.updateSettings({ now: { ...DEFAULT_NOW, ...now } })
   client.updateSettings.mockClear()
-  render(<SettingsDialog client={client} target={{ section: 'appearance' }} onClose={() => undefined} />)
+  render(<SettingsDialog client={client} target={{ section: 'now' }} onClose={() => undefined} />)
   const dialog = screen.getByRole('dialog', { name: '设置' })
-  const group = await within(dialog).findByRole('group', { name: '此刻' })
+  const group = await within(dialog).findByRole('group', { name: '模块' })
   return { client, group }
 }
 
-const ID = { 验证码: 'codes', 草稿: 'drafts', 收件箱: 'inbox', 最近的附件: 'attachments', 近况: 'activity' } as Record<string, string>
+const ID = { 验证码: 'codes', 草稿: 'drafts', 你不在的时候: 'away', 收件箱: 'inbox', 一键清理: 'cleanup', 近况: 'activity', 最近的附件: 'attachments' } as Record<string, string>
 const names = (group: HTMLElement) => [...group.querySelectorAll('li label')].map((label) => ID[label.textContent!])
 
 describe('Now settings', () => {
+  it('is its own page in the app group, after Appearance, and not part of Appearance', async () => {
+    const client = testClient([exampleAccount()])
+    client.listFolders.mockResolvedValue([])
+    render(<SettingsDialog client={client} target={{ section: 'appearance' }} onClose={() => undefined} />)
+    const dialog = screen.getByRole('dialog', { name: '设置' })
+    const appGroup = within(dialog).getByTestId('settings-nav-group-app')
+    const labels = within(appGroup).getAllByRole('button').map((button) => button.textContent)
+    expect(labels.indexOf('此刻')).toBe(labels.indexOf('外观') + 1)
+    await within(dialog).findByRole('switch', { name: '深色' }).catch(() => undefined)
+    expect(within(dialog).queryByRole('group', { name: '模块' })).not.toBeInTheDocument()
+    await userEvent.click(within(appGroup).getByRole('button', { name: '此刻' }))
+    expect(await within(dialog).findByRole('group', { name: '模块' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('heading', { name: '此刻' })).toBeInTheDocument()
+  })
+
   it('lists the modules that can be hidden, all shown, and none that cannot', async () => {
     const { group } = await renderPane()
     expect(within(group).getByRole('radio', { name: '自动' })).toBeChecked()
-    expect(names(group)).toEqual(['codes', 'drafts', 'inbox', 'attachments', 'activity'])
-    for (const name of ['验证码', '草稿', '收件箱', '最近的附件', '近况']) expect(within(group).getByRole('switch', { name: name })).toBeChecked()
+    expect(names(group)).toEqual(['codes', 'drafts', 'away', 'inbox', 'cleanup', 'activity', 'attachments'])
+    for (const name of ['验证码', '草稿', '你不在的时候', '收件箱', '一键清理', '近况', '最近的附件']) expect(within(group).getByRole('switch', { name: name })).toBeChecked()
     expect(within(group).queryByRole('switch', { name: '需要处理' })).not.toBeInTheDocument()
     // Nothing to reorder while the arrangement is automatic.
     expect(within(group).queryByRole('button', { name: /^上移/ })).not.toBeInTheDocument()
@@ -46,23 +61,23 @@ describe('Now settings', () => {
     const { client, group } = await renderPane()
     await userEvent.click(within(group).getByRole('radio', { name: '固定顺序' }))
     expect(lastNow(client)).toEqual({ arrangement: 'fixed', order: [], hidden: [] })
-    await waitFor(() => expect(within(group).getAllByRole('button', { name: /^调整 .* 的顺序$/ })).toHaveLength(5))
+    await waitFor(() => expect(within(group).getAllByRole('button', { name: /^调整 .* 的顺序$/ })).toHaveLength(7))
     expect(within(group).getByRole('button', { name: '上移 验证码' })).toBeDisabled()
-    expect(within(group).getByRole('button', { name: '下移 近况' })).toBeDisabled()
+    expect(within(group).getByRole('button', { name: '下移 最近的附件' })).toBeDisabled()
 
     await userEvent.click(within(group).getByRole('button', { name: '下移 验证码' }))
-    expect(lastNow(client)).toEqual({ arrangement: 'fixed', order: ['drafts', 'codes', 'inbox', 'attachments', 'activity'], hidden: [] })
-    await waitFor(() => expect(names(group)).toEqual(['drafts', 'codes', 'inbox', 'attachments', 'activity']))
+    expect(lastNow(client)).toEqual({ arrangement: 'fixed', order: ['drafts', 'codes', 'away', 'inbox', 'cleanup', 'activity', 'attachments'], hidden: [] })
+    await waitFor(() => expect(names(group)).toEqual(['drafts', 'codes', 'away', 'inbox', 'cleanup', 'activity', 'attachments']))
     await userEvent.click(within(group).getByRole('button', { name: '上移 近况' }))
-    expect(lastNow(client)?.order).toEqual(['drafts', 'codes', 'inbox', 'activity', 'attachments'])
+    expect(lastNow(client)?.order).toEqual(['drafts', 'codes', 'away', 'inbox', 'activity', 'cleanup', 'attachments'])
   })
 
   it('follows a saved order, keeps ids this version does not know, and keeps hidden ones listed', async () => {
     const { client, group } = await renderPane({ arrangement: 'fixed', order: ['activity', 'future', 'inbox'], hidden: ['inbox'] })
-    expect(names(group)).toEqual(['activity', 'inbox', 'codes', 'drafts', 'attachments'])
+    expect(names(group)).toEqual(['activity', 'inbox', 'codes', 'drafts', 'away', 'cleanup', 'attachments'])
     expect(within(group).getByRole('switch', { name: '收件箱' })).not.toBeChecked()
     await userEvent.click(within(group).getByRole('button', { name: '上移 收件箱' }))
-    expect(lastNow(client)?.order).toEqual(['inbox', 'activity', 'codes', 'drafts', 'attachments', 'future'])
+    expect(lastNow(client)?.order).toEqual(['inbox', 'activity', 'codes', 'drafts', 'away', 'cleanup', 'attachments', 'future'])
   })
 
   it('restores the defaults for this group only', async () => {

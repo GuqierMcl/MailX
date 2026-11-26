@@ -115,6 +115,10 @@ frontend/src/features/startup/
 
 `0035_message_summaries.sql` 新建 `message_summaries`，保存内置助手对邮件的摘要：主键为 `(message_id, style, language)`，`message_id` 外键引用 `messages(id)` 并随邮件级联删除；`language` 是翻译目标语言代码或 `original`。每行记录 `source_sha256`（主题、发件人、接收时间与正文文字的哈希）与 `prompt_version`，两者任一与当前不一致就视为过期，不需要清理迁移。不改已有表与数据。设置页可清除全部摘要（见 [AI Runtime](../ai-runtime/README.md#4-运行生命周期)）。
 
+### 未读发件人索引
+
+`0036_unread_sender_index.sql` 为 `messages` 建立部分索引 `messages_unread_by_sender`（`folder_id, lower(from_address)`，仅 `is_read = 0` 的行），「此刻」概况按发件地址汇总收件箱未读时只读未读行，不扫描整个收件箱；不新增表，不改已有数据。
+
 ## 4. 版本与执行规则
 
 ### 4.1 沿用 v1 记录格式

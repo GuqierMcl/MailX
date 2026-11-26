@@ -1,6 +1,7 @@
 {
   "title": "Settings",
   "appearance": "Appearance",
+  "now": "Now",
   "notifications": "Notifications",
   "compose": "Sending",
   "security": "Security",
@@ -488,7 +489,7 @@
   "assistantSummaryCacheClear": "Clear summaries",
   "assistantSummaryCacheCleared_one": "Cleared {{count}} summary",
   "assistantSummaryCacheCleared_other": "Cleared {{count}} summaries",
-  "nowGroup": "Now",
+  "nowGroup": "Modules",
   "nowArrangement": "Module order",
   "nowArrangementDescription": "Automatic follows the time of day and what is in your mailbox. Fixed keeps the order you set.",
   "nowAuto": "Automatic",

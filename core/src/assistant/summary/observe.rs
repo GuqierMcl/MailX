@@ -334,6 +334,7 @@ mod tests {
         MailOverview {
             new_mail: NewMailOverview::default(),
             starred_unread: 0,
+            unread_senders: vec![],
             verification_codes: vec![],
             code_candidates: vec![],
             recent_attachments: vec![],
