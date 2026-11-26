@@ -11,6 +11,7 @@ import { ChatHistory } from '@/features/ai/chat-history'
 import { ChatInput } from '@/features/ai/chat-input'
 import { ChatMessages } from '@/features/ai/chat-messages'
 import type { AssistantChat } from '@/features/ai/use-assistant-chat'
+import { toast } from '@/components/ui/toast'
 import { useStickToBottom } from '@/features/ai/use-stick-to-bottom'
 import { escapeBelongsToSomethingElse } from '@/features/mail/use-close-on-escape'
 import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion'
@@ -23,6 +24,13 @@ import { useViewSwap } from './use-view-swap'
 type View = 'overview' | 'conversation'
 
 const WAITING_CARD = '[data-slot="confirm-card"][data-status="waiting"]'
+
+/** What was asked when consent was missing: repeated once the user agrees. */
+type Waiting =
+  | { kind: 'send'; message: string }
+  | { kind: 'regenerate' }
+  | { kind: 'continue' }
+  | { kind: 'edit'; messageId: string; message: string }
 
 /** A small floating button above the input: it fades in with a slight rise. */
 function Pill({ onClick, children, className }: { onClick: () => void; children: ReactNode; className?: string }) {
@@ -74,7 +82,8 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   const [input, setInput] = useState<HTMLTextAreaElement | null>(null)
   const footer = useRef<HTMLDivElement | null>(null)
   const shell = useRef<HTMLDivElement | null>(null)
-  const [waiting, setWaiting] = useState<string | null>(null)
+  /** What stopped for consent, and the words to put back if the user declines. */
+  const [waiting, setWaiting] = useState<Waiting | null>(null)
   const granted = useRef(false)
   const [restore, setRestore] = useState<{ text: string; key: number } | null>(null)
   const [cardShown, setCardShown] = useState(false)
@@ -108,14 +117,35 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   const send = useCallback((message: string) => {
     if (!chat) return
     void chat.send(message).then((result) => {
-      if (result === 'consent') { granted.current = false; setWaiting(message) }
+      if (result === 'consent') setWaiting({ kind: 'send', message })
       else if (result === 'sent' || result === 'failed') go('conversation')
     })
   }, [chat, go])
 
+  const regenerate = useCallback(() => {
+    if (!chat) return
+    void chat.regenerate().then((result) => {
+      if (result === 'consent') setWaiting({ kind: 'regenerate' })
+      else if (result === 'failed') toast.error(t('ai:chat.redoFailed'))
+    })
+  }, [chat])
+  const continueReply = useCallback(() => {
+    if (!chat) return
+    void chat.continueReply().then((result) => {
+      if (result === 'consent') setWaiting({ kind: 'continue' })
+      else if (result === 'failed') toast.error(t('ai:chat.redoFailed'))
+    })
+  }, [chat])
   const leave = useCallback(() => go('overview'), [go])
   const newChat = () => { chat?.reset(); go('overview') }
   const focusInput = useCallback(() => { input?.focus({ preventScroll: true }) }, [input])
+  const editMessage = useCallback((messageId: string, message: string) => {
+    if (!chat) return
+    void chat.edit(messageId, message).then((result) => {
+      if (result === 'consent') setWaiting({ kind: 'edit', messageId, message })
+      else if (result === 'failed') toast.error(t('ai:chat.redoFailed'))
+    })
+  }, [chat])
   const scrollToCard = useCallback(() => {
     // After the conversation is on screen the card exists; look next frame.
     requestAnimationFrame(() => document.querySelector(WAITING_CARD)?.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' }))
@@ -168,8 +198,9 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
 
   const env = useMemo<ChatEnv | null>(() => chat && {
     client, onOpenEmail, onOpenDraft, accounts, folders, onOpenFolder: (folder) => onSelectMailbox({ kind: 'folder', folder }), respond: (approved) => { void chat.respond(approved) }, retry: () => { void chat.retry() },
+    regenerate, continueReply, onEdit: editMessage,
     focusInput, undone: chat.undone, markUndone: chat.markUndone,
-  }, [accounts, chat, client, focusInput, folders, onOpenDraft, onOpenEmail, onSelectMailbox])
+  }, [accounts, chat, client, continueReply, editMessage, focusInput, folders, onOpenDraft, onOpenEmail, onSelectMailbox, regenerate])
 
   const showConfirmPill = chat?.pending && (!conversation || !cardShown)
 
@@ -259,12 +290,24 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
         open={waiting !== null}
         onOpenChange={(open) => {
           if (open) return
-          const message = waiting
+          const asked = waiting
           setWaiting(null)
           // Declined: the words go back into the field. Agreeing sets `granted` right after closing, in the same turn.
-          queueMicrotask(() => { if (message && !granted.current) setRestore({ text: message, key: Date.now() }) })
+          queueMicrotask(() => {
+            const agreed = granted.current
+            granted.current = false
+            if (asked?.kind === 'send' && !agreed) setRestore({ text: asked.message, key: Date.now() })
+          })
         }}
-        onGranted={() => { granted.current = true; if (waiting) send(waiting) }}
+        onGranted={() => {
+          granted.current = true
+          const asked = waiting
+          if (!asked || !chat) return
+          if (asked.kind === 'send') send(asked.message)
+          else if (asked.kind === 'regenerate') regenerate()
+          else if (asked.kind === 'continue') continueReply()
+          else editMessage(asked.messageId, asked.message)
+        }}
       />
     </div>
   )

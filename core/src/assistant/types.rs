@@ -59,6 +59,26 @@ pub enum RunKind {
         #[serde(default)]
         #[ts(optional)]
         context: Option<ChatContext>,
+        /// Answer the conversation's last user message again in place of its
+        /// last reply; `message` must be empty and `conversationId` set. Only
+        /// a reply whose tool calls all read (`Conflict` otherwise).
+        #[serde(default)]
+        #[ts(optional)]
+        regenerate: Option<bool>,
+        /// Go on with the reply that was cut off (stopped, or at the output
+        /// limit); `message` must be empty and `conversationId` set. The
+        /// model is told to continue from where it stopped; no user message
+        /// is added.
+        #[serde(default)]
+        #[ts(optional)]
+        continuation: Option<bool>,
+        /// Reword an earlier message: the `edit`-th user message of the
+        /// conversation (from 0) becomes `message`, and it and everything
+        /// after it are replaced. Needs `conversationId`; nothing after it
+        /// may have changed mail (`Conflict` otherwise).
+        #[serde(default)]
+        #[ts(optional)]
+        edit: Option<u32>,
     },
     /// A summary of one email for the reader (`docs/architecture/ai-chat-ui.md`
     /// section 5.2). The core reads the email itself, within the assistant's

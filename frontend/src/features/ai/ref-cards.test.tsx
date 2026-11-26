@@ -26,7 +26,7 @@ function setup(text: string, { email = detail(), folders = [folder()] }: { email
   client.getEmail.mockImplementation(async () => { if (email instanceof Error) throw email; return email })
   const env: ChatEnv = {
     client, accounts: [account], folders, onOpenEmail: vi.fn(), onOpenDraft: vi.fn(), onOpenFolder: vi.fn(), respond: vi.fn(), retry: vi.fn(), focusInput: vi.fn(),
-    undone: new Set(), markUndone: vi.fn(),
+    undone: new Set(), markUndone: vi.fn(), regenerate: vi.fn(), continueReply: vi.fn(), onEdit: vi.fn(),
   }
   render(<TooltipProvider><ChatEnvContext value={env}><Markdown text={text} onOpenLink={vi.fn()} /></ChatEnvContext></TooltipProvider>)
   return { client, env }

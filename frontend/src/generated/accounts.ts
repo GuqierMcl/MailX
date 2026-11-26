@@ -1333,7 +1333,27 @@ occasion?: Occasion, } | { "type": "chat", conversationId?: string, message: str
  * What the user is looking at as they write. The core reads it
  * itself, within the assistant's accounts, for this run only.
  */
-context?: ChatContext, } | { "type": "emailSummary", emailId: string, style?: SummaryStyle, language?: SummaryLanguage,
+context?: ChatContext,
+/**
+ * Answer the conversation's last user message again in place of its
+ * last reply; `message` must be empty and `conversationId` set. Only
+ * a reply whose tool calls all read (`Conflict` otherwise).
+ */
+regenerate?: boolean,
+/**
+ * Go on with the reply that was cut off (stopped, or at the output
+ * limit); `message` must be empty and `conversationId` set. The
+ * model is told to continue from where it stopped; no user message
+ * is added.
+ */
+continuation?: boolean,
+/**
+ * Reword an earlier message: the `edit`-th user message of the
+ * conversation (from 0) becomes `message`, and it and everything
+ * after it are replaced. Needs `conversationId`; nothing after it
+ * may have changed mail (`Conflict` otherwise).
+ */
+edit?: number, } | { "type": "emailSummary", emailId: string, style?: SummaryStyle, language?: SummaryLanguage,
 /**
  * Skip the cached summary and ask the model again; the new one
  * replaces it.

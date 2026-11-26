@@ -18,6 +18,12 @@ export type ChatEnv = {
   respond: (approved: boolean) => void
   /** Asks again after a failure. */
   retry: () => void
+  /** Answers the last message again in place of its reply. */
+  regenerate: () => void
+  /** Goes on with a reply that stopped short. */
+  continueReply: () => void
+  /** Sends a reworded message in place of one of yours (by id); it and everything after it are replaced. */
+  onEdit: (messageId: string, text: string) => void
   /** Gives the focus back to the input. */
   focusInput: () => void
   /** Calls whose undo was used. */

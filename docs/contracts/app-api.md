@@ -767,7 +767,9 @@ type StartRun = { kind: RunKind };
 type RunKind =
   | { type: "nowSummary"; since: string | null; dayStarts?: string[]; fresh?: boolean; occasion?: Occasion }  // 参数同 emails_overview；邮件概况由核心自己算，界面不传邮件内容。fresh 为 true（「重新生成」）时跳过 30 分钟缓存、重新请求模型，新答案替换缓存项；省略为 false。occasion 是今天的节日或节气（可省略），界面按预设句的同一规则算出：节日按界面语言，节气只在中文界面发送；核心把它变成一行事实，缓存键随之不同
   | { type: "chat"; conversationId?: string; message: string;          // 不带 conversationId 即新对话；message 1–20000 字符
-      context?: ChatContext }                                          // 用户正在看的内容，只用于本次运行
+      context?: ChatContext;                                           // 用户正在看的内容，只用于本次运行
+      regenerate?: boolean; continuation?: boolean;                    // 见下方“重做、继续与编辑”：两者都要 conversationId，且 message 必须为空
+      edit?: number }                                                  // 用 message 改写第 edit 条用户消息（从 0 数）
                                                                        // ChatContext = { type: "email"; emailId } | { type: "emails"; emailIds }（1–20 个）
                                                                        //             | { type: "draft"; draftId }；格式不对为 validation（field 为 context）。
                                                                        // 邮件或草稿在助手可用账号之外或不存在时按“没有上下文”处理，不报错。
@@ -880,6 +882,14 @@ type FlagRestore = { emailId: string; isRead: boolean | null; isStarred: boolean
 - 因此没有 `assistant_undo` 命令：核心不保存撤销数据，不增加状态，撤销与用户自己的整理共用同一条路径与事件。助手自己的整理同样会发出 `MailStateChanged`（`source: "ai"`，含 `undoToken`），列表据此刷新；工具事件里的 `undo` 只是把令牌与这次对话里的那一行对上。
 
 **邮件摘要设置。** `assistant.summary` 为 `EmailSummarySettings { auto, senders, style, language, collapsed }`，默认 `{ false, [], "brief", { mode: "interface" }, false }`。`senders` 是小写地址，最多 500 个，重复项合并；`language` 为 `fixed` 时 `code` 必须有效。校验失败为 `validation`，`field` 为 `assistant.summary.senders` 或 `assistant.summary.language`；手写损坏的设置文件按字段修复，只丢弃有问题的字段。
+
+**重做、继续与编辑。** 聊天运行可以改动已有的对话，而不只是追加一句（`features/ai/chat-messages.tsx` 的消息操作）。三个字段互斥，同时给出多个返回 `validation`（`field` 为 `edit`），都要求 `conversationId`。
+
+- `regenerate: true`（`message` 必须为空）：丢弃最后一条用户消息之后的回复，重新回答这条消息。对话里没有用户消息返回 `validation`（`field` 为 `conversationId`）。
+- `edit: n`（`message` 为改后的文字，规则同普通消息）：第 `n` 条用户消息（从 0 数）连同它之后的所有消息被移除，换成 `message`，再回答它。`n` 超出用户消息条数返回 `validation`（`field` 为 `edit`）。
+- `continuation: true`（`message` 必须为空）：最后一条是助手回复时接着写下去（用户手动停止，或因长度上限被截断时），历史照旧；最后一条不是助手回复返回 `validation`。
+
+重做和编辑要移除的部分里只要有一次改信、写草稿或发信的调用就返回 `conflict`：变动已经发生，不能从历史里抹掉；只读调用不妨碍。运行没能开始（例如运行数已满）时对话原样放回；开始之后，被移除的部分不再恢复，新的内容保存时从被移除的第一行写起，覆盖存储里的旧行。这些请求与普通消息一样受 `assistantBusy`、`assistantContextFull` 和同意校验约束，未同意时快照为 `awaitingConsent`，对话不变。`context` 照常只用于这次运行。
 
 **已保存的对话。** 设置 `assistant.saveHistory`（默认 `true`，旧文件按 `true` 读取）决定聊天是否保存在本机（迁移 `0032`，设计见 [AI Runtime](../ai-runtime/README.md#4-运行生命周期)）。关闭只停止保存新的轮次，已有记录保留，直到用户删除；关闭期间的对话之后也不补存。四个命令只开放给主窗口，参数拒绝未知字段。`StartRun` 的聊天带已保存对话的 `conversationId` 时继续它：不在内存里就从本机读入，历史原样发给模型；不存在（含涉及的账号已被移除）返回 `notFound`，已有约 400 条消息返回 `assistantContextFull`。
 

@@ -51,7 +51,8 @@ describe('useAssistantChat', () => {
     await waitFor(() => expect(result.current.busy).toBe(false))
     client.assistantStart.mockResolvedValue(snapshot({ runId: 'r2' }))
     await act(async () => { await result.current.retry() })
-    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', conversationId: 'c1', message: '这封说了什么', context } })
+    // The message reached the host: it is answered again, not said twice.
+    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', conversationId: 'c1', message: '', regenerate: true, context } })
   })
 
   it('ignores an empty message and one sent while a reply is going', async () => {
@@ -136,7 +137,8 @@ describe('useAssistantChat', () => {
     expect(result.current.messages[1]).toMatchObject({ role: 'assistant', turn: { state: 'failed', error: 'aiNetwork' } })
     client.assistantStart.mockResolvedValue(snapshot({ runId: 'r2' }))
     await act(async () => { await result.current.retry() })
-    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', conversationId: 'c1', message: '帮我看看' } })
+    // The host has the message already: the reply is asked for again, the message is not added twice.
+    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', conversationId: 'c1', message: '', regenerate: true } })
     expect(result.current.messages.map((message) => message.role)).toEqual(['user', 'assistant'])
     expect(result.current.messages[1]).toMatchObject({ turn: { state: 'running', error: null } })
   })
@@ -177,6 +179,62 @@ describe('useAssistantChat', () => {
     client.assistantSnapshot.mockResolvedValue(snapshot({ state: 'completed', toolsAvailable: false }))
     await emit(event(2, { type: 'finished', reason: 'stop' }), event(3, { type: 'state', state: 'completed' }))
     await waitFor(() => expect(result.current.toolsAvailable).toBe(false))
+  })
+})
+
+describe('asking again', () => {
+  async function talked() {
+    const view = setup()
+    const { client, result, emit } = view
+    await act(async () => { await result.current.send('第一句') })
+    await emit(event(2, { type: 'text', delta: '答一' }), event(3, { type: 'finished', reason: 'stop' }), event(4, { type: 'state', state: 'completed' }))
+    client.assistantStart.mockResolvedValue(snapshot({ runId: 'r2' }))
+    await act(async () => { await result.current.send('第二句') })
+    await emit(event(2, { type: 'text', delta: '答二' }, 'r2'), event(3, { type: 'finished', reason: 'stop' }, 'r2'), event(4, { type: 'state', state: 'completed' }, 'r2'))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    return view
+  }
+  const said = (messages: ReturnType<typeof useAssistantChat>['messages']) =>
+    messages.map((message) => (message.role === 'user' ? message.text : message.turn.text))
+
+  it('rewords an earlier message in place and drops everything after it', async () => {
+    const { client, result, emit } = await talked()
+    const first = result.current.messages[0]
+    client.assistantStart.mockResolvedValue(snapshot({ runId: 'r3' }))
+    await act(async () => { expect(await result.current.edit(first.id, '第一句，改过')).toBe('sent') })
+    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', conversationId: 'c1', message: '第一句，改过', edit: 0 } })
+    await emit(event(2, { type: 'text', delta: '新答' }, 'r3'), event(3, { type: 'finished', reason: 'stop' }, 'r3'), event(4, { type: 'state', state: 'completed' }, 'r3'))
+    await waitFor(() => expect(said(result.current.messages)).toEqual(['第一句，改过', '新答']))
+  })
+
+  it('puts everything back when the edit does not go out', async () => {
+    const { client, result } = await talked()
+    const before = said(result.current.messages)
+    client.assistantStart.mockResolvedValue(snapshot({ runId: 'r3', state: 'awaitingConsent' }))
+    await act(async () => { expect(await result.current.edit(result.current.messages[2].id, '改')).toBe('consent') })
+    expect(said(result.current.messages)).toEqual(before)
+  })
+
+  it('replaces the last reply, not the one before it, when it is gone over', async () => {
+    const { client, result, emit } = await talked()
+    client.assistantStart.mockResolvedValue(snapshot({ runId: 'r3' }))
+    await act(async () => { await result.current.regenerate() })
+    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', conversationId: 'c1', message: '', regenerate: true } })
+    expect(said(result.current.messages)).toEqual(['第一句', '答一', '第二句', ''])
+    await emit(event(2, { type: 'text', delta: '再答二' }, 'r3'), event(3, { type: 'state', state: 'completed' }, 'r3'))
+    await waitFor(() => expect(said(result.current.messages)).toEqual(['第一句', '答一', '第二句', '再答二']))
+  })
+
+  it('shows a reply that was gone on with as one reply', async () => {
+    const { client, result, emit } = setup()
+    await act(async () => { await result.current.send('写长一点') })
+    await emit(event(2, { type: 'text', delta: '前半' }), event(3, { type: 'state', state: 'canceled' }))
+    await waitFor(() => expect(result.current.busy).toBe(false))
+    client.assistantStart.mockResolvedValue(snapshot({ runId: 'r2' }))
+    await act(async () => { await result.current.continueReply() })
+    expect(client.assistantStart).toHaveBeenLastCalledWith({ kind: { type: 'chat', conversationId: 'c1', message: '', continuation: true } })
+    await emit(event(2, { type: 'text', delta: '后半' }, 'r2'), event(3, { type: 'state', state: 'completed' }, 'r2'))
+    await waitFor(() => expect(said(result.current.messages)).toEqual(['写长一点', '前半后半']))
   })
 })
 

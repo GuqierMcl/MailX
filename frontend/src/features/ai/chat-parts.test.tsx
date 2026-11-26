@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { act, render, screen, waitFor } from '@/test/render'
+import { act, render, screen, waitFor, within } from '@/test/render'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import type { Draft, EmailDetail, EmailSummary, ToolActivity } from '@/generated/accounts'
@@ -27,7 +27,7 @@ const tool = (over: Partial<ToolActivity> & { settledAt?: number | null; at?: nu
 
 function setup(env: Partial<ChatEnv> = {}) {
   const client = testClient([account])
-  const handlers = { onOpenEmail: vi.fn(), onOpenDraft: vi.fn(), respond: vi.fn(), retry: vi.fn(), focusInput: vi.fn(), markUndone: vi.fn() }
+  const handlers = { onOpenEmail: vi.fn(), onOpenDraft: vi.fn(), respond: vi.fn(), retry: vi.fn(), focusInput: vi.fn(), markUndone: vi.fn(), regenerate: vi.fn(), continueReply: vi.fn(), onEdit: vi.fn() }
   const value: ChatEnv = { client, accounts: [], folders: [], onOpenFolder: vi.fn(), undone: new Set(), ...handlers, ...env }
   const view = (children: React.ReactNode) => <TooltipProvider><ChatEnvContext value={value}>{children}</ChatEnvContext></TooltipProvider>
   return { client, ...handlers, view }
@@ -196,5 +196,68 @@ describe('ChatMessages', () => {
     expect(respond).toHaveBeenCalledWith(true)
     rerender(view(<ChatMessages messages={[reply({ confirms: [{ requestId: 'q', callId: 'k', request, at: 0 }], answers: { q: true } })]} />))
     expect(screen.getByText('已同意 · 已取消发送')).toBeInTheDocument()
+  })
+})
+
+describe('message actions', () => {
+  const at = new Date(2026, 10, 26, 9, 5).getTime()
+  const actions = (row: HTMLElement) => within(within(row).getByRole('group', { name: '消息操作' }))
+
+  it('copies a message and shows when it was said', async () => {
+    const user = userEvent.setup()
+    const { view } = setup()
+    render(view(<ChatMessages messages={[{ id: 'u', role: 'user', text: '这周有哪些待办？', at }, reply({ text: '有两件。' })]} />))
+    const question = actions(screen.getByText('这周有哪些待办？').parentElement!)
+    expect(question.getByText('09:05')).toHaveAttribute('dateTime', new Date(at).toISOString())
+    await user.click(question.getByRole('button', { name: '复制' }))
+    expect(await navigator.clipboard.readText()).toBe('这周有哪些待办？')
+    await user.click(actions(screen.getByText('有两件。').closest('.group') as HTMLElement).getByRole('button', { name: '复制' }))
+    expect(await navigator.clipboard.readText()).toBe('有两件。')
+  })
+
+  it('rewords a message of yours in place, and only where nothing after it changed mail', async () => {
+    const user = userEvent.setup()
+    const { view, onEdit } = setup()
+    const archived = reply({ text: '已归档', tools: [tool({ summary: { type: 'changed', count: 1, emailIds: ['e'], undo: null } as never })] })
+    render(view(<ChatMessages messages={[
+      { id: 'u0', role: 'user', text: '归档旧邮件', at }, { ...archived, id: 'r0' },
+      { id: 'u1', role: 'user', text: '总结一下', at }, reply({ text: '好的' }),
+    ]} />))
+    // Before the archive: no edit, since what it did would stay done.
+    expect(actions(screen.getByText('归档旧邮件').parentElement!).queryByRole('button', { name: '编辑' })).toBeNull()
+    await user.click(actions(screen.getByText('总结一下').parentElement!).getByRole('button', { name: '编辑' }))
+    const field = screen.getByRole('textbox', { name: '编辑消息' })
+    expect(field).toHaveValue('总结一下')
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    await user.type(field, '，简短些{Enter}')
+    expect(onEdit).toHaveBeenCalledWith('u1', '总结一下，简短些')
+    expect(screen.queryByRole('textbox', { name: '编辑消息' })).not.toBeInTheDocument()
+    await user.click(actions(screen.getByText('总结一下').parentElement!).getByRole('button', { name: '编辑' }))
+    await user.keyboard('{Escape}')
+    expect(screen.getByText('总结一下')).toBeInTheDocument()
+    expect(onEdit).toHaveBeenCalledTimes(1)
+  })
+
+  it('regenerates only the last reply, and never one that changed mail', async () => {
+    const { view, regenerate } = setup()
+    const { rerender } = render(view(<ChatMessages messages={[
+      { ...reply({ text: '第一次' }), id: 'r0' }, { id: 'u', role: 'user', text: '再说说' }, reply({ text: '第二次' }),
+    ]} />))
+    expect(screen.getAllByRole('button', { name: '重新生成' })).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: '重新生成' }))
+    expect(regenerate).toHaveBeenCalledTimes(1)
+    rerender(view(<ChatMessages messages={[reply({ text: '已归档', tools: [tool({ summary: { type: 'changed', count: 2 } as never })] })]} />))
+    expect(screen.queryByRole('button', { name: '重新生成' })).not.toBeInTheDocument()
+  })
+
+  it('goes on with a reply that stopped short, and offers nothing while one is written', async () => {
+    const { view, continueReply } = setup()
+    const { rerender } = render(view(<ChatMessages messages={[reply({ text: '完整的回答' })]} />))
+    expect(screen.queryByRole('button', { name: '继续生成' })).not.toBeInTheDocument()
+    rerender(view(<ChatMessages messages={[reply({ state: 'canceled', text: '写到一半' })]} />))
+    await userEvent.click(screen.getByRole('button', { name: '继续生成' }))
+    expect(continueReply).toHaveBeenCalledTimes(1)
+    rerender(view(<ChatMessages messages={[reply({ state: 'running', text: '正在写', finishedReason: null, finishedAt: null })]} />))
+    expect(screen.queryByRole('group', { name: '消息操作' })).not.toBeInTheDocument()
   })
 })

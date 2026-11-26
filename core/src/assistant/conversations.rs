@@ -62,6 +62,10 @@ struct Conversation {
     no_save: bool,
     records: BTreeMap<usize, ToolRecord>,
     accounts: BTreeSet<String>,
+    /// The storage row each user message is (or will be) saved at, by its
+    /// index in `messages`: a regenerated reply or an edited message is
+    /// written over the old rows from there.
+    user_rows: BTreeMap<usize, u32>,
 }
 
 impl Conversation {
@@ -77,6 +81,18 @@ impl Conversation {
             no_save: false,
             records: BTreeMap::new(),
             accounts: BTreeSet::new(),
+            user_rows: BTreeMap::from([(0, 0)]),
+        }
+    }
+
+    /// Notes the storage row of a user message about to go in at `index`:
+    /// the rows saved so far, plus one for each message not saved yet.
+    fn note_user_row(&mut self, index: usize) {
+        let row = u32::try_from(index.saturating_sub(self.saved_messages))
+            .ok()
+            .and_then(|unsaved| self.saved_rows.checked_add(unsaved));
+        if let Some(row) = row {
+            self.user_rows.insert(index, row);
         }
     }
 
@@ -127,6 +143,31 @@ pub(crate) struct ActiveConversation {
     pub(crate) id: String,
     /// Already released (rolled back); `drop` has nothing left to do.
     released: bool,
+    /// What a regeneration took away, put back if the new run never starts:
+    /// the old reply must not be lost because asking again failed.
+    restore: Option<Restore>,
+    /// Went on with an earlier reply: there is no new user message to take back.
+    continued: bool,
+}
+
+struct Restore {
+    /// How long the history was cut to; anything the run added after it goes.
+    keep: usize,
+    messages: Vec<ChatMessage>,
+    stamps: Vec<String>,
+    user_rows: BTreeMap<usize, u32>,
+    saved_messages: usize,
+    saved_rows: u32,
+    no_save: bool,
+}
+
+/// What a run in place of earlier history answers.
+enum Redo {
+    /// The last user message again, in place of its reply.
+    Answer,
+    /// The `index`-th user message (from 0), reworded: it and everything
+    /// after it are replaced.
+    Edit { index: usize, message: String },
 }
 
 impl ActiveConversation {
@@ -134,11 +175,29 @@ impl ActiveConversation {
     /// that held only that message disappears) and frees the conversation.
     pub(crate) fn rollback(mut self) {
         self.released = true;
+        let restore = self.restore.take();
+        let continued = self.continued;
         let mut table = self.store.lock();
         if let Some(conversation) = table.map.get_mut(&self.id) {
-            conversation.messages.pop();
-            conversation.stamps.pop();
+            match restore {
+                Some(restore) => {
+                    conversation.messages.truncate(restore.keep);
+                    conversation.stamps.truncate(restore.keep);
+                    conversation.messages.extend(restore.messages);
+                    conversation.stamps.extend(restore.stamps);
+                    conversation.user_rows.extend(restore.user_rows);
+                    conversation.saved_messages = restore.saved_messages;
+                    conversation.saved_rows = restore.saved_rows;
+                    conversation.no_save = restore.no_save;
+                }
+                None if continued => {}
+                None => {
+                    conversation.messages.pop();
+                    conversation.stamps.pop();
+                }
+            }
             conversation.active = false;
+            conversation.seal();
             if conversation.messages.is_empty() {
                 table.map.remove(&self.id);
             }
@@ -219,6 +278,8 @@ impl Conversations {
                 }
                 conversation.active = true;
                 conversation.used = clock;
+                let index = conversation.messages.len();
+                conversation.note_user_row(index);
                 conversation.messages.push(ChatMessage::User(message));
                 conversation.stamps.push(now_rfc3339());
                 id.to_owned()
@@ -239,6 +300,175 @@ impl Conversations {
                 store: self.clone(),
                 id: id.clone(),
                 released: false,
+                restore: None,
+                continued: false,
+            },
+            history,
+        ))
+    }
+
+    /// Goes on with the conversation's last reply: the history stays as it
+    /// ends (the last reply, stopped or cut off), and the model is asked to
+    /// continue it. `NotFound` for an unknown id, `AssistantBusy` while a run
+    /// holds it, `Validation` when there is no reply to continue.
+    pub(crate) fn begin_continue(
+        self: &Arc<Self>,
+        id: &str,
+    ) -> Result<(ActiveConversation, Vec<ChatMessage>), AppError> {
+        let mut table = self.lock();
+        table.clock += 1;
+        let clock = table.clock;
+        let conversation = table
+            .map
+            .get_mut(id)
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        if conversation.active {
+            return Err(AppError::new(ErrorCode::AssistantBusy));
+        }
+        if !matches!(
+            conversation.messages.last(),
+            Some(ChatMessage::Assistant { .. })
+        ) {
+            return Err(AppError::validation("conversationId"));
+        }
+        conversation.active = true;
+        conversation.used = clock;
+        let history = conversation.messages.clone();
+        drop(table);
+        Ok((
+            ActiveConversation {
+                store: self.clone(),
+                id: id.to_owned(),
+                released: false,
+                restore: None,
+                continued: true,
+            },
+            history,
+        ))
+    }
+
+    /// Takes back the last reply so the last user message can be answered
+    /// again, and returns the history ending with that message. Only a reply
+    /// that changed nothing can go: re-running one that archived, drafted or
+    /// sent would do it twice (`Conflict`). `NotFound` for an unknown id,
+    /// `AssistantBusy` while a run holds it, `Validation` without a user
+    /// message.
+    pub(crate) fn begin_regenerate(
+        self: &Arc<Self>,
+        id: &str,
+    ) -> Result<(ActiveConversation, Vec<ChatMessage>), AppError> {
+        self.begin_redo(id, Redo::Answer)
+    }
+
+    /// Rewords the `index`-th user message (from 0): it and everything after
+    /// it are replaced by `message`, and the history ending with it is
+    /// returned. As for [`Self::begin_regenerate`], nothing after it may have
+    /// changed mail (`Conflict`); an index past the last user message is
+    /// `Validation`.
+    pub(crate) fn begin_edit(
+        self: &Arc<Self>,
+        id: &str,
+        index: usize,
+        message: String,
+    ) -> Result<(ActiveConversation, Vec<ChatMessage>), AppError> {
+        self.begin_redo(id, Redo::Edit { index, message })
+    }
+
+    fn begin_redo(
+        self: &Arc<Self>,
+        id: &str,
+        redo: Redo,
+    ) -> Result<(ActiveConversation, Vec<ChatMessage>), AppError> {
+        let mut table = self.lock();
+        table.clock += 1;
+        let clock = table.clock;
+        let conversation = table
+            .map
+            .get_mut(id)
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        if conversation.active {
+            return Err(AppError::new(ErrorCode::AssistantBusy));
+        }
+        let mut users = conversation
+            .messages
+            .iter()
+            .enumerate()
+            .filter(|(_, message)| matches!(message, ChatMessage::User(_)))
+            .map(|(at, _)| at);
+        let (user, keep, reworded) = match redo {
+            Redo::Answer => {
+                let at = users
+                    .next_back()
+                    .ok_or_else(|| AppError::validation("conversationId"))?;
+                (at, at + 1, None)
+            }
+            Redo::Edit { index, message } => {
+                let at = users
+                    .nth(index)
+                    .ok_or_else(|| AppError::validation("edit"))?;
+                (at, at, Some(message))
+            }
+        };
+        // Everything that goes must have changed nothing.
+        let changed = conversation.messages[user + 1..]
+            .iter()
+            .any(|message| match message {
+                ChatMessage::Assistant { tool_calls, .. } => tool_calls
+                    .iter()
+                    .any(|call| !super::policy::is_read(&call.name)),
+                _ => false,
+            });
+        if changed {
+            return Err(AppError::new(ErrorCode::Conflict));
+        }
+        let restore = Restore {
+            keep,
+            messages: conversation.messages[keep..].to_vec(),
+            stamps: conversation.stamps[keep..].to_vec(),
+            user_rows: conversation.user_rows.split_off(&keep),
+            saved_messages: conversation.saved_messages,
+            saved_rows: conversation.saved_rows,
+            no_save: conversation.no_save,
+        };
+        conversation.messages.truncate(keep);
+        conversation.stamps.truncate(keep);
+        conversation.records.retain(|index, _| *index < keep);
+        if conversation.saved_messages > keep {
+            // What goes is in storage: the next save writes over it, from
+            // the row the first message to go was saved at. Without that row
+            // the conversation is not saved again rather than saved wrong.
+            conversation.saved_messages = keep;
+            // Answering again keeps the user message and writes after it;
+            // an edit writes over the message itself.
+            let row = if keep > user {
+                conversation
+                    .user_rows
+                    .get(&user)
+                    .and_then(|row| row.checked_add(1))
+            } else {
+                restore.user_rows.get(&user).copied()
+            };
+            match row {
+                Some(row) => conversation.saved_rows = row,
+                None => conversation.no_save = true,
+            }
+        }
+        if let Some(message) = reworded {
+            conversation.note_user_row(keep);
+            conversation.messages.push(ChatMessage::User(message));
+            conversation.stamps.push(now_rfc3339());
+        }
+        conversation.active = true;
+        conversation.used = clock;
+        let history = conversation.messages.clone();
+        drop(table);
+        Ok((
+            ActiveConversation {
+                store: self.clone(),
+                id: id.to_owned(),
+                released: false,
+                restore: Some(restore),
+                continued: false,
             },
             history,
         ))
@@ -284,6 +514,7 @@ impl Conversations {
             no_save: false,
             records: BTreeMap::new(),
             accounts: BTreeSet::new(),
+            user_rows: loaded.user_rows,
         };
         // A reply the app was closed in the middle of.
         conversation.seal();

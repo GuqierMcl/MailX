@@ -180,10 +180,36 @@ impl Assistant {
         let inner = &self.inner;
         let message = match &request.kind {
             RunKind::Chat {
-                message, context, ..
+                message,
+                context,
+                regenerate,
+                continuation,
+                edit,
+                conversation_id,
             } => {
                 let message = message.trim();
-                if message.is_empty() || message.chars().count() > MAX_MESSAGE_CHARS {
+                let redoing = [
+                    continuation.unwrap_or(false),
+                    regenerate.unwrap_or(false),
+                    edit.is_some(),
+                ];
+                if redoing.iter().filter(|on| **on).count() > 1 {
+                    return Err(AppError::validation("edit"));
+                }
+                if edit.is_some() && conversation_id.is_none() {
+                    return Err(AppError::validation("conversationId"));
+                }
+                // Going on with or redoing a reply says nothing itself: it needs the
+                // conversation, and no words of its own.
+                let again = continuation.unwrap_or(false) || regenerate.unwrap_or(false);
+                if again {
+                    if !message.is_empty() {
+                        return Err(AppError::validation("message"));
+                    }
+                    if conversation_id.is_none() {
+                        return Err(AppError::validation("conversationId"));
+                    }
+                } else if message.is_empty() || message.chars().count() > MAX_MESSAGE_CHARS {
                     return Err(AppError::validation("message"));
                 }
                 if context
@@ -261,15 +287,33 @@ impl Assistant {
             RunKind::Chat {
                 conversation_id,
                 context,
+                regenerate,
+                continuation,
+                edit,
                 ..
             } => {
                 let message = message.unwrap_or_default();
+                let continuing = continuation.unwrap_or(false);
                 if let Some(id) = conversation_id.as_deref() {
                     self.ensure_loaded(id).await?;
                 }
-                let (conversation, history) = inner
-                    .conversations
-                    .begin(conversation_id.as_deref(), message)?;
+                let (conversation, history) = match (
+                    regenerate.unwrap_or(false),
+                    continuing,
+                    edit,
+                    conversation_id.as_deref(),
+                ) {
+                    (true, _, _, Some(id)) => inner.conversations.begin_regenerate(id)?,
+                    (_, true, _, Some(id)) => inner.conversations.begin_continue(id)?,
+                    (_, _, Some(index), Some(id)) => inner.conversations.begin_edit(
+                        id,
+                        usize::try_from(index).map_err(|_| AppError::validation("edit"))?,
+                        message,
+                    )?,
+                    _ => inner
+                        .conversations
+                        .begin(conversation_id.as_deref(), message)?,
+                };
                 let run_id = match inner.runs.create(
                     RunKindTag::Chat,
                     Some(conversation.id.clone()),
@@ -290,6 +334,7 @@ impl Assistant {
                     conversation,
                     history,
                     context,
+                    continuing,
                 ));
                 inner.runs.set_abort(&run_id, task.abort_handle());
                 inner.runs.snapshot(&run_id)
