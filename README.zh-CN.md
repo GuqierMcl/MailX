@@ -10,7 +10,7 @@
 [![Release](https://img.shields.io/github/v/release/GuqierMcl/MailX?include_prereleases&sort=semver&style=flat-square&labelColor=1f1f22)](https://github.com/GuqierMcl/MailX/releases)
 [![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square&labelColor=1f1f22)](https://github.com/GuqierMcl/MailX/releases)
 
-[English](README.md) | 简体中文
+[English](README.md) | 简体中文 | [Türkçe](README.tr.md)
 
 [官网](https://mailxapp.com/zh-CN/) · [文档](https://mailxapp.com/zh-CN/docs/) · [发布版本](https://github.com/GuqierMcl/MailX/releases)
 
