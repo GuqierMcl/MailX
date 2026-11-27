@@ -12,6 +12,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### ✨ Optimization
+
+- Refine the startup screen with a minimalist breathing brand icon over the native translucent canvas on macOS and eliminate the initial blank frame before the logo appears. / 优化启动加载页，改为在画布与 macOS 原生毛玻璃材质上展示极简呼吸图标，并消除启动首帧显示图标前的空白闪烁。
+
 ## [0.5.1] - 2026-11-27
 
 ### 🚀 Feature

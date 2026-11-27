@@ -11,6 +11,11 @@ import { initializeLanguage } from './i18n/locale'
 // Apply the last known appearance before the first paint to avoid a flash;
 // the core's settings replace it once IPC answers.
 applyAppearance(cachedAppearance())
+// macOS puts a window material behind the webview before JS runs; pre-enabling
+// translucency avoids an opaque first frame before `window_get_chrome` replies.
+if (isTauri() && /Mac/i.test(navigator.userAgent)) {
+  document.documentElement.setAttribute('data-translucent', '')
+}
 initializeLanguage()
 
 // A packaged app should not act like a browser tab. Development builds keep

@@ -474,3 +474,33 @@ html[data-translucent].dark .app-canvas {
     opacity: 0.7;}
   .ai-caret[data-state="leaving"] {
     animation: ai-caret-out 100ms linear forwards;}}
+
+/* Startup loading screen: breathing brand mark over the translucent/canvas backdrop. */
+.startup-logo-breathe {
+  animation: startup-logo-breathe 2.2s ease-in-out infinite;
+  will-change: transform, opacity;}
+.startup-logo-glow {
+  animation: startup-logo-glow 2.2s ease-in-out infinite;
+  will-change: transform, opacity;}
+@keyframes startup-logo-breathe {
+  0%, 100% {
+    opacity: 0.72;
+    transform: scale(0.96);}
+  50% {
+    opacity: 1;
+    transform: scale(1.02);}}
+@keyframes startup-logo-glow {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.9);}
+  50% {
+    opacity: 0.85;
+    transform: scale(1.12);}}
+@media (prefers-reduced-motion: reduce) {
+  .startup-logo-breathe,
+  .startup-logo-glow {
+    animation: none;}
+  .startup-logo-breathe {
+    opacity: 0.92;}
+  .startup-logo-glow {
+    opacity: 0.5;}}

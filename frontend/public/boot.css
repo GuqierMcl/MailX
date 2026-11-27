@@ -1,0 +1,86 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background-color: transparent;
+}
+
+.boot-splash {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100vh;
+  height: 100svh;
+  user-select: none;
+}
+
+.boot-splash-mark {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.boot-splash-glow {
+  position: absolute;
+  inset: -24px;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: rgb(0 0 0 / 7%);
+  filter: blur(40px);
+  animation: boot-splash-glow 2.2s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@media (prefers-color-scheme: dark) {
+  .boot-splash-glow {
+    background: rgb(255 255 255 / 12%);
+  }
+}
+
+.boot-splash-logo {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  filter: drop-shadow(0 4px 12px rgb(0 0 0 / 15%));
+  animation: boot-splash-breathe 2.2s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+@keyframes boot-splash-breathe {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes boot-splash-glow {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-splash-logo,
+  .boot-splash-glow {
+    animation: none;
+  }
+  .boot-splash-logo {
+    opacity: 0.92;
+  }
+  .boot-splash-glow {
+    opacity: 0.5;
+  }
+}

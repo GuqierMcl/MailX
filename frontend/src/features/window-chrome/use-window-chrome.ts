@@ -23,9 +23,10 @@ export function useWindowChrome(host: WindowHost | null) {
 
 /** Lets the stylesheet draw the canvas translucent once the host has put a material behind it. */
 export function useTranslucentCanvas(chrome: WindowChrome | null) {
-  const translucent = chrome?.translucent ?? false
   useEffect(() => {
-    document.documentElement.toggleAttribute('data-translucent', translucent)
-    return () => document.documentElement.removeAttribute('data-translucent')
-  }, [translucent])
+    if (!chrome) return
+    document.documentElement.toggleAttribute('data-translucent', chrome.translucent)
+  }, [chrome])
+
+  useEffect(() => () => document.documentElement.removeAttribute('data-translucent'), [])
 }

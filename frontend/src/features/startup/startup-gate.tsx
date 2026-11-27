@@ -5,8 +5,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ErrorNotice } from '@/components/error-notice'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { FieldDescription } from '@/components/ui/field'
-import { Skeleton } from '@/components/ui/skeleton'
 import type { StartupStatus } from '@/generated/startup'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { Workbench } from '@/features/mail/workbench'
@@ -100,7 +98,7 @@ export function StartupGate({ client, children }: { client: MailxClient; childre
 function StartupShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-full overflow-auto">
-      <Card className="flex min-h-full w-full max-w-none flex-col items-center justify-center rounded-none border-0 bg-background p-6 shadow-none [&>*]:w-full [&>*]:max-w-md">{children}</Card>
+      <Card className="flex min-h-full w-full max-w-none flex-col items-center justify-center rounded-none border-0 bg-transparent p-6 pb-16 shadow-none [&>*]:w-full [&>*]:max-w-md">{children}</Card>
     </div>
   )
 }
@@ -108,17 +106,26 @@ function StartupShell({ children }: { children: React.ReactNode }) {
 function StartupLoadingScreen() {
   useTranslation()
   return (
-    <StartupShell>
-      <CardHeader>
-        <CardTitle>{t('common:preparingMailx')}</CardTitle>
-        <CardDescription>{t('common:initializingDescription')}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3" role="status" aria-label={t('common:initializingData')}>
-        <Skeleton className="h-3 w-4/5" />
-        <Skeleton className="h-3 w-3/5" />
-        <FieldDescription>{t('common:initializingHint')}</FieldDescription>
-      </CardContent>
-    </StartupShell>
+    <div
+      className="flex h-full w-full select-none items-center justify-center pb-10"
+      role="status"
+      aria-label={t('common:initializingData')}
+    >
+      <div className="relative flex items-center justify-center">
+        <span
+          aria-hidden="true"
+          className="startup-logo-glow pointer-events-none absolute -inset-6 rounded-full bg-foreground/[0.07] blur-2xl dark:bg-white/[0.12]"
+        />
+        <img
+          src={`${import.meta.env.BASE_URL}logo.svg`}
+          alt=""
+          width={72}
+          height={72}
+          draggable={false}
+          className="startup-logo-breathe relative size-[72px] drop-shadow-md"
+        />
+      </div>
+    </div>
   )
 }
 

@@ -5,11 +5,14 @@
 //! host reports which controls to draw and performs title bar gestures the way
 //! the operating system preferences say, instead of always toggling maximize.
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use mailx_core::Activity;
 use serde::{Deserialize, Serialize};
 use tauri::plugin::TauriPlugin;
+use tauri::webview::PageLoadEvent;
 use tauri::{
     AppHandle, Emitter, EventTarget, Manager, Runtime, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
@@ -148,6 +151,10 @@ enum TitleBarGesture {
     Nothing,
 }
 
+/// Upper bound on waiting for the initial HTML/logo paint before showing the
+/// main window, so a slow dev server or asset stall never leaves it invisible.
+const INITIAL_SHOW_FALLBACK: Duration = Duration::from_millis(450);
+
 /// Builds the main window from `tauri.conf.json` with platform title bar settings.
 pub(crate) fn create_main_window(app: &AppHandle, visible: bool) -> tauri::Result<WebviewWindow> {
     let config = app
@@ -159,14 +166,27 @@ pub(crate) fn create_main_window(app: &AppHandle, visible: bool) -> tauri::Resul
         .cloned()
         .ok_or_else(|| tauri::Error::WindowNotFound)?;
     let navigation_app = app.clone();
+    let show_on_load = Arc::new(AtomicBool::new(visible));
+    let shown = Arc::new(AtomicBool::new(false));
+    let load_show_flag = show_on_load.clone();
+    let load_shown = shown.clone();
     // Created hidden: the window-state plugin restores size and position while
-    // the window is built, and showing it afterwards avoids a jump from the
-    // default geometry.
+    // the window is built, and waiting for the initial page load avoids flashing
+    // an empty window before the boot splash renders.
     let builder = style_builder(
         WebviewWindowBuilder::from_config(app, &config)?
             .visible(false)
             .focused(visible)
-            .on_navigation(move |url| crate::body_protocol::navigation(&navigation_app, url)),
+            .on_navigation(move |url| crate::body_protocol::navigation(&navigation_app, url))
+            .on_page_load(move |window, payload| {
+                if payload.event() == PageLoadEvent::Finished
+                    && load_show_flag.load(Ordering::SeqCst)
+                    && !load_shown.swap(true, Ordering::SeqCst)
+                {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }),
     );
     let window = builder.build()?;
     watch_state(&window);
@@ -175,8 +195,18 @@ pub(crate) fn create_main_window(app: &AppHandle, visible: bool) -> tauri::Resul
     // build() registered the main window. Sample once more after registration;
     // later callbacks can find and show the window themselves.
     if visible || crate::autostart::user_activated(app) {
-        window.show()?;
-        window.set_focus()?;
+        show_on_load.store(true, Ordering::SeqCst);
+        let fallback_app = app.clone();
+        let fallback_shown = shown.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(INITIAL_SHOW_FALLBACK).await;
+            if !fallback_shown.swap(true, Ordering::SeqCst)
+                && let Some(window) = fallback_app.get_webview_window(MAIN_WINDOW)
+            {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        });
     }
     Ok(window)
 }

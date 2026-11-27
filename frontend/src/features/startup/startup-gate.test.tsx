@@ -30,7 +30,10 @@ describe('startup gate', () => {
     client.getStartupStatus.mockReturnValueOnce(pending.promise)
     render(<StartupGate client={client}><span>ready content</span></StartupGate>)
 
-    expect(screen.getByRole('status', { name: '正在初始化本地数据' })).toBeInTheDocument()
+    const status = screen.getByRole('status', { name: '正在初始化本地数据' })
+    expect(status).toBeInTheDocument()
+    expect(status.querySelector('img[src$="logo.svg"]')).toBeInTheDocument()
+    expect(status.textContent).toBe('')
     expect(screen.queryByText('ready content')).not.toBeInTheDocument()
     expect(client.listAccounts).not.toHaveBeenCalled()
     await act(async () => { pending.resolve({ state: 'ready', revision: 1 }) })
