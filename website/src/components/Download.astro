@@ -12,13 +12,14 @@ type Link = { id: string; label: string; download: Download | undefined }
 type LinkGroup = { label?: string; links: Link[] }
 const linuxArchitectures: LinuxArchitecture[] = ['x64', 'arm64']
 const linuxFormats = ['appimage', 'deb', 'rpm'] as const
+const hasLinuxArm64 = linuxFormats.some((format) => find(`linux-arm64-${format}`))
 const groups: { os: string; name: string; note: string; extra: string | null; linkGroups: LinkGroup[] }[] = [
   { os: 'macos', name: t.macos.name, note: t.macos.note, extra: t.macos.which, linkGroups: [{ links: [
     { id: 'arm', label: t.macos.arm, download: find('macos-arm64') },
     { id: 'intel', label: t.macos.intel, download: find('macos-x64') },
   ] }] },
   { os: 'windows', name: t.windows.name, note: t.windows.note, extra: null, linkGroups: [{ links: [{ id: 'setup', label: t.windows.setup, download: find('windows-x64') }] }] },
-  { os: 'linux', name: t.linux.name, note: t.linux.note, extra: null, linkGroups: linuxArchitectures.map((arch) => ({
+  { os: 'linux', name: t.linux.name, note: hasLinuxArm64 ? `${t.linux.ubuntuMinimum} ${t.linux.note}` : t.linux.note, extra: null, linkGroups: linuxArchitectures.map((arch) => ({
     label: t.linux[arch],
     links: linuxFormats.map((format) => ({
       id: `${arch}-${format}`,

@@ -106,7 +106,7 @@ Gmail · iCloud 邮箱 · Outlook · Microsoft 365 · Exchange（自建服务器
 | Linux（x64） | `.AppImage`、`.deb` 或 `.rpm`（`linux-x64`） |
 | Linux（ARM64） | `.AppImage`、`.deb` 或 `.rpm`（`linux-arm64`） |
 
-Linux 两种架构的安装包均基于 Ubuntu 24.04 构建。Ubuntu 用户请使用 24.04 或更新版本。
+Linux 安装包以各版本的发布文件为准。从提供 ARM64 安装包的版本起，Ubuntu 上两种架构均请使用 24.04 或更新版本。
 
 macOS 安装包已使用 Developer ID 签名并公证，下载后可以直接打开。Windows 与 Linux 安装包尚未做代码签名，系统可能拦截首次启动，各版本发布说明里的安装说明介绍了打开方法。macOS、Windows 和 AppImage 版本可以在应用内自动更新。这些构建尚未在每个平台上逐一验证。
 

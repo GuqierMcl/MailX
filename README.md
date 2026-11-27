@@ -106,7 +106,7 @@ Published builds are on the [Releases](https://github.com/GuqierMcl/MailX/releas
 | Linux (x64) | `.AppImage`, `.deb` or `.rpm` (`linux-x64`) |
 | Linux (ARM64) | `.AppImage`, `.deb` or `.rpm` (`linux-arm64`) |
 
-Linux packages for both architectures are built on Ubuntu 24.04. On Ubuntu, use 24.04 or later.
+Check each release for available Linux packages. For releases that include ARM64, use Ubuntu 24.04 or later on either architecture.
 
 The macOS build is signed with a Developer ID and notarized, so it opens normally after download. The Windows and Linux builds are not code-signed yet, so your system may block the first launch; the install notes in each release explain how to open them. The macOS, Windows and AppImage builds can update themselves from within the app. These builds have not been verified on every platform yet.
 

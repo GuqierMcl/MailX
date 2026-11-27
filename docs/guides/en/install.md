@@ -19,9 +19,9 @@ Choose the installer for your computer on the [download page](/en/download/), th
 
 ### Linux
 
-Choose **x64** for 64-bit Intel or AMD and **ARM64** for 64-bit ARM. Run `uname -m` in a terminal to check. `x86_64` means x64, and `aarch64` means ARM64. On Ubuntu, use 24.04 or later for either architecture.
+Choose **x64** for 64-bit Intel or AMD and **ARM64** for 64-bit ARM. Run `uname -m` in a terminal to check. `x86_64` means x64, and `aarch64` means ARM64.
 
-Both architectures offer **AppImage**, **deb** (Debian / Ubuntu) and **rpm** (Fedora / openSUSE).
+Check the download page for formats available for your architecture: **AppImage**, **deb** (Debian / Ubuntu), or **rpm** (Fedora / openSUSE). For releases that include ARM64, use Ubuntu 24.04 or later on either architecture.
 
 - **AppImage**: runs directly and supports automatic in-app updates.
 - **deb / rpm**: install with your system's package manager. MailX lets you know when a new version is out so you can install it manually.
