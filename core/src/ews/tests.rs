@@ -865,10 +865,29 @@ fn soap_rejects_dtd_namespace_spoofing_and_stuck_page_cursors() {
         soap::parse_items(page.as_bytes(), 0),
         Err(EwsError::Protocol)
     ));
-    let page = page.replace("IndexedPagingOffset=\"0\"", "IndexedPagingOffset=\"1\"");
+    let page = page
+        .replace("IndexedPagingOffset=\"0\"", "IndexedPagingOffset=\"1\"")
+        .replace("<m:RootFolder ", "<m:RootFolder TotalItemsInView=\"42\" ");
     let result = soap::parse_items(page.as_bytes(), 0).unwrap();
     assert_eq!(result.next_offset, Some(1));
+    assert_eq!(result.total_in_view, Some(42));
     assert_eq!(result.items[0].id, "one");
+
+    let since = DateTime::parse_from_rfc3339("2026-08-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let before = DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let bounded = soap::items_range("inbox-id", Some(since), Some(before), 0, 50);
+    assert!(bounded.contains("<t:And>"));
+    assert!(bounded.contains("<t:IsGreaterThanOrEqualTo>"));
+    assert!(bounded.contains("<t:IsLessThanOrEqualTo>"));
+    let unbounded = soap::items_range("inbox-id", None, Some(before), 0, 50);
+    assert!(!unbounded.contains("<t:And>"));
+    assert!(unbounded.contains("<t:IsLessThanOrEqualTo>"));
+    let all = soap::items_range("inbox-id", None, None, 0, 50);
+    assert!(!all.contains("<m:Restriction>"));
 }
 
 #[tokio::test]

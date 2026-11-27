@@ -906,6 +906,64 @@ pub struct GeneralSettings {
     pub startup_view: StartupView,
 }
 
+/// How far back in time each account's folders are synchronized.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncWindow {
+    #[default]
+    Days30,
+    Days90,
+    Year1,
+    All,
+    /// Retained until validation or sanitization runs.
+    #[doc(hidden)]
+    #[ts(skip)]
+    #[serde(skip_serializing)]
+    Invalid,
+}
+
+impl SyncWindow {
+    pub fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Days30 | Self::Invalid => "days30",
+            Self::Days90 => "days90",
+            Self::Year1 => "year1",
+            Self::All => "all",
+        }
+    }
+
+    pub fn from_db_str(value: &str) -> Option<Self> {
+        match value {
+            "days30" => Some(Self::Days30),
+            "days90" => Some(Self::Days90),
+            "year1" => Some(Self::Year1),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+
+    pub fn target_date(self, today: chrono::NaiveDate) -> Option<chrono::NaiveDate> {
+        match self {
+            Self::Days30 | Self::Invalid => Some(today - chrono::Duration::days(30)),
+            Self::Days90 => Some(today - chrono::Duration::days(90)),
+            Self::Year1 => Some(today - chrono::Duration::days(365)),
+            Self::All => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SyncWindow {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(match serde_json::Value::deserialize(deserializer)? {
+            serde_json::Value::String(value) if value == "days30" => Self::Days30,
+            serde_json::Value::String(value) if value == "days90" => Self::Days90,
+            serde_json::Value::String(value) if value == "year1" => Self::Year1,
+            serde_json::Value::String(value) if value == "all" => Self::All,
+            _ => Self::Invalid,
+        })
+    }
+}
+
 /// Optional mail-workflow enhancements, independent of notification delivery.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
@@ -913,6 +971,8 @@ pub struct MailSettings {
     /// After a dedicated verification-code copy succeeds, move that email to
     /// the account's Trash. Never authorizes a permanent deletion.
     pub trash_verification_mail_after_copy: bool,
+    /// Global default synchronization history depth; individual accounts may override.
+    pub sync_window: SyncWindow,
 }
 
 fn deserialize_language<'de, D: serde::Deserializer<'de>>(
@@ -1034,6 +1094,9 @@ impl AppSettings {
         if !valid_language(&self.general.language) {
             return Err(AppError::validation("general.language"));
         }
+        if self.mail.sync_window == SyncWindow::Invalid {
+            return Err(AppError::validation("mail.syncWindow"));
+        }
         let appearance = self.appearance;
         if !(NAV_WIDTH_MIN..=NAV_WIDTH_MAX).contains(&self.layout.nav_width) {
             return Err(AppError::validation("layout.navWidth"));
@@ -1131,7 +1194,13 @@ impl AppSettings {
             },
         };
         Self {
-            mail: self.mail,
+            mail: MailSettings {
+                sync_window: match self.mail.sync_window {
+                    SyncWindow::Invalid => SyncWindow::Days30,
+                    window => window,
+                },
+                ..self.mail
+            },
             general: if valid_language(&self.general.language) {
                 self.general
             } else {
@@ -1575,6 +1644,14 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                     .is_some_and(|value| !value.is_boolean())
                 {
                     mail.remove("trashVerificationMailAfterCopy");
+                }
+                if mail.get("syncWindow").is_some_and(|value| {
+                    matches!(
+                        serde_json::from_value::<SyncWindow>(value.clone()),
+                        Ok(SyncWindow::Invalid) | Err(_)
+                    )
+                }) {
+                    mail.remove("syncWindow");
                 }
             } else {
                 settings.remove("mail");

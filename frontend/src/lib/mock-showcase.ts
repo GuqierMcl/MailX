@@ -31,7 +31,7 @@ const ME = {
 } as Record<string, MailAddress>
 
 /** A preset provider shows its logo instead of a colour, so only the generic account sets one. */
-const profile = (displayName: string, color: string | null = null) => ({ displayName, color, senderName: null, useProviderIcon: true })
+const profile = (displayName: string, color: string | null = null) => ({ displayName, color, senderName: null, useProviderIcon: true, syncWindow: null })
 const keep = { kind: 'password', mode: 'shared', password: { action: 'keep' } } as const
 
 function imap(id: string, providerId: string | null, name: string, servers: [string, string, 465 | 587], color?: string): AccountConfigInput {

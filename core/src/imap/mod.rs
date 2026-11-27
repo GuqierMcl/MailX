@@ -952,6 +952,24 @@ impl Session {
         .await
     }
 
+    pub(crate) async fn search_history(
+        &mut self,
+        since: Option<NaiveDate>,
+        before: NaiveDate,
+        mut mailbox: MailboxInfo,
+    ) -> Result<Vec<u32>, ImapError> {
+        let query = match since {
+            Some(since) => format!(
+                "UID SEARCH SINCE {} BEFORE {}",
+                since.format("%d-%b-%Y"),
+                before.format("%d-%b-%Y")
+            ),
+            None => format!("UID SEARCH BEFORE {}", before.format("%d-%b-%Y")),
+        };
+        self.search(&query, Some(&mut mailbox), None, ImapSearchKind::History)
+            .await
+    }
+
     pub(crate) async fn search_uids(&mut self, requested: &[u32]) -> Result<Vec<u32>, ImapError> {
         let query = format!("UID SEARCH UID {}", nonempty_uid_set(requested)?);
         self.search(&query, None, Some(requested), ImapSearchKind::Uids)
@@ -1940,6 +1958,43 @@ mod tests {
                 .as_deref(),
             Some("original@vip.qq.com")
         );
+        session.logout().await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn search_history_formats_since_before_and_before_only() {
+        let (mut session, server) = header_session(vec![
+            (
+                "EXAMINE \"INBOX\"".into(),
+                "* 2 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n* OK [UIDNEXT 50] next\r\n{tag} OK [READ-ONLY]\r\n".into(),
+            ),
+            (
+                "UID SEARCH SINCE 01-Aug-2026 BEFORE 19-Sep-2026".into(),
+                "* SEARCH 10 11\r\n{tag} OK\r\n".into(),
+            ),
+            (
+                "UID SEARCH BEFORE 01-Aug-2026".into(),
+                "* SEARCH 3 4\r\n{tag} OK\r\n".into(),
+            ),
+            ("LOGOUT".into(), "{tag} OK\r\n".into()),
+        ])
+        .await;
+        let mailbox = session.examine("INBOX").await.unwrap();
+        let bounded = session
+            .search_history(
+                NaiveDate::from_ymd_opt(2026, 8, 1),
+                NaiveDate::from_ymd_opt(2026, 9, 19).unwrap(),
+                mailbox,
+            )
+            .await
+            .unwrap();
+        assert_eq!(bounded, vec![10, 11]);
+        let unbounded = session
+            .search_history(None, NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(), mailbox)
+            .await
+            .unwrap();
+        assert_eq!(unbounded, vec![3, 4]);
         session.logout().await.unwrap();
         server.await.unwrap();
     }

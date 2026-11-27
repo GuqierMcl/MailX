@@ -66,7 +66,7 @@ export const DEFAULT_ASSISTANT: AssistantSettings = {
 }
 /** The core ignores `consented` in a write; consent changes only through the assistant's own commands. */
 export const useUpdateAssistant = (client: MailxClient) => useSettingsSection(client, 'assistant', DEFAULT_ASSISTANT)
-export const useUpdateMailSettings = (client: MailxClient) => useSettingsSection(client, 'mail', { trashVerificationMailAfterCopy: false }, false)
+export const useUpdateMailSettings = (client: MailxClient) => useSettingsSection(client, 'mail', { trashVerificationMailAfterCopy: false, syncWindow: 'days30' }, false)
 export const useUpdateGeneral = (client: MailxClient) => useSettingsSection(client, 'general', { language: 'system', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'now' }, false)
 
 /** How long layout changes wait for a quieter moment before being written. */

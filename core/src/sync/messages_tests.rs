@@ -74,6 +74,7 @@ fn fixture_with(account_config: serde_json::Value, role: FolderRole) -> Fixture 
     let shared = Arc::new(Shared {
         service: Arc::downgrade(&service),
         states: Mutex::new(HashMap::new()),
+        global_sync_window: Mutex::new(crate::settings::SyncWindow::Days30),
         events: Arc::new(move |event: &CoreEvent| match event {
             CoreEvent::Sync(state) => observed.lock().unwrap().push(state.clone()),
             CoreEvent::NewMail(mail) => arrived.lock().unwrap().push(mail.clone()),
@@ -86,7 +87,8 @@ fn fixture_with(account_config: serde_json::Value, role: FolderRole) -> Fixture 
             | CoreEvent::AssistantConversationsChanged(_)
             | CoreEvent::Previews(_)
             | CoreEvent::AccountRemoved(_)
-            | CoreEvent::MailStateChanged(_) => {}
+            | CoreEvent::MailStateChanged(_)
+            | CoreEvent::Backfill(_) => {}
         }),
     });
     let token = WorkerToken {
@@ -2131,4 +2133,565 @@ async fn starred_messages_outside_the_date_window_are_synced_and_unstarred_clean
         .find(|mail| mail.subject == "Old Star")
         .expect("unstarred older message remains visible instead of being marked deleted");
     assert!(!old.is_starred);
+}
+
+#[tokio::test]
+async fn imap_backfill_fetches_older_messages_marks_history_end_and_preserves_on_shrink() {
+    let fixture = fixture();
+    let recent_uid = 200u32;
+    let old_uid = 50u32;
+    let old_date = chrono::Utc::now() - chrono::Duration::days(400);
+
+    // Hot round syncs the 30-day window (UID 200).
+    let mut hot = commands(21, &[recent_uid]);
+    add_headers(&mut hot, &[(recent_uid, "Recent")]);
+    run(&fixture, hot, true).await.unwrap();
+
+    // Expand sync window to All and confirm task starts in Running without waking hot sync.
+    let today = chrono::Utc::now().date_naive();
+    {
+        let mut service = fixture.service.lock().unwrap();
+        assert!(
+            service
+                .schedule_account_backfill(
+                    &fixture.account_id,
+                    crate::settings::SyncWindow::All,
+                    today
+                )
+                .unwrap()
+        );
+        let tasks = service.backfill_tasks().unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(
+            tasks[0].phase,
+            crate::sync::backfill::BackfillPhase::Running
+        );
+    }
+
+    let targets = fixture
+        .service
+        .lock()
+        .unwrap()
+        .sync_folders(&fixture.account_id, &fixture.source)
+        .unwrap();
+    let folder_id = targets[0].0.clone();
+
+    let job = fixture
+        .service
+        .lock()
+        .unwrap()
+        .next_backfill_folder(&fixture.account_id, &fixture.source)
+        .unwrap()
+        .expect("backfill job queued");
+
+    let mut script: Script = vec![
+        ("LOGIN ".into(), "{tag} OK authenticated\r\n".into()),
+        (
+            "CAPABILITY".into(),
+            "* CAPABILITY IMAP4rev1\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "EXAMINE ".into(),
+            "* 2 EXISTS\r\n* OK [UIDVALIDITY 21] ok\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH BEFORE ".into(),
+            format!("* SEARCH {old_uid}\r\n{{tag}} OK\r\n"),
+        ),
+        (
+            format!("UID FETCH {old_uid} "),
+            header_with(old_uid, "Two Years Ago", "\\Seen", old_date) + "{tag} OK fetched\r\n",
+        ),
+        ("LOGOUT".into(), "{tag} OK goodbye\r\n".into()),
+    ];
+    let _ = &mut script;
+    let (client, server) = tokio::io::duplex(64 * 1024);
+    let server = tokio::spawn(serve(server, script));
+    let endpoint = fixture
+        .service
+        .lock()
+        .unwrap()
+        .get(&fixture.account_id)
+        .unwrap()
+        .connection
+        .imap_smtp()
+        .unwrap()
+        .0
+        .clone();
+    let login = ImapLogin {
+        host: endpoint.host,
+        port: 993,
+        tls: crate::accounts::types::TlsMode::Implicit,
+        username: "lin".into(),
+        credential: crate::imap::ProtocolCredential::Password(SecretValue::new(
+            "synthetic-password".into(),
+        )),
+    };
+    let mut session = imap::test_session(Box::new(client), &login).await.unwrap();
+    if let Ok(mut states) = fixture.shared.states.lock()
+        && let Some(state) = states.get_mut(&fixture.account_id)
+    {
+        state.phase = SyncPhase::Idle;
+        for f in &mut state.folders {
+            f.phase = FolderSyncPhase::Idle;
+        }
+    }
+    fixture.events.lock().unwrap().clear();
+    fixture.new_mail.lock().unwrap().clear();
+    let wake = SyncWake::default();
+    let mut did_work = false;
+    let outcome = super::super::backfill::backfill_imap_folder(
+        &fixture.shared,
+        &fixture.token,
+        &wake,
+        &mut session,
+        &job,
+        std::time::Instant::now(),
+        &mut did_work,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        outcome,
+        super::super::backfill::FolderTurn::Completed
+    ));
+    session.logout().await.unwrap();
+    server.await.unwrap();
+
+    // No NewMail event and no Syncing phase emitted by backfill.
+    assert!(fixture.new_mail.lock().unwrap().is_empty());
+    assert!(!fixture.events.lock().unwrap().iter().any(|state| {
+        state.phase == SyncPhase::Syncing
+            || state
+                .folders
+                .iter()
+                .any(|f| f.phase == FolderSyncPhase::Syncing)
+    }));
+
+    // Coverage shows complete history and both emails are visible.
+    {
+        let service = fixture.service.lock().unwrap();
+        assert!(service.backfill_tasks().unwrap().is_empty());
+        let page = service
+            .list_emails(&EmailListQuery {
+                folder_id: Some(folder_id.clone()),
+                ..EmailListQuery::default()
+            })
+            .unwrap();
+        assert_eq!(page.items.len(), 2);
+        assert!(page.coverage.history_reached_end);
+        assert_eq!(page.coverage.synced_after, None);
+    }
+
+    // Shrinking back to 30 days keeps already-synced historical mail intact.
+    {
+        let mut service = fixture.service.lock().unwrap();
+        assert!(
+            !service
+                .schedule_account_backfill(
+                    &fixture.account_id,
+                    crate::settings::SyncWindow::Days30,
+                    today
+                )
+                .unwrap()
+        );
+        let page = service
+            .list_emails(&EmailListQuery {
+                folder_id: Some(folder_id),
+                ..EmailListQuery::default()
+            })
+            .unwrap();
+        assert_eq!(page.items.len(), 2);
+        assert!(page.items.iter().any(|m| m.subject == "Two Years Ago"));
+    }
+}
+
+#[tokio::test]
+async fn backfill_yields_immediately_to_pending_hot_wake() {
+    let fixture = fixture();
+    let hot = commands(21, &[]);
+    run(&fixture, hot, true).await.unwrap();
+    let today = chrono::Utc::now().date_naive();
+    fixture
+        .service
+        .lock()
+        .unwrap()
+        .schedule_account_backfill(
+            &fixture.account_id,
+            crate::settings::SyncWindow::Days90,
+            today,
+        )
+        .unwrap();
+
+    let wake = SyncWake::default();
+    wake.notify();
+    let turn = super::super::backfill::run_budgeted(&fixture.shared, &fixture.token, &wake).await;
+    assert_eq!(turn, super::super::backfill::BackfillTurn::Interrupted);
+    let tasks = fixture.service.lock().unwrap().backfill_tasks().unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(
+        tasks[0].phase,
+        crate::sync::backfill::BackfillPhase::Running
+    );
+}
+
+#[tokio::test]
+async fn backfill_pause_resume_cancel_and_load_older_preserve_cached_mail() {
+    let fixture = fixture();
+    let mut hot = commands(21, &[10]);
+    add_headers(&mut hot, &[(10, "Recent")]);
+    run(&fixture, hot, true).await.unwrap();
+
+    let folder_id = fixture
+        .service
+        .lock()
+        .unwrap()
+        .sync_folders(&fixture.account_id, &fixture.source)
+        .unwrap()[0]
+        .0
+        .clone();
+
+    let mut service = fixture.service.lock().unwrap();
+    let (account_id, queued) = service.load_older_folder(&folder_id, 90).unwrap();
+    assert_eq!(account_id, fixture.account_id);
+    assert!(queued);
+    assert_eq!(
+        service.backfill_tasks().unwrap()[0].phase,
+        crate::sync::backfill::BackfillPhase::Running
+    );
+
+    assert!(
+        service
+            .control_account_backfill(
+                &fixture.account_id,
+                crate::sync::backfill::BackfillControlAction::Pause
+            )
+            .unwrap()
+    );
+    assert_eq!(
+        service.backfill_tasks().unwrap()[0].phase,
+        crate::sync::backfill::BackfillPhase::Paused
+    );
+
+    assert!(
+        service
+            .control_account_backfill(
+                &fixture.account_id,
+                crate::sync::backfill::BackfillControlAction::Resume
+            )
+            .unwrap()
+    );
+    assert_eq!(
+        service.backfill_tasks().unwrap()[0].phase,
+        crate::sync::backfill::BackfillPhase::Running
+    );
+
+    assert!(
+        service
+            .control_account_backfill(
+                &fixture.account_id,
+                crate::sync::backfill::BackfillControlAction::Cancel
+            )
+            .unwrap()
+    );
+    assert!(service.backfill_tasks().unwrap().is_empty());
+    let page = service
+        .list_emails(&EmailListQuery {
+            folder_id: Some(folder_id),
+            ..EmailListQuery::default()
+        })
+        .unwrap();
+    assert_eq!(page.items.len(), 1);
+}
+
+#[tokio::test]
+async fn ews_backfill_paginates_cursor_before_and_completes() {
+    let fixture = {
+        let mut f = super::super::ews::tests::fixture_with_ews(Some(
+            "https://controlled.example/EWS/Exchange.asmx",
+        ));
+        let target = f.target.clone();
+        let initial_since = (f.now.date_naive() - chrono::Duration::days(30)).to_string();
+        let cursor = f
+            .service
+            .ensure_generation(&target, &initial_since)
+            .unwrap()
+            .unwrap();
+        let recent = super::super::ews::tests::item("recent-item", f.now);
+        let assigned = f
+            .service
+            .ews_assign(&target, &[(recent.id.clone(), recent.change_key.clone())])
+            .unwrap()
+            .unwrap();
+        let rec = super::super::ews::message_record(assigned[0].uid, &recent, f.now);
+        f.service
+            .store_message_batch(&target, &[rec], assigned[0].uid)
+            .unwrap();
+        f.service.finish_backfill(&target, false).unwrap();
+        f.service
+            .schedule_account_backfill(
+                &target.account_id,
+                crate::settings::SyncWindow::Days90,
+                f.now.date_naive(),
+            )
+            .unwrap();
+        let expected_target = (f.now.date_naive() - chrono::Duration::days(90)).to_string();
+        let _ = (cursor, expected_target);
+        f
+    };
+
+    let account_id = fixture.target.account_id.clone();
+    let source = fixture.target.mailbox_source_id.clone();
+    let folder_id = fixture.target.folder_id.clone();
+    let target_date = (fixture.now.date_naive() - chrono::Duration::days(90)).to_string();
+    let prev_highest = fixture
+        .service
+        .next_backfill_folder(&account_id, &source)
+        .unwrap()
+        .unwrap()
+        .highest_uid;
+    let account_revision = fixture.service.sync_identity(&account_id).unwrap().revision;
+    let service = Arc::new(Mutex::new(fixture.service));
+    let events: Events = Arc::new(|_: &CoreEvent| {});
+    let shared = Arc::new(Shared {
+        service: Arc::downgrade(&service),
+        states: Mutex::new(HashMap::new()),
+        global_sync_window: Mutex::new(crate::settings::SyncWindow::Days90),
+        events,
+    });
+    let token = WorkerToken {
+        account_id: account_id.clone(),
+        source: source.clone(),
+        is_ews: true,
+        revision: account_revision,
+        generation: 1,
+    };
+    shared.states.lock().unwrap().insert(
+        account_id.clone(),
+        AccountSyncState {
+            account_id: account_id.clone(),
+            mailbox_source_id: Some(source.clone()),
+            generation: 1,
+            sequence: 0,
+            folder_revision: 0,
+            folders: vec![FolderSyncState {
+                folder_id: folder_id.clone(),
+                phase: FolderSyncPhase::Idle,
+                last_synced_at: None,
+                failure: None,
+                failure_since: None,
+                data_revision: 0,
+            }],
+            phase: SyncPhase::Idle,
+            last_synced_at: None,
+            failure: None,
+            failure_since: None,
+        },
+    );
+    let job = service
+        .lock()
+        .unwrap()
+        .next_backfill_folder(&account_id, &source)
+        .unwrap()
+        .unwrap();
+
+    async fn read_http(stream: &mut DuplexStream) -> String {
+        use tokio::io::AsyncReadExt as _;
+        let mut bytes = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = stream.read(&mut buf).await.unwrap();
+            assert!(n > 0);
+            bytes.extend_from_slice(&buf[..n]);
+            if let Some(end) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&bytes[..end]);
+                let len = head
+                    .lines()
+                    .filter_map(|l| l.split_once(':'))
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                    .and_then(|(_, v)| v.trim().parse::<usize>().ok())
+                    .unwrap_or(0);
+                if bytes.len() >= end + 4 + len {
+                    return String::from_utf8(bytes[end + 4..end + 4 + len].to_vec()).unwrap();
+                }
+            }
+        }
+    }
+
+    async fn write_soap(stream: &mut DuplexStream, op: &str, body: &str) {
+        let envelope = format!(
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:m=\"http://schemas.microsoft.com/exchange/services/2006/messages\" xmlns:t=\"http://schemas.microsoft.com/exchange/services/2006/types\"><s:Body><m:{op}Response><m:ResponseMessages><m:{op}ResponseMessage ResponseClass=\"Success\"><m:ResponseCode>NoError</m:ResponseCode>{body}</m:{op}ResponseMessage></m:ResponseMessages></m:{op}Response></s:Body></s:Envelope>"
+        );
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/xml\r\n\r\n{envelope}",
+            envelope.len()
+        );
+        stream.write_all(reply.as_bytes()).await.unwrap();
+    }
+
+    let (client_stream, mut server_stream) = tokio::io::duplex(64 * 1024);
+    let server = tokio::spawn(async move {
+        // Page 1 FindItem
+        let req1 = read_http(&mut server_stream).await;
+        assert!(req1.contains("FindItem"));
+        write_soap(
+            &mut server_stream,
+            "FindItem",
+            "<m:RootFolder IncludesLastItemInRange=\"false\" IndexedPagingOffset=\"1\" TotalItemsInView=\"2\"><t:Items><t:Message><t:ItemId Id=\"old-2\" ChangeKey=\"k2\"/><t:Subject>Old Two</t:Subject><t:DateTimeReceived>2026-09-10T10:00:00Z</t:DateTimeReceived></t:Message></t:Items></m:RootFolder>",
+        )
+        .await;
+        // Page 1 GetItem recipients
+        let get1 = read_http(&mut server_stream).await;
+        assert!(get1.contains("GetItem"));
+        write_soap(
+            &mut server_stream,
+            "GetItem",
+            "<m:Items><t:Message><t:ItemId Id=\"old-2\" ChangeKey=\"k2\"/></t:Message></m:Items>",
+        )
+        .await;
+        // Page 2 FindItem
+        let req2 = read_http(&mut server_stream).await;
+        assert!(req2.contains("FindItem"));
+        write_soap(
+            &mut server_stream,
+            "FindItem",
+            "<m:RootFolder IncludesLastItemInRange=\"true\" TotalItemsInView=\"1\"><t:Items><t:Message><t:ItemId Id=\"old-1\" ChangeKey=\"k1\"/><t:Subject>Old One</t:Subject><t:DateTimeReceived>2026-08-25T10:00:00Z</t:DateTimeReceived></t:Message></t:Items></m:RootFolder>",
+        )
+        .await;
+        // Page 2 GetItem recipients
+        let get2 = read_http(&mut server_stream).await;
+        assert!(get2.contains("GetItem"));
+        write_soap(
+            &mut server_stream,
+            "GetItem",
+            "<m:Items><t:Message><t:ItemId Id=\"old-1\" ChangeKey=\"k1\"/></t:Message></m:Items>",
+        )
+        .await;
+    });
+
+    let mut client = crate::ews::EwsClient::test_stream(Box::new(client_stream)).await;
+    let wake = SyncWake::default();
+    let mut did_work = false;
+    let turn = super::super::backfill::backfill_ews_folder(
+        &shared,
+        &token,
+        &wake,
+        &mut client,
+        &job,
+        std::time::Instant::now(),
+        &mut did_work,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        turn,
+        super::super::backfill::FolderTurn::Completed
+    ));
+    server.await.unwrap();
+
+    let service = service.lock().unwrap();
+    assert!(service.backfill_tasks().unwrap().is_empty());
+    let page = service
+        .list_emails(&EmailListQuery {
+            folder_id: Some(folder_id),
+            ..EmailListQuery::default()
+        })
+        .unwrap();
+    assert_eq!(page.items.len(), 3);
+    assert!(!page.coverage.history_reached_end);
+    assert_eq!(
+        page.coverage.synced_after.as_deref(),
+        Some(target_date.as_str())
+    );
+    assert!(page.items.iter().any(|m| m.subject == "Old One"));
+    assert!(page.items.iter().any(|m| m.subject == "Old Two"));
+    let _ = prev_highest;
+}
+
+#[test]
+fn backfill_tasks_reports_known_total_while_other_folders_are_still_queued() {
+    let f = fixture();
+    let account_id = f.account_id.clone();
+    let source = f.source.clone();
+    let mut service = f.service.lock().unwrap();
+    service
+        .store_folders(
+            &account_id,
+            &source,
+            &[
+                FolderRecord {
+                    remote_name: "INBOX".into(),
+                    parent_remote_name: None,
+                    name: "INBOX".into(),
+                    delimiter: Some("/".into()),
+                    role: FolderRole::Inbox,
+                    selectable: true,
+                    attributes: vec![],
+                    status: None,
+                },
+                FolderRecord {
+                    remote_name: "Sent".into(),
+                    parent_remote_name: None,
+                    name: "Sent".into(),
+                    delimiter: Some("/".into()),
+                    role: FolderRole::Sent,
+                    selectable: true,
+                    attributes: vec!["\\Sent".into()],
+                    status: None,
+                },
+            ],
+        )
+        .unwrap();
+    let folders = service.sync_folders(&account_id, &source).unwrap();
+    let inbox_id = folders
+        .iter()
+        .find(|(_, remote)| remote == "INBOX")
+        .unwrap()
+        .0
+        .clone();
+    let sent_id = folders
+        .iter()
+        .find(|(_, remote)| remote == "Sent")
+        .unwrap()
+        .0
+        .clone();
+
+    for folder_id in [&inbox_id, &sent_id] {
+        let target = crate::storage::messages::SyncTarget {
+            account_id: account_id.clone(),
+            mailbox_source_id: source.clone(),
+            folder_id: folder_id.clone(),
+            uid_validity: 1,
+        };
+        service.ensure_generation(&target, "2026-10-01").unwrap();
+        service.finish_backfill(&target, false).unwrap();
+    }
+
+    service
+        .schedule_account_backfill(
+            &account_id,
+            crate::settings::SyncWindow::Days90,
+            chrono::NaiveDate::from_ymd_opt(2026, 10, 31).unwrap(),
+        )
+        .unwrap();
+    let tasks = service.backfill_tasks().unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].total, None);
+
+    let inbox_target = crate::storage::messages::SyncTarget {
+        account_id: account_id.clone(),
+        mailbox_source_id: source.clone(),
+        folder_id: inbox_id,
+        uid_validity: 1,
+    };
+    service
+        .update_backfill_progress(&inbox_target, 200, Some(585), None, None)
+        .unwrap();
+
+    // Even though Sent still has history_total = NULL, the account task reports
+    // the known progress from INBOX rather than staying indeterminate.
+    let tasks = service.backfill_tasks().unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].fetched, 200);
+    assert_eq!(tasks[0].total, Some(585));
 }

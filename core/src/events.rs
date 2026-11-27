@@ -14,6 +14,7 @@ use ts_rs::TS;
 use crate::mail::{MailAddress, PreviewState};
 use crate::send::types::{DraftChanged, OutboxChanged};
 use crate::settings::NotificationSettings;
+use crate::sync::backfill::AccountBackfillTask;
 use crate::sync::manager::{AccountSyncState, FlagWriteBack, MessagesDeleted};
 
 /// Maximum message details used in the ordinary notification summary.
@@ -26,6 +27,8 @@ pub enum CoreEvent {
     AccountRemoved(crate::accounts::types::AccountRemoval),
     /// An account's sync state changed; readers refetch on new revisions.
     Sync(AccountSyncState),
+    /// Historical backfill task list changed (started, progressed, paused, failed, or finished).
+    Backfill(Vec<AccountBackfillTask>),
     /// A read / starred write-back round finished.
     FlagWriteBack(FlagWriteBack),
     /// Local flags or archive state changed; all mailbox views refetch.

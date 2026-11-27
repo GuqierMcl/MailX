@@ -25,7 +25,7 @@ function email(id: string, overrides: Partial<EmailSummary> = {}): EmailSummary 
 }
 
 function page(items: EmailSummary[]): EmailPage {
-  return { items, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: false, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }
+  return { items, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: false, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false } }
 }
 
 function detail(summary: EmailSummary): EmailDetail {

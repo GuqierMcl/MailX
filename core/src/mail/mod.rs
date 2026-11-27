@@ -264,6 +264,8 @@ pub struct Coverage {
     /// At least one matching selectable folder exceeded the per-round UID limit.
     pub window_capped: bool,
     pub bodies_complete: bool,
+    /// True when every matching selectable folder has synced all available history.
+    pub history_reached_end: bool,
     /// Messages in scope whose body text is in the local search index.
     #[ts(type = "number")]
     pub indexed_bodies: u64,

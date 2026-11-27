@@ -505,5 +505,14 @@
   "nowReorderFinished": "已放下 {{module}}，位于第 {{position}} 项，共 {{count}} 项。",
   "nowReorderCanceled": "已取消调整 {{module}} 的顺序。",
   "nowReset": "恢复默认",
-  "nowResetLabel": "恢复默认（此刻）"
+  "nowResetLabel": "恢复默认（此刻）",
+  "syncHistory": "历史邮件",
+  "syncWindow": "默认同步范围",
+  "syncWindowDescription": "新邮件与星标邮件始终自动同步；调小范围时会保留本机已同步的旧邮件。",
+  "syncWindowOption": {
+    "days30": "最近 30 天",
+    "days90": "最近 90 天",
+    "year1": "最近 1 年",
+    "all": "全部邮件"
+  }
 }

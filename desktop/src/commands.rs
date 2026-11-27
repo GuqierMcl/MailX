@@ -1,8 +1,9 @@
 use mailx_core::{
-    Account, AccountConnectionVerification, AccountRemoval, AccountSyncState, ApiResult, AppError,
-    CancelConnectionVerification, CancelDraftVerification, ConversationPage, CreateAccountRequest,
-    DiscoverEwsSettings, DraftConnectionVerification, EmailDetail, EmailListQuery, EmailPage,
-    ErrorCode, EwsSettingsDiscovery, Folder, MailOverview, MailOverviewQuery, RemoveAccountRequest,
+    Account, AccountBackfillTask, AccountConnectionVerification, AccountRemoval, AccountSyncState,
+    ApiResult, AppError, BackfillControlAction, CancelConnectionVerification,
+    CancelDraftVerification, ConversationPage, CreateAccountRequest, DiscoverEwsSettings,
+    DraftConnectionVerification, EmailDetail, EmailListQuery, EmailPage, ErrorCode,
+    EwsSettingsDiscovery, Folder, MailOverview, MailOverviewQuery, RemoveAccountRequest,
     SettingsPatch, SettingsSnapshot, UpdateConnectionRequest, UpdateProfileRequest,
     VerifyAccountConnection, VerifyDraftConnection,
 };
@@ -1279,6 +1280,69 @@ pub(crate) async fn sync_states(
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FolderLoadOlderArgs {
+    folder_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BackfillControlArgs {
+    account_id: String,
+    action: BackfillControlAction,
+}
+
+#[tauri::command]
+pub(crate) async fn sync_backfill_tasks(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<AccountBackfillTask>>, ()> {
+    let args =
+        authorize(&window, "sync_backfill_tasks").and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(_) => state.run(|core| core.backfill_tasks()).await,
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn sync_load_older_folder(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<AccountBackfillTask>>, ()> {
+    let args = authorize(&window, "sync_load_older_folder")
+        .and_then(|_| parse::<FolderLoadOlderArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.load_older_folder(&args.folder_id))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+#[tauri::command]
+pub(crate) async fn sync_control_backfill(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<Vec<AccountBackfillTask>>, ()> {
+    let args = authorize(&window, "sync_control_backfill")
+        .and_then(|_| parse::<BackfillControlArgs>(request.body()));
+    Ok(respond(match args {
+        Ok(args) => {
+            state
+                .run(move |core| core.control_backfill(&args.account_id, args.action))
+                .await
+        }
+        Err(error) => Err(error),
+    }))
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WindowPerformArgs {
     action: WindowAction,
@@ -1316,6 +1380,7 @@ pub(crate) async fn settings_update(
     Ok(respond(match args {
         Ok(args) => {
             let changes_security = args.request.security.is_some();
+            let changes_mail = args.request.mail.is_some();
             let result = state.settings(move |store| store.patch(args.request)).await;
             if changes_security
                 && result.as_ref().is_ok_and(|s| {
@@ -1325,6 +1390,12 @@ pub(crate) async fn settings_update(
                 protocol.revoke_remote_images();
             }
             if let Ok(snapshot) = &result {
+                if changes_mail {
+                    let window = snapshot.settings.mail.sync_window;
+                    let _ = state
+                        .run(move |core| core.set_sync_window(window).map(|_| ()))
+                        .await;
+                }
                 emit_settings_changed(&app, snapshot);
                 crate::lifecycle::settings_changed(&app, snapshot);
                 crate::updater::settings_changed(&app, snapshot);

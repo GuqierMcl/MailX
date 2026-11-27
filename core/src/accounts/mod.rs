@@ -214,6 +214,7 @@ impl AccountService {
             color: old.account.color.clone(),
             sender_name: old.account.sender_name.clone(),
             use_provider_icon: old.account.use_provider_icon,
+            sync_window: old.account.sync_window,
         };
         let (snapshot, writes) = self.build(request.connection, profile, Some(&old))?;
         let current_refs = snapshot.refs();
@@ -421,6 +422,7 @@ impl AccountService {
             color: profile.color,
             sender_name: profile.sender_name,
             use_provider_icon: profile.use_provider_icon,
+            sync_window: profile.sync_window,
             email_address: config.email_address,
             provider_id: config.provider_id,
             mailbox_source_id: source,
@@ -746,6 +748,9 @@ fn validate_profile(profile: &mut AccountProfileInput) -> Result<(), AppError> {
             normalize_sender_name(&value).ok_or_else(|| AppError::validation("senderName"))?
         }
     };
+    if profile.sync_window == Some(crate::settings::SyncWindow::Invalid) {
+        return Err(AppError::validation("syncWindow"));
+    }
     Ok(())
 }
 /// Trimmed; an empty value clears the name. Control characters (CR and LF
@@ -994,6 +999,9 @@ fn canonical_config(
     // The default stays absent so requests recorded before this preference match.
     if !profile.use_provider_icon {
         canonical["useProviderIcon"] = serde_json::json!(false);
+    }
+    if let Some(sync_window) = profile.sync_window {
+        canonical["syncWindow"] = serde_json::json!(sync_window);
     }
     encode(&canonical)
 }

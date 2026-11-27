@@ -79,7 +79,11 @@ senderName: string | null,
 /**
  * Prefer known provider artwork when available; omitted defaults to true.
  */
-useProviderIcon: boolean, };
+useProviderIcon: boolean,
+/**
+ * Optional per-account override of the global history sync window.
+ */
+syncWindow: SyncWindow | null, };
 
 export type ConnectionInput = { emailAddress: string, providerId: string | null, authentication: AuthenticationInput, route: RouteInput, } & ({ backend: EwsBackend, ews: EwsConnectionConfig, } | { imap: ConnectionConfig, smtp: ConnectionConfig, });
 
@@ -95,7 +99,11 @@ senderName: string | null,
 /**
  * Prefer known provider artwork when available; omitted defaults to true.
  */
-useProviderIcon: boolean, emailAddress: string, providerId: string | null, authentication: AuthenticationInput, route: RouteInput, } & ({ backend: EwsBackend, ews: EwsConnectionConfig, } | { imap: ConnectionConfig, smtp: ConnectionConfig, });
+useProviderIcon: boolean,
+/**
+ * Optional per-account override of the global history sync window.
+ */
+syncWindow: SyncWindow | null, emailAddress: string, providerId: string | null, authentication: AuthenticationInput, route: RouteInput, } & ({ backend: EwsBackend, ews: EwsConnectionConfig, } | { imap: ConnectionConfig, smtp: ConnectionConfig, });
 
 export type CreateAccountRequest = { requestId: string, config: AccountConfigInput, };
 
@@ -158,7 +166,11 @@ senderName: string | null,
 /**
  * Appearance only. Defaults to true for credential journals from older builds.
  */
-useProviderIcon: boolean, emailAddress: string, providerId: string | null, mailboxSourceId: string, authentication: AccountAuthenticationSummary, route: RouteConfig, routeRevision: number,
+useProviderIcon: boolean,
+/**
+ * Optional per-account override of the global history sync window.
+ */
+syncWindow: SyncWindow | null, emailAddress: string, providerId: string | null, mailboxSourceId: string, authentication: AccountAuthenticationSummary, route: RouteConfig, routeRevision: number,
 /**
  * The initial application default is direct at revision 1.
  */
@@ -348,6 +360,10 @@ export type Coverage = { headersComplete: boolean,
  * At least one matching selectable folder exceeded the per-round UID limit.
  */
 windowCapped: boolean, bodiesComplete: boolean,
+/**
+ * True when every matching selectable folder has synced all available history.
+ */
+historyReachedEnd: boolean,
 /**
  * Messages in scope whose body text is in the local search index.
  */
@@ -613,6 +629,14 @@ lastSyncedAt: string | null, failure: SyncFailure | null,
  */
 failureSince: string | null, };
 
+export type BackfillPhase = "running" | "paused" | "failed";
+
+export type BackfillControlAction = "pause" | "resume" | "cancel";
+
+export type AccountBackfillTask = { accountId: string, phase: BackfillPhase, targetDate: string | null, coveredSince: string | null, fetched: number, total: number | null, activeFolderName: string | null, failure: SyncFailure | null, };
+
+export type SyncWindow = "days30" | "days90" | "year1" | "all";
+
 export type ThemeMode = "system" | "light" | "dark";
 
 export type FontSize = "small" | "default" | "large";
@@ -805,7 +829,11 @@ export type MailSettings = {
  * After a dedicated verification-code copy succeeds, move that email to
  * the account's Trash. Never authorizes a permanent deletion.
  */
-trashVerificationMailAfterCopy: boolean, };
+trashVerificationMailAfterCopy: boolean,
+/**
+ * Global default synchronization history depth; individual accounts may override.
+ */
+syncWindow: SyncWindow, };
 
 export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, badge: BadgeSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, assistant: AssistantSettings, now: NowSettings, };
 

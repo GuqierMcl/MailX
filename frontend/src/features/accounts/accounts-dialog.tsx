@@ -346,14 +346,16 @@ type SaveStatus = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved' }
  */
 function ProfileEditor({ client, account, onSaved, onPreview, removal }: ProfileEditorProps) {
   useTranslation()
+  const settings = useSettings(client)
   const [displayName, setDisplayName] = useState(account.displayName)
   const [color, setColor] = useState(account.color)
   const [senderName, setSenderName] = useState(account.senderName ?? '')
   const [useProviderIcon, setUseProviderIcon] = useState(account.useProviderIcon)
+  const [syncWindow, setSyncWindow] = useState(account.syncWindow)
   const [nameError, setNameError] = useState<ClientFailure | null>(null)
   const [senderNameError, setSenderNameError] = useState<ClientFailure | null>(null)
   const [status, setStatus] = useState<SaveStatus>({ kind: 'idle' })
-  const committed = useRef({ displayName: account.displayName, color: account.color, senderName: account.senderName, useProviderIcon: account.useProviderIcon })
+  const committed = useRef({ displayName: account.displayName, color: account.color, senderName: account.senderName, useProviderIcon: account.useProviderIcon, syncWindow: account.syncWindow })
   const queue = useRef<Promise<void>>(Promise.resolve())
   const typed = useRef(displayName)
   const alive = useRef(true)
@@ -362,7 +364,8 @@ function ProfileEditor({ client, account, onSaved, onPreview, removal }: Profile
     if (removal.current.removed) return
     const profile = { ...committed.current, ...patch }
     if (profile.displayName === committed.current.displayName && profile.color === committed.current.color &&
-      profile.senderName === committed.current.senderName && profile.useProviderIcon === committed.current.useProviderIcon) return
+      profile.senderName === committed.current.senderName && profile.useProviderIcon === committed.current.useProviderIcon &&
+      profile.syncWindow === committed.current.syncWindow) return
     committed.current = profile
     if (alive.current) setStatus({ kind: 'saving' })
     queue.current = queue.current.then(async () => {
@@ -469,6 +472,12 @@ function ProfileEditor({ client, account, onSaved, onPreview, removal }: Profile
           setColor(next)
           onPreview({ color: next })
           save({ color: next })
+        }}
+        syncWindow={syncWindow}
+        globalSyncWindow={settings.data?.settings.mail.syncWindow}
+        onSyncWindowChange={(next) => {
+          setSyncWindow(next)
+          save({ syncWindow: next })
         }}
       />
     </SettingsGroup>

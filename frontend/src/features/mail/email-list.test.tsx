@@ -364,3 +364,70 @@ describe('rows in a sent view', () => {
     expect(await screen.findByText('仅在本机，服务器上暂未找到副本', { selector: '[data-slot="tooltip-content"]' })).toBeInTheDocument()
   })
 })
+
+describe('history sync range footer', () => {
+  it('shows synced date with load-older and adjust buttons in a single-account folder view', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const onLoadOlder = vi.fn()
+    const onAdjustSyncRange = vi.fn()
+    render(
+      <EmailList
+        title="收件箱" emails={[email('one')]} accounts={null} loading={false}
+        syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+        hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+        filter="all" search="" selectedId={null} previewLines="one"
+        onFilterChange={vi.fn()} onSelect={vi.fn()} onLoadMore={vi.fn()}
+        historyCoverage={{
+          syncedAfter: '2026-10-01',
+          historyReachedEnd: false,
+          canLoadOlder: true,
+          onLoadOlder,
+          onAdjustSyncRange,
+        }}
+      />,
+    )
+    expect(screen.getByText('仅同步了 2026-10-01 之后的邮件')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '加载更早' }))
+    expect(onLoadOlder).toHaveBeenCalledOnce()
+    await userEvent.click(screen.getByRole('button', { name: '调整同步范围' }))
+    expect(onAdjustSyncRange).toHaveBeenCalledOnce()
+  })
+
+  it('omits load-older in multi-account views and hides footer once history reaches the end', () => {
+    const { rerender } = render(
+      <EmailList
+        title="全部收件箱" emails={[email('one')]} accounts={null} loading={false}
+        syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+        hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+        filter="all" search="" selectedId={null} previewLines="one"
+        onFilterChange={vi.fn()} onSelect={vi.fn()} onLoadMore={vi.fn()}
+        historyCoverage={{
+          syncedAfter: '2026-10-01',
+          historyReachedEnd: false,
+          canLoadOlder: false,
+          onAdjustSyncRange: vi.fn(),
+        }}
+      />,
+    )
+    expect(screen.getByText('仅同步了 2026-10-01 之后的邮件')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '加载更早' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '调整同步范围' })).toBeInTheDocument()
+
+    rerender(
+      <EmailList
+        title="全部收件箱" emails={[email('one')]} accounts={null} loading={false}
+        syncStatus={{ phase: 'idle', failure: null, windowCapped: false }}
+        hasMore={false} loadingMore={false} refreshing={false} stale={false} loadMoreError={null} error={null}
+        filter="all" search="" selectedId={null} previewLines="one"
+        onFilterChange={vi.fn()} onSelect={vi.fn()} onLoadMore={vi.fn()}
+        historyCoverage={{
+          syncedAfter: null,
+          historyReachedEnd: true,
+          canLoadOlder: false,
+          onAdjustSyncRange: vi.fn(),
+        }}
+      />,
+    )
+    expect(screen.queryByText(/仅同步了/)).not.toBeInTheDocument()
+  })
+})

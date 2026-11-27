@@ -1,5 +1,6 @@
 //! Public wire contract. Input secrets cannot be serialized back to clients.
 use crate::secrets::SecretValue;
+use crate::settings::SyncWindow;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -203,6 +204,9 @@ pub struct AccountProfileInput {
     /// Prefer known provider artwork when available; omitted defaults to true.
     #[serde(default = "default_use_provider_icon")]
     pub use_provider_icon: bool,
+    /// Optional per-account override of the global history sync window.
+    #[serde(default)]
+    pub sync_window: Option<SyncWindow>,
 }
 
 fn default_use_provider_icon() -> bool {
@@ -239,6 +243,9 @@ pub struct AccountConfigInput {
     /// Prefer known provider artwork when available; omitted defaults to true.
     #[serde(default = "default_use_provider_icon")]
     pub use_provider_icon: bool,
+    /// Optional per-account override of the global history sync window.
+    #[serde(default)]
+    pub sync_window: Option<SyncWindow>,
     pub email_address: String,
     pub provider_id: Option<String>,
     #[serde(flatten)]
@@ -255,6 +262,7 @@ impl AccountConfigInput {
                 color: self.color,
                 sender_name: self.sender_name,
                 use_provider_icon: self.use_provider_icon,
+                sync_window: self.sync_window,
             },
             ConnectionInput {
                 email_address: self.email_address,
@@ -502,6 +510,9 @@ pub struct Account {
     /// Appearance only. Defaults to true for credential journals from older builds.
     #[serde(default = "default_use_provider_icon")]
     pub use_provider_icon: bool,
+    /// Optional per-account override of the global history sync window.
+    #[serde(default)]
+    pub sync_window: Option<SyncWindow>,
     pub email_address: String,
     pub provider_id: Option<String>,
     pub mailbox_source_id: String,

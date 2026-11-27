@@ -119,9 +119,17 @@ impl Storage {
     }
 
     pub fn load(&self, id: &str) -> Result<Snapshot, AppError> {
-        let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at,color,sender_name,use_provider_icon,mail_backend FROM accounts WHERE id=?1", [id], |r| {
-            Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,r.get::<_, Option<String>>(7)?,r.get::<_, Option<String>>(8)?,r.get::<_, bool>(9)?,r.get::<_, String>(10)?))
+        let basic = self.db.query_row("SELECT revision,display_name,email_address,provider_id,mailbox_source_id,created_at,updated_at,color,sender_name,use_provider_icon,mail_backend,sync_window FROM accounts WHERE id=?1", [id], |r| {
+            Ok((r.get::<_, u32>(0)?,r.get::<_, String>(1)?,r.get::<_, String>(2)?,r.get::<_, Option<String>>(3)?,r.get::<_, String>(4)?,r.get::<_, String>(5)?,r.get::<_, String>(6)?,r.get::<_, Option<String>>(7)?,r.get::<_, Option<String>>(8)?,r.get::<_, bool>(9)?,r.get::<_, String>(10)?,r.get::<_, Option<String>>(11)?))
         }).optional()?.ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        let sync_window = basic
+            .11
+            .as_deref()
+            .map(|value| {
+                crate::settings::SyncWindow::from_db_str(value)
+                    .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))
+            })
+            .transpose()?;
         let mut profile_statement = self.db.prepare("SELECT id,generation,secret_ref,trusted_endpoints_json,oauth_binding_json FROM auth_profiles WHERE account_id=?1")?;
         let records = profile_statement
             .query_map([id], |r| {
@@ -222,6 +230,7 @@ impl Storage {
                 color: basic.7,
                 sender_name: basic.8,
                 use_provider_icon: basic.9,
+                sync_window,
                 email_address: basic.2,
                 provider_id: basic.3,
                 mailbox_source_id: basic.4,
@@ -344,15 +353,19 @@ impl Storage {
         profile: &AccountProfileInput,
         updated_at: &str,
     ) -> Result<(), AppError> {
+        let sync_window = profile
+            .sync_window
+            .map(crate::settings::SyncWindow::as_db_str);
         let changed = self.db.execute(
-            "UPDATE accounts SET display_name=?2,color=?3,sender_name=?5,use_provider_icon=?6,updated_at=?4 WHERE id=?1",
+            "UPDATE accounts SET display_name=?2,color=?3,sender_name=?5,use_provider_icon=?6,sync_window=?7,updated_at=?4 WHERE id=?1",
             params![
                 id,
                 profile.display_name,
                 profile.color,
                 updated_at,
                 profile.sender_name,
-                profile.use_provider_icon
+                profile.use_provider_icon,
+                sync_window
             ],
         )?;
         if changed == 0 {
@@ -376,7 +389,10 @@ impl Storage {
             return Err(AppError::new(ErrorCode::Conflict));
         }
         if current.is_none() {
-            tx.execute("INSERT INTO accounts(id,revision,display_name,color,sender_name,use_provider_icon,email_address,provider_id,mailbox_source_id,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![account.id,account.revision,account.display_name,account.color,account.sender_name,account.use_provider_icon,account.email_address,account.provider_id,account.mailbox_source_id,account.created_at,account.updated_at])?;
+            let sync_window = account
+                .sync_window
+                .map(crate::settings::SyncWindow::as_db_str);
+            tx.execute("INSERT INTO accounts(id,revision,display_name,color,sender_name,use_provider_icon,sync_window,email_address,provider_id,mailbox_source_id,created_at,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![account.id,account.revision,account.display_name,account.color,account.sender_name,account.use_provider_icon,sync_window,account.email_address,account.provider_id,account.mailbox_source_id,account.created_at,account.updated_at])?;
         } else {
             // A connection commit never writes the profile; those fields
             // have their own update and must not be reverted by a replayed journal.

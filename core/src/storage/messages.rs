@@ -16,9 +16,11 @@ use crate::{
     sync::headers::MessageRecord,
 };
 
+mod backfill;
 mod overview;
 mod sent_copies;
 
+pub(crate) use backfill::BackfillFolderJob;
 pub(crate) use overview::{CodeSource, NewMailRows, SenderCount, SentRecipient, TopSender};
 
 /// Identity captured before network I/O; every write checks it again in its transaction.
@@ -41,6 +43,13 @@ pub(crate) struct FolderSyncCursor {
     /// Set when this call started a new generation (first sync or UIDVALIDITY
     /// change), which hides previously visible messages. Not stored.
     pub created: bool,
+    pub history_target_date: Option<String>,
+    pub history_covered_since: Option<String>,
+    pub history_cursor_before: Option<String>,
+    pub history_fetched: u32,
+    pub history_total: Option<u32>,
+    pub history_state: String,
+    pub history_failure_code: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -103,14 +112,31 @@ fn current_target(db: &Connection, target: &SyncTarget) -> Result<bool, AppError
 
 fn read_cursor(db: &Connection, folder_id: &str) -> Result<Option<FolderSyncCursor>, AppError> {
     Ok(db.query_row(
-        "SELECT uid_validity, window_start, window_capped, backfill_done, highest_uid, updated_at
+        "SELECT uid_validity, window_start, window_capped, backfill_done, highest_uid, updated_at,
+                history_target_date, history_covered_since, history_cursor_before,
+                history_fetched, history_total, history_state, history_failure_code
          FROM folder_sync_cursors WHERE folder_id = ?1",
         [folder_id],
-        |row| Ok(FolderSyncCursor {
-            uid_validity: row.get(0)?, window_start: row.get(1)?, window_capped: row.get(2)?,
-            backfill_done: row.get(3)?, highest_uid: row.get(4)?, updated_at: row.get(5)?,
-            created: false,
-        }),
+        |row| {
+            let fetched: i64 = row.get(9)?;
+            let total: Option<i64> = row.get(10)?;
+            Ok(FolderSyncCursor {
+                uid_validity: row.get(0)?,
+                window_start: row.get(1)?,
+                window_capped: row.get(2)?,
+                backfill_done: row.get(3)?,
+                highest_uid: row.get(4)?,
+                updated_at: row.get(5)?,
+                created: false,
+                history_target_date: row.get(6)?,
+                history_covered_since: row.get(7)?,
+                history_cursor_before: row.get(8)?,
+                history_fetched: u32::try_from(fetched).unwrap_or(u32::MAX),
+                history_total: total.and_then(|value| u32::try_from(value).ok()),
+                history_state: row.get(11)?,
+                history_failure_code: row.get(12)?,
+            })
+        },
     ).optional()?)
 }
 
@@ -196,7 +222,9 @@ impl Storage {
              VALUES (?1, ?2, ?3, 0, 0, 0, 0, ?4)
              ON CONFLICT (folder_id) DO UPDATE SET uid_validity = excluded.uid_validity,
              window_start = excluded.window_start, window_capped = 0, backfill_done = 0, history_complete = 0,
-             highest_uid = 0, updated_at = excluded.updated_at",
+             highest_uid = 0, history_target_date = NULL, history_covered_since = NULL,
+             history_cursor_before = NULL, history_fetched = 0, history_total = NULL,
+             history_state = 'idle', history_failure_code = NULL, updated_at = excluded.updated_at",
             params![target.folder_id, target.uid_validity, window_start, timestamp],
         )?;
         let cursor = read_cursor(&tx, &target.folder_id)?.map(|cursor| FolderSyncCursor {
@@ -602,14 +630,31 @@ impl Storage {
     fn email_coverage(&self, query: &EmailListQuery) -> Result<Coverage, AppError> {
         let filter = ScopeFilter::new(query)?;
         let sql = format!(
-            "SELECT COUNT(*), COALESCE(SUM(CASE WHEN c.backfill_done = 1 AND c.window_capped = 0 THEN 1 ELSE 0 END), 0), MAX(c.window_start), COALESCE(MAX(c.window_capped), 0)
+            "SELECT COUNT(*),
+                    COALESCE(SUM(CASE WHEN c.backfill_done = 1 AND c.window_capped = 0 THEN 1 ELSE 0 END), 0),
+                    MAX(CASE WHEN c.history_covered_since = 'all' THEN NULL ELSE COALESCE(c.history_covered_since, c.window_start) END),
+                    COALESCE(MAX(c.window_capped), 0),
+                    COALESCE(SUM(CASE WHEN c.history_covered_since = 'all' THEN 1 ELSE 0 END), 0)
              FROM folders f JOIN accounts a ON a.id = f.account_id AND a.mailbox_source_id = f.mailbox_source_id
              LEFT JOIN folder_sync_cursors c ON c.folder_id = f.id WHERE {}", filter.sql());
-        let (total, complete, synced_after, window_capped): (i64, i64, Option<String>, bool) = self
+        let (total, complete, synced_after, window_capped, reached_end_count): (
+            i64,
+            i64,
+            Option<String>,
+            bool,
+            i64,
+        ) = self
             .db
             .query_row(&sql, params_from_iter(filter.values), |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })?;
+        let history_reached_end = total > 0 && total == reached_end_count;
         let indexed_filter = ScopeFilter::new(query)?;
         let indexed_bodies: i64 = self.db.query_row(
             &format!(
@@ -624,8 +669,13 @@ impl Storage {
             headers_complete: total > 0 && total == complete,
             window_capped,
             bodies_complete: false,
+            history_reached_end,
             indexed_bodies: u64::try_from(indexed_bodies).unwrap_or(0),
-            synced_after,
+            synced_after: if history_reached_end {
+                None
+            } else {
+                synced_after
+            },
             synced_before: None,
         })
     }

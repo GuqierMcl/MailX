@@ -510,5 +510,14 @@
   "nowReorderFinished": "Dropped {{module}}, position {{position}} of {{count}}.",
   "nowReorderCanceled": "Reordering {{module}} canceled.",
   "nowReset": "Restore defaults",
-  "nowResetLabel": "Restore defaults (Now)"
+  "nowResetLabel": "Restore defaults (Now)",
+  "syncHistory": "History sync",
+  "syncWindow": "Default sync range",
+  "syncWindowDescription": "Recent and starred messages always stay in sync. Narrowing the range keeps already-synced older messages on this device.",
+  "syncWindowOption": {
+    "days30": "Last 30 days",
+    "days90": "Last 90 days",
+    "year1": "Last 1 year",
+    "all": "All mail"
+  }
 }

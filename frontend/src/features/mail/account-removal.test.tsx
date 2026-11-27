@@ -28,7 +28,7 @@ function email(accountId: string): EmailSummary {
   }
 }
 function page(items: EmailSummary[]): EmailPage {
-  return { items, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }
+  return { items, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false } }
 }
 function detail(accountId: string): EmailDetail {
   return { summary: email(accountId), to: [], cc: [], replyTo: [], attachments: [], bodyFailure: null,

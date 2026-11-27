@@ -337,5 +337,9 @@
   "ewsDiscoveryStatusunsupported": "This server does not offer supported Exchange authentication.",
   "ewsDiscoveryStatusprotocol": "The server returned an unsupported settings response.",
   "ewsVerifyConnection": "Verify connection",
-  "ewsVerifyingConnection": "Verifying connection…"
+  "ewsVerifyingConnection": "Verifying connection…",
+  "syncWindow": "Sync range",
+  "syncWindowHint": "Recent and starred messages always stay in sync. Narrowing the range keeps already-synced older messages on this device.",
+  "syncWindowFollow": "Follow global default",
+  "syncWindowFollowGlobal": "Follow global default ({{value}})"
 }

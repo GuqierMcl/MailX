@@ -33,7 +33,7 @@ const detail = (summary: EmailSummary): EmailDetail => ({
 
 const page = (items: EmailSummary[]): EmailPage => ({
   items, nextCursor: null,
-  coverage: { headersComplete: true, bodiesComplete: false, indexedBodies: 0, syncedAfter: '2026-09-18', syncedBefore: null, windowCapped: false },
+  coverage: { headersComplete: true, bodiesComplete: false, indexedBodies: 0, syncedAfter: '2026-09-18', syncedBefore: null, windowCapped: false, historyReachedEnd: false },
 })
 
 function setup(thread: EmailSummary[], listed: EmailSummary, options: { possiblyIncomplete?: boolean } = {}) {

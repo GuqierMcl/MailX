@@ -50,6 +50,7 @@ impl mailx_core::EventSink for DesktopEvents {
 
 /// Pushed to the main window whenever an account's sync state changes.
 const SYNC_STATE_EVENT: &str = "mailx://sync-state";
+const BACKFILL_EVENT: &str = "mailx://backfill";
 /// Pushed after a read / starred write-back round, for refreshing markers and
 /// telling the user a star stayed on this device.
 const FLAG_EVENT: &str = "mailx://flags";
@@ -260,6 +261,13 @@ fn main() {
                             changed,
                         );
                     }
+                    mailx_core::CoreEvent::Backfill(tasks) => {
+                        let _ = handle.emit_to(
+                            EventTarget::webview_window(window_chrome::MAIN_WINDOW),
+                            BACKFILL_EVENT,
+                            tasks,
+                        );
+                    }
                 });
             let events: mailx_core::Events = if let Ok(path) = &data_dir {
                 let diagnostics = diagnostics::Diagnostics::start(path);
@@ -355,6 +363,9 @@ fn main() {
             commands::links_open,
             commands::sync_states,
             commands::sync_refresh,
+            commands::sync_backfill_tasks,
+            commands::sync_load_older_folder,
+            commands::sync_control_backfill,
             commands::emails_set_flag,
             commands::emails_delete,
             commands::emails_undo_delete,

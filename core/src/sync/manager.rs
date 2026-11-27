@@ -19,13 +19,17 @@ use ts_rs::TS;
 use super::cadence::{Activity, Cadence, FRONT_WAKE_MIN_GAP};
 use super::diagnostics::RoundDiagnostics;
 use super::idle::{self, IdleControl, IdleHealth};
-use super::{folders, messages, writeback};
+use super::{
+    backfill::{self, BackfillTurn},
+    folders, messages, writeback,
+};
 use crate::accounts::AccountService;
 use crate::accounts::sync_plan::PlanError;
 use crate::error::{AppError, ErrorCode};
 use crate::events::{CoreEvent, Events, NewMail, NewMailMessage};
 use crate::imap::{self, ImapError, Session};
 use crate::net::NetError;
+use crate::settings::SyncWindow;
 
 const FOLDER_REFRESH_INTERVAL: Duration = Duration::from_secs(10 * 60);
 /// Retry delay after consecutive transient failures: exponential from 1s,
@@ -170,10 +174,41 @@ pub(super) struct WorkerToken {
 pub(super) struct Shared {
     service: Weak<Mutex<AccountService>>,
     states: Mutex<HashMap<String, AccountSyncState>>,
+    global_sync_window: Mutex<SyncWindow>,
     pub(super) events: Events,
 }
 
 impl Shared {
+    pub(super) fn global_sync_window(&self) -> SyncWindow {
+        self.global_sync_window
+            .lock()
+            .map_or(SyncWindow::Days30, |guard| *guard)
+    }
+
+    pub(super) fn set_global_sync_window(&self, window: SyncWindow) {
+        if let Ok(mut guard) = self.global_sync_window.lock() {
+            *guard = window;
+        }
+    }
+
+    pub(super) fn bump_folder_revision(&self, token: &WorkerToken, folder_id: &str) {
+        self.folder_update(token, folder_id, |folder| {
+            folder.data_revision = folder.data_revision.saturating_add(1);
+        });
+    }
+
+    pub(super) fn emit_backfill_tasks(&self) {
+        let Some(service) = self.service.upgrade() else {
+            return;
+        };
+        let tasks = service
+            .lock()
+            .ok()
+            .and_then(|service| service.backfill_tasks().ok())
+            .unwrap_or_default();
+        self.events.emit(&CoreEvent::Backfill(tasks));
+    }
+
     fn active(state: &AccountSyncState, token: &WorkerToken) -> bool {
         state.generation == token.generation
             && state.mailbox_source_id.as_deref() == Some(token.source.as_str())
@@ -353,21 +388,33 @@ pub(super) struct SyncWake {
     notify: tokio::sync::Notify,
     reconcile_all: AtomicBool,
     reconcile_inbox: AtomicBool,
+    pending_hot_wake: AtomicBool,
 }
 
 impl SyncWake {
     pub(super) fn notify(&self) {
+        self.pending_hot_wake.store(true, Ordering::Release);
         self.notify.notify_one();
     }
 
     pub(super) fn notify_reconcile_all(&self) {
         self.reconcile_all.store(true, Ordering::Release);
+        self.pending_hot_wake.store(true, Ordering::Release);
         self.notify.notify_one();
     }
 
     pub(super) fn notify_reconcile_inbox(&self) {
         self.reconcile_inbox.store(true, Ordering::Release);
+        self.pending_hot_wake.store(true, Ordering::Release);
         self.notify.notify_one();
+    }
+
+    pub(super) fn notify_backfill(&self) {
+        self.notify.notify_one();
+    }
+
+    pub(super) fn has_pending_hot_wake(&self) -> bool {
+        self.pending_hot_wake.load(Ordering::Acquire)
     }
 
     pub(super) fn notified(&self) -> tokio::sync::futures::Notified<'_> {
@@ -375,6 +422,7 @@ impl SyncWake {
     }
 
     pub(super) fn take_reconcile(&self) -> Reconcile {
+        self.pending_hot_wake.store(false, Ordering::Release);
         Reconcile {
             all: self.reconcile_all.swap(false, Ordering::AcqRel),
             inbox: self.reconcile_inbox.swap(false, Ordering::AcqRel),
@@ -454,6 +502,7 @@ impl SyncManager {
             shared: Arc::new(Shared {
                 service: Arc::downgrade(&service),
                 states: Mutex::new(HashMap::new()),
+                global_sync_window: Mutex::new(SyncWindow::Days30),
                 events,
             }),
             runtime,
@@ -690,6 +739,29 @@ impl SyncManager {
         {
             wake.notify();
         }
+    }
+
+    pub(crate) fn set_global_sync_window(&self, window: SyncWindow) {
+        self.shared.set_global_sync_window(window);
+    }
+
+    pub(crate) fn global_sync_window(&self) -> SyncWindow {
+        self.shared.global_sync_window()
+    }
+
+    pub(crate) fn wake_backfill(&self, account_id: &str) {
+        if let Some(wake) = self
+            .wakers
+            .lock()
+            .ok()
+            .and_then(|wakers| wakers.get(account_id).cloned())
+        {
+            wake.notify_backfill();
+        }
+    }
+
+    pub(crate) fn emit_backfill_tasks(&self) {
+        self.shared.emit_backfill_tasks();
     }
 
     /// Starts, or restarts with fresh settings, the worker for an account.
@@ -1064,6 +1136,22 @@ async fn run(
                 return;
             }
         };
+        if matches!(pause, Pause::Cadence) && !wake.has_pending_hot_wake() {
+            match backfill::run_budgeted(&shared, &token, &wake).await {
+                BackfillTurn::Done => {}
+                BackfillTurn::Interrupted => {
+                    cadence.reset();
+                    continue;
+                }
+                BackfillTurn::ContinueSoon => {
+                    tokio::select! {
+                        () = tokio::time::sleep(Duration::from_millis(200)) => {}
+                        () = wake.notified() => {}
+                    }
+                    continue;
+                }
+            }
+        }
         if !wait_for_next_round(&pause, &mut cadence, &wake, &mut activity, &mut idle_health).await
         {
             return;
@@ -1491,7 +1579,7 @@ pub(super) fn classify(error: ImapError) -> Outcome {
     }
 }
 
-pub(super) fn failure(
+pub(crate) fn failure(
     code: SyncFailureCode,
     detail: Option<String>,
     will_retry: bool,

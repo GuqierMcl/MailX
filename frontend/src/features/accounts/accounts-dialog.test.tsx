@@ -57,7 +57,7 @@ describe('accounts dialog', () => {
     fireEvent.change(name, { target: { value: '  新名称 ' } })
     fireEvent.blur(name)
     await waitFor(() => expect(onAccountsChanged).toHaveBeenCalledOnce())
-    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '新名称', color: null, senderName: null, useProviderIcon: true } })
+    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '新名称', color: null, senderName: null, useProviderIcon: true, syncWindow: null } })
     expect(client.updateConnection).not.toHaveBeenCalled()
     expect(await within(dialog).findByText('已保存')).toBeInTheDocument()
   })
@@ -66,7 +66,7 @@ describe('accounts dialog', () => {
     const { client, dialog } = renderDialog()
     await within(dialog).findByLabelText('账号名称')
     await userEvent.click(within(dialog).getByRole('radio', { name: '紫' }))
-    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#7c3aed', senderName: null, useProviderIcon: true } }))
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#7c3aed', senderName: null, useProviderIcon: true, syncWindow: null } }))
     expect(within(dialog).getByRole('radio', { name: '紫' })).toHaveAttribute('aria-checked', 'true')
   })
 
@@ -79,7 +79,7 @@ describe('accounts dialog', () => {
     await userEvent.click(preference)
     await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({
       accountId: first.id,
-      profile: { displayName: first.displayName, color: first.color, senderName: first.senderName, useProviderIcon: false },
+      profile: { displayName: first.displayName, color: first.color, senderName: first.senderName, useProviderIcon: false, syncWindow: null },
     }))
     await userEvent.click(within(dialog).getByRole('button', { name: new RegExp('^' + other.displayName) }))
     const otherPreference = await within(dialog).findByRole('switch', { name: '使用服务商图标' })
@@ -87,7 +87,7 @@ describe('accounts dialog', () => {
     await userEvent.click(otherPreference)
     await waitFor(() => expect(client.updateProfile).toHaveBeenLastCalledWith({
       accountId: other.id,
-      profile: { displayName: other.displayName, color: other.color, senderName: other.senderName, useProviderIcon: true },
+      profile: { displayName: other.displayName, color: other.color, senderName: other.senderName, useProviderIcon: true, syncWindow: null },
     }))
     expect(client.updateConnection).not.toHaveBeenCalled()
   })
@@ -106,14 +106,14 @@ describe('accounts dialog', () => {
     fireEvent.change(field, { target: { value: '  Lin Wei ' } })
     fireEvent.blur(field)
     await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({
-      accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: null, senderName: 'Lin Wei', useProviderIcon: true },
+      accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: null, senderName: 'Lin Wei', useProviderIcon: true, syncWindow: null },
     }))
     expect(field).toHaveValue('Lin Wei')
 
     fireEvent.change(field, { target: { value: ' ' } })
     fireEvent.keyDown(field, { key: 'Enter' })
     await waitFor(() => expect(client.updateProfile).toHaveBeenLastCalledWith({
-      accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: null, senderName: null, useProviderIcon: true },
+      accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: null, senderName: null, useProviderIcon: true, syncWindow: null },
     }))
   })
 
@@ -152,7 +152,7 @@ describe('accounts dialog', () => {
     const { client, dialog } = renderDialog([exampleAccount(), second])
     fireEvent.change(await within(dialog).findByLabelText('账号名称'), { target: { value: '没按回车' } })
     await userEvent.click(within(dialog).getByRole('button', { name: /^个人邮箱/ }))
-    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '没按回车', color: null, senderName: null, useProviderIcon: true } }))
+    await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '没按回车', color: null, senderName: null, useProviderIcon: true, syncWindow: null } }))
     await waitFor(() => expect(client.getAccount).toHaveBeenCalledWith(second.id))
   })
 
@@ -334,7 +334,7 @@ describe('accounts dialog', () => {
     expect(client.updateProfile).not.toHaveBeenCalled()
     fireEvent.change(picker)
     await waitFor(() => expect(client.updateProfile).toHaveBeenCalledOnce())
-    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#fde68a', senderName: null, useProviderIcon: true } })
+    expect(client.updateProfile).toHaveBeenCalledWith({ accountId: exampleAccount().id, profile: { displayName: '工作邮箱', color: '#fde68a', senderName: null, useProviderIcon: true, syncWindow: null } })
     // A preset still works and takes the selection from the custom color.
     await userEvent.click(within(dialog).getByRole('radio', { name: '紫' }))
     expect(within(dialog).getByRole('radio', { name: '紫' })).toHaveAttribute('aria-checked', 'true')
@@ -593,4 +593,17 @@ it('verifies a saved Exchange account and shows the HTTPS endpoint without IMAP/
   await userEvent.click(within(dialog).getByRole('button', { name: '连接详情' }))
   expect(within(dialog).getByText('https://mail.example.com/EWS/Exchange.asmx · EXAMPLE\\alice')).toBeInTheDocument()
   expect(within(dialog).queryByText(/IMAP ·|SMTP ·/)).not.toBeInTheDocument()
+})
+
+it('saves a per-account sync window override without touching the connection', async () => {
+  const { client, dialog } = renderDialog()
+  const select = await within(dialog).findByRole('combobox', { name: '同步范围' })
+  expect(select).toHaveTextContent(/跟随全局默认/)
+  await userEvent.click(select)
+  await userEvent.click(await screen.findByRole('option', { name: '最近 1 年' }))
+  await waitFor(() => expect(client.updateProfile).toHaveBeenCalledWith({
+    accountId: exampleAccount().id,
+    profile: { displayName: '工作邮箱', color: null, senderName: null, useProviderIcon: true, syncWindow: 'year1' },
+  }))
+  expect(client.updateConnection).not.toHaveBeenCalled()
 })

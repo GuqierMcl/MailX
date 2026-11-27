@@ -24,7 +24,7 @@ const bob = { name: 'Bob', address: 'bob@example.com' }
 const items = [email('a1', alice), email('b1', bob), email('a2', { name: 'Alice', address: 'Alice@Example.com' }), email('b2', bob)]
 
 function page(rows: EmailSummary[]): EmailPage {
-  return { items: rows, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: false, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }
+  return { items: rows, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: false, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false } }
 }
 
 async function setup() {

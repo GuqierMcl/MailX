@@ -13,7 +13,7 @@ export function exampleAccount(overrides: Partial<Account>): Account & { imap: i
 export function exampleAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision: 3,
-    displayName: '工作邮箱', color: null, senderName: null, useProviderIcon: true, emailAddress: 'work@example.com', providerId: null,
+    displayName: '工作邮箱', color: null, senderName: null, useProviderIcon: true, syncWindow: null, emailAddress: 'work@example.com', providerId: null,
     mailboxSourceId: 'source-a', imap: { host: 'imap.example.com', port: 993, tls: 'implicit', username: 'receive@example.com' },
     smtp: { host: 'smtp.example.com', port: 465, tls: 'implicit', username: 'send@example.com' },
     authentication: { kind: 'password', mode: 'shared', imap: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' }, smtp: { id: 'auth-a', generation: 1, passwordConfigured: true, trust: 'trusted' } },
@@ -34,7 +34,7 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false } }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }
+  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false, syncWindow: 'days30' }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false } }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }
   let settingsRevision = 0
   let autostart = { enabled: false, available: true }
   const settingsSnapshot = () => ({ settings: preferences, effectiveLocale: preferences.general.language === 'en' ? 'en' as const : 'zh-CN' as const, revision: settingsRevision, stored: true, recovered: false })
@@ -48,16 +48,16 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     listAccounts: vi.fn<MailxClient['listAccounts']>().mockResolvedValue(rows),
     discoverEwsSettings: vi.fn<MailxClient['discoverEwsSettings']>().mockResolvedValue({ status: 'notFound', endpoint: null, source: null, targetGrant: null }),
     getAccount: vi.fn<MailxClient['getAccount']>().mockImplementation(async (id) => rows.find((row) => row.id === id) ?? exampleAccount()),
-    createAccount: vi.fn<MailxClient['createAccount']>().mockImplementation(async ({ config }) => exampleAccount({ useProviderIcon: config.useProviderIcon ?? true })),
+    createAccount: vi.fn<MailxClient['createAccount']>().mockImplementation(async ({ config }) => exampleAccount({ useProviderIcon: config.useProviderIcon ?? true, syncWindow: config.syncWindow ?? null })),
     beginOAuthAccount: vi.fn<MailxClient['beginOAuthAccount']>().mockResolvedValue({ sessionId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }),
     finishOAuthAccount: vi.fn<MailxClient['finishOAuthAccount']>().mockResolvedValue({ kind: 'verified', emailAddress: 'lin@outlook.com' }),
     confirmOAuthMailbox: vi.fn<MailxClient['confirmOAuthMailbox']>().mockImplementation(async ({ emailAddress }) => ({ kind: 'verified', emailAddress })),
-    createOAuthAccount: vi.fn<MailxClient['createOAuthAccount']>().mockImplementation(async ({ profile }) => exampleAccount({ useProviderIcon: profile.useProviderIcon })),
+    createOAuthAccount: vi.fn<MailxClient['createOAuthAccount']>().mockImplementation(async ({ profile }) => exampleAccount({ useProviderIcon: profile.useProviderIcon, syncWindow: profile.syncWindow ?? null })),
     finishOAuthReauthorization: vi.fn<MailxClient['finishOAuthReauthorization']>().mockImplementation(async () => exampleAccount()),
     cancelOAuthAccount: vi.fn<MailxClient['cancelOAuthAccount']>().mockResolvedValue(undefined),
     reauthorizeOAuthAccount: vi.fn<MailxClient['reauthorizeOAuthAccount']>().mockResolvedValue({ sessionId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }),
     updateConnection: vi.fn<MailxClient['updateConnection']>().mockImplementation(async ({ accountId, expectedRevision }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), revision: expectedRevision + 1 })),
-    updateProfile: vi.fn<MailxClient['updateProfile']>().mockImplementation(async ({ accountId, profile }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), ...profile, useProviderIcon: profile.useProviderIcon ?? true })),
+    updateProfile: vi.fn<MailxClient['updateProfile']>().mockImplementation(async ({ accountId, profile }) => ({ ...(rows.find((row) => row.id === accountId) ?? exampleAccount()), ...profile, useProviderIcon: profile.useProviderIcon ?? true, syncWindow: profile.syncWindow ?? null })),
     removeAccount: vi.fn<MailxClient['removeAccount']>().mockImplementation(async ({ accountId }) => ({ accountId, draftIds: [], credentialsPending: false })),
     onAccountRemoved: vi.fn<MailxClient['onAccountRemoved']>().mockReturnValue(() => undefined),
     verifyAccountConnection: vi.fn<MailxClient['verifyAccountConnection']>().mockImplementation(async (accountId, revision) => ({
@@ -93,6 +93,10 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     onMailStateChanged: vi.fn<MailxClient['onMailStateChanged']>().mockReturnValue(() => undefined),
     onDeletions: vi.fn<MailxClient['onDeletions']>().mockReturnValue(() => undefined),
     refreshSync: vi.fn<MailxClient['refreshSync']>().mockResolvedValue(undefined),
+    listBackfillTasks: vi.fn<MailxClient['listBackfillTasks']>().mockResolvedValue([]),
+    loadOlderFolder: vi.fn<MailxClient['loadOlderFolder']>().mockResolvedValue([]),
+    controlBackfill: vi.fn<MailxClient['controlBackfill']>().mockResolvedValue([]),
+    onBackfill: vi.fn<MailxClient['onBackfill']>().mockReturnValue(() => undefined),
     getAvatar: vi.fn<MailxClient['getAvatar']>().mockResolvedValue(null),
     saveAttachment: vi.fn<MailxClient['saveAttachment']>().mockResolvedValue('saved'),
     clearImageCache: vi.fn<MailxClient['clearImageCache']>().mockResolvedValue(undefined),
@@ -122,7 +126,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     aiTest: vi.fn<MailxClient['aiTest']>().mockRejectedValue(new Error('not configured')),
     aiProviderIcon: vi.fn<MailxClient['aiProviderIcon']>().mockResolvedValue(null),
     onSyncState: vi.fn<MailxClient['onSyncState']>().mockReturnValue(() => undefined),
-    listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }),
+    listEmails: vi.fn<MailxClient['listEmails']>().mockResolvedValue({ items: [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false } }),
     getMailOverview: vi.fn<MailxClient['getMailOverview']>().mockResolvedValue({ newMail: { total: 0, accounts: [], latest: [], senders: [] }, starredUnread: 0, unreadSenders: [], verificationCodes: [], codeCandidates: [], recentAttachments: [], generatedAt: new Date(0).toISOString() }),
     getEmail: vi.fn<MailxClient['getEmail']>().mockRejectedValue(new Error('not found')),
     getConversation: vi.fn<MailxClient['getConversation']>().mockRejectedValue(new Error('not found')),
