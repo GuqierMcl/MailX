@@ -14,7 +14,7 @@ export function LifecycleProvider({ client, children }: { client: LifecycleClien
   const queryClient = useQueryClient()
   const [snapshot, setSnapshot] = useState<LifecycleSnapshot | null>(null)
   const latest = useRef<LifecycleSnapshot | null>(null)
-  const [quitFailure, setQuitFailure] = useState<{ generation: number; error: unknown } | null>(null)
+  const [saveFailure, setSaveFailure] = useState<{ kind: 'quit' | 'release'; generation: number; error: unknown } | null>(null)
   useEffect(() => {
     if (!client) return
     let disposed = false
@@ -23,7 +23,8 @@ export function LifecycleProvider({ client, children }: { client: LifecycleClien
       if (disposed || (latest.current && next.revision < latest.current.revision)) return
       latest.current = next
       setSnapshot(next)
-      if (next.quitting) setQuitFailure((current) => current?.generation === next.quitRequestId ? current : null)
+      if (next.quitting) setSaveFailure((current) => current?.kind === 'quit' && current.generation === next.quitRequestId ? current : null)
+      else if (next.releaseRequestId !== null) setSaveFailure((current) => current?.kind === 'release' && current.generation === next.releaseRequestId ? current : null)
     }
     void client.onSnapshot(accept).then(async (unsubscribe) => {
       if (disposed) { unsubscribe(); return }
@@ -34,6 +35,7 @@ export function LifecycleProvider({ client, children }: { client: LifecycleClien
   }, [client])
   const quitting = snapshot?.quitting ?? false
   const generation = snapshot?.quitRequestId ?? null
+  const releaseGeneration = snapshot?.releaseRequestId ?? null
   useEffect(() => {
     if (!client || !quitting || generation === null) return
     const controller = new AbortController()
@@ -44,13 +46,30 @@ export function LifecycleProvider({ client, children }: { client: LifecycleClien
         if (current()) await client.confirmQuit(generation)
       } catch (cause) {
         if (!current()) return
-        setQuitFailure({ generation, error: cause })
+        setSaveFailure({ kind: 'quit', generation, error: cause })
         // Bind cancellation too: an old failed write cannot cancel a newer quit.
         try { await client.cancelQuit(generation) } catch { /* The host's deadline still cancels an unconfirmed quit. */ }
       }
     })()
     return () => controller.abort()
   }, [client, generation, queryClient, quitting])
+
+  useEffect(() => {
+    if (!client || quitting || releaseGeneration === null) return
+    const controller = new AbortController()
+    const current = () => !controller.signal.aborted && !latest.current?.quitting && latest.current?.releaseRequestId === releaseGeneration
+    void (async () => {
+      try {
+        await prepareMainWindowQuit(queryClient, controller.signal)
+        if (current()) await client.confirmBackgroundRelease(releaseGeneration)
+      } catch (cause) {
+        if (!current()) return
+        setSaveFailure({ kind: 'release', generation: releaseGeneration, error: cause })
+        try { await client.cancelBackgroundRelease(releaseGeneration) } catch { /* Host state recovers on next focus or close. */ }
+      }
+    })()
+    return () => controller.abort()
+  }, [client, queryClient, quitting, releaseGeneration])
 
   useEffect(() => {
     if (!quitting) return
@@ -70,9 +89,9 @@ export function LifecycleProvider({ client, children }: { client: LifecycleClien
     <div className="contents" inert={quitting} data-main-interaction>{children}</div>
     {client && snapshot?.closeRequestId !== null && snapshot?.closeRequestId !== undefined && !snapshot.quitting &&
       <CloseChoiceDialog key={snapshot.closeRequestId} client={client} snapshot={snapshot} requestId={snapshot.closeRequestId} />}
-    {client && snapshot && !quitFailure && (snapshot.quitting || snapshot.quitTimedOut) &&
+    {client && snapshot && !saveFailure && (snapshot.quitting || snapshot.quitTimedOut) &&
       <QuitProgress key={snapshot.quitting ? `quitting-${generation}` : 'timedOut'} client={client} generation={generation} timedOut={snapshot.quitTimedOut && !snapshot.quitting} />}
-    {quitFailure && <QuitFailure error={quitFailure.error} onClose={() => setQuitFailure(null)} />}
+    {saveFailure && <QuitFailure kind={saveFailure.kind} error={saveFailure.error} onClose={() => setSaveFailure(null)} />}
   </LifecycleContext.Provider>
 }
 
@@ -146,13 +165,13 @@ function QuitProgress({ client, generation, timedOut }: { client: LifecycleClien
   </Dialog>
 }
 
-function QuitFailure({ error, onClose }: { error: unknown; onClose: () => void }) {
+function QuitFailure({ kind, error, onClose }: { kind: 'quit' | 'release'; error: unknown; onClose: () => void }) {
   const { t } = useTranslation('settings')
   return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
     <DialogContent data-quit-controls>
       <DialogHeader>
-        <DialogTitle>{t('quitSaveFailedTitle')}</DialogTitle>
-        <DialogDescription>{t('quitSaveFailedDescription')}</DialogDescription>
+        <DialogTitle>{t(kind === 'release' ? 'releaseSaveFailedTitle' : 'quitSaveFailedTitle')}</DialogTitle>
+        <DialogDescription>{t(kind === 'release' ? 'releaseSaveFailedDescription' : 'quitSaveFailedDescription')}</DialogDescription>
       </DialogHeader>
       <p role="alert" className="text-sm text-destructive">{error instanceof InlineDraftUnsaved ? t('quitInlineDraftFailed') : errorText(error)}</p>
       <DialogFooter><Button variant="outline" onClick={onClose}>{t('dismissQuitNotice')}</Button></DialogFooter>

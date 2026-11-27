@@ -3,13 +3,13 @@ import type { DesktopAction } from './lifecycle-client'
 import { useLifecycle } from './lifecycle-context'
 
 /** The tray only enables actions once their workbench listener is installed. */
-export function useDesktopActions(handle: (action: DesktopAction) => void) {
+export function useDesktopActions(handle: (action: DesktopAction) => void, readyToRegister = true) {
   const lifecycle = useLifecycle()
   const client = lifecycle?.client
   const latest = useRef(handle)
   useEffect(() => { latest.current = handle }, [handle])
   useEffect(() => {
-    if (!client) return
+    if (!client || !readyToRegister) return
     let disposed = false
     let stop: (() => void) | undefined
     let ready = false
@@ -24,5 +24,5 @@ export function useDesktopActions(handle: (action: DesktopAction) => void) {
       stop?.()
       if (ready) void client.setDesktopReady(false).catch(() => undefined)
     }
-  }, [client])
+  }, [client, readyToRegister])
 }

@@ -36,6 +36,7 @@ mod imp {
     use tokio::sync::Notify;
 
     use crate::state::DesktopState;
+    #[cfg(target_os = "linux")]
     use crate::window_chrome::MAIN_WINDOW;
 
     /// How long a burst of changes (a sync round, a batch of marks) settles
@@ -64,15 +65,46 @@ mod imp {
                 }
             },
             move |count| {
-                apply_app
-                    .get_webview_window(MAIN_WINDOW)
-                    .is_some_and(|window| window.set_badge_count(count).is_ok())
+                let app = apply_app.clone();
+                async move { apply_badge(&app, count).await }
             },
         ));
         let ready_app = app.clone();
         app.state::<DesktopState>()
             .add_ready_hook(move || refresh(&ready_app));
         refresh(app);
+    }
+
+    /// Updates the macOS Dock tile directly without requiring a live main
+    /// window, so unread counts stay accurate while the UI is released.
+    #[cfg(target_os = "macos")]
+    async fn apply_badge(app: &AppHandle, count: Option<i64>) -> bool {
+        use objc2_app_kit::NSApplication;
+        use objc2_foundation::{MainThreadMarker, NSString};
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let label = count.map(|value| value.to_string());
+        if app
+            .run_on_main_thread(move || {
+                let applied = MainThreadMarker::new().is_some_and(|mtm| {
+                    let tile = NSApplication::sharedApplication(mtm).dockTile();
+                    let value = label.as_deref().map(NSString::from_str);
+                    tile.setBadgeLabel(value.as_deref());
+                    true
+                });
+                let _ = tx.send(applied);
+            })
+            .is_err()
+        {
+            return false;
+        }
+        rx.await.unwrap_or(false)
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn apply_badge(app: &AppHandle, count: Option<i64>) -> bool {
+        app.get_webview_window(MAIN_WINDOW)
+            .is_some_and(|window| window.set_badge_count(count).is_ok())
     }
 
     pub(super) fn refresh(app: &AppHandle) {
@@ -111,14 +143,16 @@ impl Shown {
 /// and applies it if it changed. A wake-up during the work is kept and runs
 /// the loop once more, so no change is missed.
 #[cfg(any(test, target_os = "macos", target_os = "linux"))]
-async fn run<C, F>(
+async fn run<C, F, A, AF>(
     wake: std::sync::Arc<tokio::sync::Notify>,
     settle: std::time::Duration,
     mut compute: C,
-    mut apply: impl FnMut(Option<i64>) -> bool,
+    mut apply: A,
 ) where
     C: FnMut() -> F,
     F: std::future::Future<Output = Option<u32>>,
+    A: FnMut(Option<i64>) -> AF,
+    AF: std::future::Future<Output = bool>,
 {
     let mut shown = Shown::default();
     loop {
@@ -128,7 +162,7 @@ async fn run<C, F>(
             continue;
         };
         if let Some(badge) = shown.change(count)
-            && apply(badge)
+            && apply(badge).await
         {
             shown = Shown(Some(count));
         }
@@ -180,7 +214,7 @@ mod tests {
                 let applied = applied.clone();
                 move |badge| {
                     applied.lock().unwrap().push(badge);
-                    true
+                    async { true }
                 }
             },
         ));
@@ -223,7 +257,8 @@ mod tests {
                 move |_| {
                     let mut attempts = attempts.lock().unwrap();
                     *attempts += 1;
-                    *attempts > 1
+                    let ok = *attempts > 1;
+                    async move { ok }
                 }
             },
         ));

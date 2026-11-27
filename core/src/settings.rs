@@ -889,6 +889,9 @@ pub struct GeneralSettings {
     /// Ask until the user chooses whether closing should keep MailX running.
     /// The desktop host applies platform and tray availability constraints.
     pub close_behavior: CloseBehavior,
+    /// Destroy the main window WebView when closing to background (or during
+    /// silent login startup) to release UI memory; keep only the Rust core.
+    pub release_ui_in_background: bool,
     /// Optional macOS menu bar shortcut; the Dock remains available.
     pub show_menu_bar_icon: bool,
     /// Hide the main window only on a registered desktop login launch. The
@@ -927,6 +930,7 @@ impl Default for GeneralSettings {
             language: "system".into(),
             auto_update: true,
             close_behavior: CloseBehavior::Ask,
+            release_ui_in_background: false,
             show_menu_bar_icon: true,
             silent_start: false,
             single_key_shortcuts: true,
@@ -1640,6 +1644,7 @@ fn read_file(path: &Path, metadata: &fs::Metadata) -> Option<AppSettings> {
                     }
                     for key in [
                         "autoUpdate",
+                        "releaseUiInBackground",
                         "showMenuBarIcon",
                         "silentStart",
                         "singleKeyShortcuts",

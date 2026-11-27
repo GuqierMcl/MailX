@@ -67,12 +67,17 @@ export function GeneralPane({ client }: { client: MailxClient }) {
         </Select>
       </SettingsRow>
       {!snapshot.backgroundAvailable && <p className="text-xs text-muted-foreground">{t('trayUnavailable')}</p>}
+      <SettingsRow label={t('releaseUiInBackground')} description={t('releaseUiInBackgroundHint')} htmlFor="general.releaseUiInBackground">
+        <Switch id="general.releaseUiInBackground" checked={settings.data?.settings.general.releaseUiInBackground ?? false}
+          disabled={!settings.data || update.isPending || snapshot.quitting || !snapshot.backgroundAvailable || (settings.data.settings.general.closeBehavior === 'quit' && !settings.data.settings.general.silentStart)}
+          onCheckedChange={(releaseUiInBackground) => update.mutate({ releaseUiInBackground })} />
+      </SettingsRow>
       {snapshot.platform === 'macos' && <SettingsRow label={t('showMenuBarIcon')} description={t('showMenuBarIconHint')} htmlFor="general.showMenuBarIcon">
         <Switch id="general.showMenuBarIcon" checked={settings.data?.settings.general.showMenuBarIcon ?? true}
           disabled={!settings.data || update.isPending || snapshot.quitting}
           onCheckedChange={(showMenuBarIcon) => update.mutate({ showMenuBarIcon })} />
       </SettingsRow>}
-      <SettingsSaveError update={update} fields={['closeBehavior', 'showMenuBarIcon']} />
+      <SettingsSaveError update={update} fields={['closeBehavior', 'releaseUiInBackground', 'showMenuBarIcon']} />
       <SettingsRow label={t('quitMailx')} description={t('quitMailxHint')}>
         <Button variant="outline" size="sm" disabled={quitPending || snapshot.quitting} onClick={() => void quit()}>{t('quitMailx')}</Button>
       </SettingsRow>

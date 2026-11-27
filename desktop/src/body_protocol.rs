@@ -535,6 +535,20 @@ impl BodyProtocol {
         }
     }
 
+    /// Drops every cached reader document and confirmation when the main
+    /// window is released to background.
+    pub(crate) fn revoke_all(&self) {
+        if let Ok(mut documents) = self.documents.lock() {
+            for document in documents.values() {
+                document.binding.release_remote_images();
+            }
+            documents.clear();
+        }
+        if let Ok(mut confirmations) = self.confirmations.lock() {
+            confirmations.clear();
+        }
+    }
+
     pub(crate) async fn image_status(
         &self,
         core: &MailxCore,

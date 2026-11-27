@@ -8,6 +8,8 @@ fn main() {
             "app_quit",
             "app_cancel_quit",
             "app_confirm_quit",
+            "app_confirm_background_release",
+            "app_cancel_background_release",
             "app_desktop_ready",
             "autostart_get",
             "autostart_set",

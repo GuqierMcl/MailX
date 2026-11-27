@@ -309,6 +309,10 @@ impl InlineComposerDraft {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = draft;
     }
+
+    pub(crate) fn clear(&self) {
+        self.set(None);
+    }
 }
 
 #[derive(Deserialize)]
@@ -925,12 +929,29 @@ pub(crate) fn watch_close(window: &WebviewWindow) {
         (WindowEvent::DragDrop(drop), WindowKind::Composer(_)) => {
             crate::compose_files::on_drag_drop(&app, &label, drop);
         }
+        (WindowEvent::Destroyed, WindowKind::Main) => {
+            if let Some(lifecycle) = app.try_state::<Lifecycle>() {
+                lifecycle.finish(MAIN_WINDOW);
+            }
+            if !is_quitting(&app)
+                && crate::lifecycle::is_main_released(&app)
+                && app.webview_windows().is_empty()
+            {
+                crate::lifecycle::expect_window_empty_exit(&app);
+            }
+        }
         (WindowEvent::Destroyed, WindowKind::Composer(_)) => {
             if let Some(dropped) = app.try_state::<crate::compose_files::DroppedFiles>() {
                 dropped.forget(&label);
             }
             if let Some(lifecycle) = app.try_state::<Lifecycle>() {
                 lifecycle.finish(&label);
+            }
+            if !is_quitting(&app)
+                && crate::lifecycle::is_main_released(&app)
+                && app.webview_windows().is_empty()
+            {
+                crate::lifecycle::expect_window_empty_exit(&app);
             }
         }
         _ => {}
@@ -1003,7 +1024,10 @@ pub(crate) fn request_quit(app: &AppHandle) {
     let labels = composers
         .iter()
         .map(|window| window.label().to_owned())
-        .chain(crate::lifecycle::main_ready(app).then(|| MAIN_WINDOW.to_owned()));
+        .chain(
+            (app.get_webview_window(MAIN_WINDOW).is_some() && crate::lifecycle::main_ready(app))
+                .then(|| MAIN_WINDOW.to_owned()),
+        );
     let Some(generation) = lifecycle.begin_quit(labels) else {
         return;
     };

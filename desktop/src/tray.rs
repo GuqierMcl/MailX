@@ -5,16 +5,12 @@ use std::sync::Mutex;
 use mailx_core::SupportedLocale;
 use serde::Deserialize;
 use tauri::{
-    AppHandle, Emitter, EventTarget, Manager,
+    AppHandle, Manager,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
-use crate::{
-    lifecycle,
-    state::DesktopState,
-    window_chrome::{self, MAIN_WINDOW},
-};
+use crate::{lifecycle, state::DesktopState, window_chrome};
 
 const ID: &str = "mailx-tray";
 
@@ -224,12 +220,7 @@ fn desktop_action(app: &AppHandle, action: &str) {
     if !lifecycle::tray_options(app).2 || crate::compose::is_quitting(app) {
         return;
     }
-    window_chrome::focus_main_window(app);
-    let _ = app.emit_to(
-        EventTarget::webview_window(MAIN_WINDOW),
-        "mailx://desktop-action",
-        action,
-    );
+    lifecycle::dispatch_desktop_action(app, serde_json::json!(action));
 }
 
 fn refresh_mail(app: &AppHandle) {

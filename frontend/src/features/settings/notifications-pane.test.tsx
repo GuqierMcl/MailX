@@ -17,9 +17,9 @@ function renderPane(client = testClient([work, home]), badgeAvailable?: boolean)
   else {
     const lifecycle: LifecycleClient = {
       getSnapshot: vi.fn(), onSnapshot: vi.fn(), resolveClose: vi.fn(), quit: vi.fn(), cancelQuit: vi.fn(),
-      confirmQuit: vi.fn(), onDesktopAction: vi.fn(), setDesktopReady: vi.fn(),
+      confirmQuit: vi.fn(), confirmBackgroundRelease: vi.fn(), cancelBackgroundRelease: vi.fn(), onDesktopAction: vi.fn(), setDesktopReady: vi.fn(),
     }
-    const snapshot: LifecycleSnapshot = { revision: 0, platform: 'windows', backgroundAvailable: true, badgeAvailable, closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }
+    const snapshot: LifecycleSnapshot = { revision: 0, platform: 'windows', backgroundAvailable: true, badgeAvailable, closeRequestId: null, releaseRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }
     render(<LifecycleContext.Provider value={{ client: lifecycle, snapshot }}>{dialog}</LifecycleContext.Provider>)
   }
   return { client, dialog: screen.getByRole('dialog', { name: '设置' }) }

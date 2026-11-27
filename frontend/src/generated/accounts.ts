@@ -775,6 +775,11 @@ autoUpdate: boolean,
  */
 closeBehavior: CloseBehavior,
 /**
+ * Destroy the main window WebView when closing to background (or during
+ * silent login startup) to release UI memory; keep only the Rust core.
+ */
+releaseUiInBackground: boolean,
+/**
  * Optional macOS menu bar shortcut; the Dock remains available.
  */
 showMenuBarIcon: boolean,

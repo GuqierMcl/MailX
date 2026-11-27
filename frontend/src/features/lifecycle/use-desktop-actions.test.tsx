@@ -13,6 +13,7 @@ function client() {
   return {
     getSnapshot: vi.fn<LifecycleClient['getSnapshot']>(), onSnapshot: vi.fn<LifecycleClient['onSnapshot']>(),
     resolveClose: vi.fn<LifecycleClient['resolveClose']>(), quit: vi.fn<LifecycleClient['quit']>(), cancelQuit: vi.fn<LifecycleClient['cancelQuit']>(), confirmQuit: vi.fn<LifecycleClient['confirmQuit']>(),
+    confirmBackgroundRelease: vi.fn<LifecycleClient['confirmBackgroundRelease']>(), cancelBackgroundRelease: vi.fn<LifecycleClient['cancelBackgroundRelease']>(),
     onDesktopAction: vi.fn<LifecycleClient['onDesktopAction']>(),
     setDesktopReady: vi.fn<LifecycleClient['setDesktopReady']>().mockResolvedValue(undefined),
   }

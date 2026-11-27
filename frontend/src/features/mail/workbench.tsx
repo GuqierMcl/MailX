@@ -570,15 +570,17 @@ export function Workbench({ client }: { client: MailxClient }) {
     archiveMany: archiveEmails,
     flagMany: setFlags,
   })
-  useEffect(() => client.onNotificationOpen(({ accountId, emailId, outboxId }) => {
+  const pendingNotificationRef = useRef<{ accountId: string; emailId?: string | null; outboxId?: string | null } | null>(null)
+  const [notificationListenerReady, setNotificationListenerReady] = useState(false)
+  const openNotification = useCallback(({ accountId, emailId, outboxId }: { accountId: string; emailId?: string | null; outboxId?: string | null }) => {
     if (outboxId) {
       setOutboxChoice(outboxId)
       showMailbox({ kind: 'outbox' })
-      return
+      return true
     }
     const { accounts, folders } = latestTree.current
     const account = accounts.find((row) => row.id === accountId)
-    if (!account) return
+    if (!account) return false
     if (emailId) {
       leaveInlineFor()
       if (singleReading) {
@@ -589,15 +591,36 @@ export function Workbench({ client }: { client: MailxClient }) {
       setOpened({ id: emailId, accountId, source: account.mailboxSourceId })
       setAnchorId(emailId)
       exitSelection()
-      return
+      return true
     }
     const inbox = folders.find((folder) => folder.accountId === accountId && folder.role === 'inbox' && folder.selectable)
-    if (inbox) {
-      setSearch('')
-      setFilter('all')
-      showMailbox({ kind: 'folder', folder: inbox })
-    }
-  }), [client, exitSelection, leaveInlineFor, showMailbox, singleReading])
+    if (!inbox) return false
+    setSearch('')
+    setFilter('all')
+    showMailbox({ kind: 'folder', folder: inbox })
+    return true
+  }, [exitSelection, leaveInlineFor, showMailbox, singleReading])
+  useEffect(() => {
+    let active = true
+    const ready = () => { if (active) setNotificationListenerReady(true) }
+    const stop = client.onNotificationOpen((request) => {
+      if (openNotification(request)) pendingNotificationRef.current = null
+      else pendingNotificationRef.current = request
+    }, ready)
+    // Mock/test clients that do not accept a second parameter stay ready immediately.
+    if (client.onNotificationOpen.length < 2) ready()
+    return () => { active = false; stop() }
+  }, [client, openNotification])
+  useEffect(() => {
+    const pending = pendingNotificationRef.current
+    if (!pending) return
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled || pendingNotificationRef.current !== pending) return
+      if (openNotification(pending)) pendingNotificationRef.current = null
+    })
+    return () => { cancelled = true }
+  }, [accounts, folders, openNotification])
 
   // Cmd/Ctrl+N writes a new mail from anywhere in the main window.
   const composeNew = compose.compose
@@ -609,7 +632,7 @@ export function Workbench({ client }: { client: MailxClient }) {
       }
     } else if (action === 'settings') setSettings({ section: 'general' })
     else if (action === 'compose') void composeNew()
-  })
+  }, notificationListenerReady)
   useEffect(() => {
     // Keyboard opens follow the setting; only a Shift-click flips it.
     const onKeyDown = (event: KeyboardEvent) => {
