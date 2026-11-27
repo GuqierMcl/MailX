@@ -112,15 +112,17 @@ git diff --check
 
 发版 PR（只改版本文件与 `CHANGELOG.md`，且与 `version:bump` 的输出一致）只运行版本与日志的轻量检查。合并到 `main` 时，若推送前的提交 `CI result` 已通过，合并提交同样只跑轻量检查，否则跑全量检查；发版工作流在构建前核对该提交的 `CI result` 已通过。验证这一规则时，确认推送前提交 CI 未完成或失败、推送含其他改动、判定出错时都回到全量检查；规则见[发布流程](release.md#发版-pr-的-ci)。判定脚本另有单元测试。
 
-CI 与 Release 的 Ubuntu 桌面依赖安装优先使用 Ubuntu 官方 HTTPS archive / security 镜像，兼容 runner 的 `mirror+file` 镜像表与直接 Ubuntu 源布局；不改动发行版、组件、签名密钥或第三方源。APT 保留下载重试与连接 / 读取超时，更新索引时的临时错误也必须使该次尝试失败。官方镜像在 runner 上无法访问时，步骤会恢复 runner 原有的镜像配置再试一次；仍失败时改用 ubuntu.com 以外的社区镜像（kernel.org 与 OCF Berkeley）。镜像只提供下载，索引仍由 APT 按 Ubuntu 签名密钥校验。每次尝试的更新限 3 分钟、安装限 5 分钟，整个步骤上限 20 分钟。修改镜像策略后用 `actionlint`（含 ShellCheck）与差异检查验证工作流，Ubuntu 安装与三平台结果以对应提交的 CI 为准。
+CI、手动 Linux 打包检查与 Release 共用 `scripts/install-linux-build-deps.sh`。x64 优先使用官方 HTTPS archive / security 镜像，ARM64 使用 Ubuntu Ports。失败时恢复 runner 原镜像，再回退到相应架构的社区镜像。APT 校验 Ubuntu 存档签名，并保留下载重试与连接 / 读取超时。每次尝试的索引更新限 3 分钟、依赖安装限 5 分钟，整个步骤上限 20 分钟。修改镜像策略后运行 `actionlint` 和 ShellCheck，并核对两种架构的工作流结果。
 
-`.github/workflows/ci.yml` 在每个 PR 和推送到 main 时运行，应用的 Linux 任务使用与发布构建一致的 Ubuntu 22.04，运行哪些任务由变更范围决定（见[发版流程](release.md#发版-pr-的-ci)）：
+`.github/workflows/ci.yml` 在每个 PR 和推送到 main 时运行，应用的 Linux 任务使用与发布构建一致的 Ubuntu 24.04，运行哪些任务由变更范围决定（见[发版流程](release.md#发版-pr-的-ci)）：
 
 - 官网：构建所用的文件有变化时运行 `version:check`、`site:check` 与 `site:build`，计入 `CI result`；没有变化时跳过。只改官网时不运行下面的应用检查。
 - Ubuntu：`version:check`、`i18n:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。
 - Ubuntu、macOS 与 Windows：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
 
-`.github/workflows/linux-appimage.yml` 仅通过 `workflow_dispatch` 手动触发，不随 PR 或 push 自动运行，也不是合并所需的检查。它在 Ubuntu 22.04 构建关闭更新签名产物的 AppImage，再用不含系统 AppIndicator 的 Ubuntu 22.04 Docker 环境验证：包内 ELF 与 AppImage runtime 的 glibc 需求不高于 2.35；五个托盘运行库的 SONAME、依赖解析与动态加载；正常启动和移除 AppIndicator 后的降级启动都须出现可见主窗口、持续存活并建立隔离的空数据库，日志符合预期降级行为。运行时使用非 root 用户与 `--network none`，保留 WebKit 沙箱，放开外层 seccomp/AppArmor 以允许嵌套命名空间，同时移除全部 capabilities；证据保存在 `linux-appimage-evidence` 产物中。可在有 Docker 的 Linux 上运行 `bash scripts/smoke-linux-appimage.sh <AppImage 路径>` 重现。这项启动检查不代替真实桌面托盘菜单、GNOME / Wayland 或邮件收发验证，发布前仍需在有桌面的 Linux 上手动确认托盘交互。
+`.github/workflows/linux-appimage.yml` 通过 `workflow_dispatch` 手动触发，在各自原生的 Ubuntu 24.04 runner 上构建无更新签名的 x64 和 ARM64 AppImage、DEB、RPM。检查安装包架构及主程序和 `mailx-mcp` 的 ELF 架构，并在干净的同架构 Ubuntu 容器中用 APT 安装 DEB。RPM 的安装和启动在目标发行版上验证。
+
+- AppImage 使用无系统 AppIndicator 的 Ubuntu 24.04 Docker 环境。检查包内 ELF 和 AppImage runtime 的架构及 glibc 需求上限 2.39，以及五个托盘库的 SONAME、依赖解析与动态加载。正常启动和移除 AppIndicator 后的降级启动都须显示主窗口、持续存活并建立隔离的空数据库。容器以非 root 运行，断网、移除全部 capabilities，并放开外层 seccomp / AppArmor 以保留 WebKit 沙箱。证据按架构存入 `linux-appimage-evidence-*`。可在有 Docker 的同架构 Linux 主机上运行 `bash scripts/smoke-linux-appimage.sh <AppImage 路径>` 重现。发布前还应在有桌面的 Linux 上核对相应环境中的托盘交互。
 
 <a id="body-native-validation"></a>
 
@@ -494,7 +496,7 @@ Windows 额外通过插件的 WebView2 设置关闭浏览器快捷键、触摸�
 行为规则见[更新器设计](../architecture/updater.md)。
 
 - **自动检查**：用宿主测试核对检查调度、旧设置迁移和开关切换、撤回与替换、下载取消和重试、包验签和缓存恢复、安装记录匹配。前端用状态替身核对响应顺序、通知去重、后台延后和版本链接。检查发布说明跨阶段保留，不执行 HTML 或非 HTTPS 链接，并限制长度；更新命令仅对可信主窗口开放。
-- **签名产物**：按[发版流程](release.md#8-更新器签名)试跑各平台构建，核对更新包及 `.sig`；标签构建另核对 `latest.json` 的版本、下载地址与签名。更新包验签和系统代码签名分开验证。
+- **签名产物**：按[发版流程](release.md#8-更新器签名)试跑各平台构建，核对更新包及 `.sig`。标签构建另核对 `latest.json` 的版本、下载地址与签名，确认两种 Linux 架构分别指向对应的 AppImage。更新包验签和系统代码签名分开验证。
 - **macOS 签名与公证**：发布工作流在构建后要求 `.app` 与 `.dmg` 通过 `codesign --verify --deep --strict`、`spctl --assess` 和 `stapler validate`，内嵌的 `mailx-mcp` 带同样的签名，任何一项不通过即不出包（见[发版流程](release.md#9-macos-代码签名与公证)）。真实 macOS 上另需确认：下载的 `.dmg` 直接打开无需右键；从更早的未签名版本升级时钥匙串只请求一次授权、之后升级不再询问；断网时公证票据仍可通过验证；Intel 与 Apple 芯片两种构建都覆盖。Windows 的 Authenticode 签名尚未实现。
 - **实机升级**：在 macOS、Windows、AppImage 用带更新器的旧版分别验证自动下载、关闭自动更新后手动下载、立即重启和退出安装，核对新版本与原有数据。覆盖取消、断网重试、系统代理、缓存恢复、安装失败及写信和发信中的退出保护。分别记录相邻与跨版本升级；deb / rpm 核对仅提示和手动更新入口。
 - **成功提示**：两种安装路径均须在主窗口就绪并切到前台时只提示一次，包括离线和静默启动后唤醒。“更新说明”须打开实际安装版本的发布页。全新安装、同版重开、安装失败不应显示成功提示。

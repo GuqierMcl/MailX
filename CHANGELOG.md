@@ -15,6 +15,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🚀 Feature
 
 - Add an optional "Release UI memory in background" setting (off by default) that releases the main window interface when closing to the background or starting silently, keeping only the mail core running. / 新增可选的「后台运行时释放界面内存」设置（默认关闭），关闭主窗口进入后台或静默启动时释放界面资源，仅保留收信与同步内核。
+- Add native ARM64 Linux downloads in AppImage, DEB and RPM formats. / 新增 ARM64 Linux 原生安装包，提供 AppImage、DEB 和 RPM 格式。
 
 ### ✨ Optimization
 
@@ -23,6 +24,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 ### 🩹 Fixed
 
 - Reconcile IMAP flags immediately on manual refresh and IDLE updates, and fetch existing starred messages from before the 30-day sync window. / 修复手动刷新和 IMAP IDLE 推送时跳过标记同步的问题，并补拉 30 天同步窗口之前已有的星标邮件。
+
+### 🔄 Changed
+
+- Use Ubuntu 24.04 as the baseline for x64 and ARM64 Linux packages. / x64 和 ARM64 Linux 安装包的系统基线统一为 Ubuntu 24.04。
 
 ## [0.5.1] - 2026-11-27
 

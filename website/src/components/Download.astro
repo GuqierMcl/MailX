@@ -1,7 +1,7 @@
 ---
 import Site from '../layouts/Site.astro'
 import { STRINGS, type Locale } from '../i18n'
-import { RELEASES_URL, formatSize, latestRelease, type Download, type DownloadId } from '../lib/release'
+import { RELEASES_URL, formatSize, latestRelease, type Download, type DownloadId, type LinuxArchitecture } from '../lib/release'
 
 interface Props { locale: Locale }
 const { locale } = Astro.props
@@ -9,17 +9,23 @@ const t = STRINGS[locale].download
 const release = await latestRelease()
 const find = (id: DownloadId): Download | undefined => release?.downloads[id]
 type Link = { id: string; label: string; download: Download | undefined }
-const groups: { os: string; name: string; note: string; extra: string | null; links: Link[] }[] = [
-  { os: 'macos', name: t.macos.name, note: t.macos.note, extra: t.macos.which, links: [
+type LinkGroup = { label?: string; links: Link[] }
+const linuxArchitectures: LinuxArchitecture[] = ['x64', 'arm64']
+const linuxFormats = ['appimage', 'deb', 'rpm'] as const
+const groups: { os: string; name: string; note: string; extra: string | null; linkGroups: LinkGroup[] }[] = [
+  { os: 'macos', name: t.macos.name, note: t.macos.note, extra: t.macos.which, linkGroups: [{ links: [
     { id: 'arm', label: t.macos.arm, download: find('macos-arm64') },
     { id: 'intel', label: t.macos.intel, download: find('macos-x64') },
-  ] },
-  { os: 'windows', name: t.windows.name, note: t.windows.note, extra: null, links: [{ id: 'setup', label: t.windows.setup, download: find('windows-x64') }] },
-  { os: 'linux', name: t.linux.name, note: t.linux.note, extra: null, links: [
-    { id: 'appimage', label: t.linux.appimage, download: find('linux-appimage') },
-    { id: 'deb', label: t.linux.deb, download: find('linux-deb') },
-    { id: 'rpm', label: t.linux.rpm, download: find('linux-rpm') },
-  ] },
+  ] }] },
+  { os: 'windows', name: t.windows.name, note: t.windows.note, extra: null, linkGroups: [{ links: [{ id: 'setup', label: t.windows.setup, download: find('windows-x64') }] }] },
+  { os: 'linux', name: t.linux.name, note: t.linux.note, extra: null, linkGroups: linuxArchitectures.map((arch) => ({
+    label: t.linux[arch],
+    links: linuxFormats.map((format) => ({
+      id: `${arch}-${format}`,
+      label: t.linux[format],
+      download: find(`linux-${arch}-${format}`),
+    })),
+  })) },
 ]
 ---
 
@@ -38,11 +44,16 @@ const groups: { os: string; name: string; note: string; extra: string | null; li
             <p class="badge">{t.recommended}</p>
             <h2>{group.name}</h2>
             <p class="muted note">{group.note}</p>
-            <div class="links">
-              {group.links.map((link) => link.download && (
-                <a class="button" data-link={link.id} href={link.download.url}>{link.label}<span class="size numeric">{formatSize(link.download.size)}</span></a>
-              ))}
-            </div>
+            {group.linkGroups.map(({ label, links }) => links.some((link) => link.download) && (
+              <div class="links">
+                {label && <h3>{label}</h3>}
+                {links.map((link) => link.download && (
+                  <a class="button" data-link={link.id} href={link.download.url} aria-label={label ? `${link.label} (${label})` : undefined}>
+                    {link.label}<span class="size numeric">{formatSize(link.download.size)}</span>
+                  </a>
+                ))}
+              </div>
+            ))}
             {group.extra && <p class="muted extra">{group.extra}</p>}
           </section>
         ))}
@@ -70,10 +81,17 @@ const groups: { os: string; name: string; note: string; extra: string | null; li
     card.classList.add('featured')
     const primary = (id: string) => card.querySelector(`[data-link="${id}"]`)?.classList.add('primary')
     if (os === 'windows') primary('setup')
-    if (os === 'linux') primary('appimage')
+    const hints = (navigator as Navigator & { userAgentData?: { getHighEntropyValues(keys: string[]): Promise<{ architecture?: string; bitness?: string }> } }).userAgentData
+    if (os === 'linux') {
+      // Reduced Linux user agents do not reliably identify the architecture.
+      hints?.getHighEntropyValues(['architecture', 'bitness']).then(({ architecture, bitness }) => {
+        if (bitness !== '64') return
+        if (architecture === 'x86') primary('x64-appimage')
+        if (architecture === 'arm') primary('arm64-appimage')
+      }).catch(() => {})
+    }
     if (os === 'macos') {
       // Chromium can tell the chip; elsewhere Apple silicon is the likelier guess.
-      const hints = (navigator as Navigator & { userAgentData?: { getHighEntropyValues(keys: string[]): Promise<{ architecture?: string }> } }).userAgentData
       hints?.getHighEntropyValues(['architecture'])
         .then((values) => primary(values.architecture === 'x86' ? 'intel' : 'arm'))
         .catch(() => primary('arm')) ?? primary('arm')
@@ -92,6 +110,7 @@ const groups: { os: string; name: string; note: string; extra: string | null; li
   .card .note { margin: 0.6rem 0 0; font-size: 0.95rem; }
   .badge { display: none; margin: 0 0 0.6rem; font-size: 0.8rem; font-weight: 600; color: var(--mx-accent); }
   .links { display: grid; gap: 0.6rem; margin-top: 1.25rem; }
+  .links h3 { margin: 0; font-size: 1rem; text-align: left; }
   .links .button { justify-content: space-between; }
   .size { font-weight: 400; font-size: 0.85rem; opacity: 0.7; }
   .extra { font-size: 0.85rem; margin: 1rem 0 0; }

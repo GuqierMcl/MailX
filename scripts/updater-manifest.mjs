@@ -11,15 +11,15 @@
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { sectionBody } from "./lib/changelog.mjs";
+import { releaseAssetName } from "./release-assets.mjs";
 
-/** The manifest key, and how an asset file belongs to it. */
+/** The Tauri manifest key and the published bundle it selects. */
 export const PLATFORMS = [
-  // Tauri names the macOS bundle after the build's architecture (`aarch64`,
-  // `x64`); the workflow renames it so the two never collide.
-  { key: "darwin-aarch64", match: (name) => name.endsWith(".app.tar.gz") && /(^|[_.-])(aarch64|arm64)([_.-]|$)/.test(name) },
-  { key: "darwin-x86_64", match: (name) => name.endsWith(".app.tar.gz") && /(^|[_.-])(x86_64|x64)([_.-]|$)/.test(name) },
-  { key: "windows-x86_64", match: (name) => name.endsWith("-setup.exe") },
-  { key: "linux-x86_64", match: (name) => name.endsWith(".AppImage") },
+  { key: "darwin-aarch64", platform: "macos-arm64", extension: ".app.tar.gz" },
+  { key: "darwin-x86_64", platform: "macos-x64", extension: ".app.tar.gz" },
+  { key: "windows-x86_64", platform: "windows-x64", extension: "-setup.exe" },
+  { key: "linux-x86_64", platform: "linux-x64", extension: ".AppImage" },
+  { key: "linux-aarch64", platform: "linux-arm64", extension: ".AppImage" },
 ];
 
 export class MissingPlatforms extends Error {
@@ -57,18 +57,19 @@ export function buildManifest({ version, notes, pubDate, baseUrl, files, readSig
   const present = new Set(files);
   const platforms = {};
   const missing = [];
-  for (const platform of PLATFORMS) {
-    const asset = files.find((name) => !name.endsWith(".sig") && platform.match(name));
-    if (!asset || !present.has(`${asset}.sig`)) {
-      missing.push(platform.key);
+  for (const { key, platform, extension } of PLATFORMS) {
+    const asset = releaseAssetName(version, platform, extension);
+    const signatureFile = `${asset}.sig`;
+    if (!present.has(asset) || !present.has(signatureFile)) {
+      missing.push(key);
       continue;
     }
-    const signature = readSignature(`${asset}.sig`).trim();
+    const signature = readSignature(signatureFile).trim();
     if (!signature) {
-      missing.push(platform.key);
+      missing.push(key);
       continue;
     }
-    platforms[platform.key] = {
+    platforms[key] = {
       signature,
       url: `${baseUrl}/${encodeURIComponent(asset)}`,
     };

@@ -22,11 +22,16 @@ libraries=(
   libdbusmenu-glib.so.4
   libdbusmenu-gtk3.so.4
 )
-library_path="$appdir/usr/lib:$appdir/usr/lib/x86_64-linux-gnu:$appdir/lib:$appdir/lib/x86_64-linux-gnu"
+case $(uname -m) in
+  x86_64) elf_machine='Advanced Micro Devices X86-64'; multiarch=x86_64-linux-gnu ;;
+  aarch64) elf_machine=AArch64; multiarch=aarch64-linux-gnu ;;
+  *) echo "Unsupported AppImage smoke host architecture: $(uname -m)" >&2; exit 2 ;;
+esac
+library_path="$appdir/usr/lib:$appdir/usr/lib/$multiarch:$appdir/lib:$appdir/lib/$multiarch"
 
 # Inspect GNU version requirements, not strings or version definitions (which
 # advertise what a library provides rather than what it needs from glibc).
-python3 - "$appdir" "${3:-}" > "$evidence/glibc.json" <<'PY'
+python3 - "$appdir" "$elf_machine" "${3:-}" > "$evidence/glibc.json" <<'PY'
 import json
 import pathlib
 import re
@@ -34,32 +39,38 @@ import subprocess
 import sys
 
 appdir = pathlib.Path(sys.argv[1])
+expected_machine = sys.argv[2]
 files = [(path, str(path.relative_to(appdir))) for path in appdir.rglob("*")
          if path.is_file() and not path.is_symlink()]
-if sys.argv[2]:
-    files.append((pathlib.Path(sys.argv[2]), "@AppImage-runtime"))
+if sys.argv[3]:
+    files.append((pathlib.Path(sys.argv[3]), "@AppImage-runtime"))
 records = []
 errors = []
-limit = (2, 35)
+limit = (2, 39)
 highest = None
 for path, name in sorted(files, key=lambda item: item[1]):
     with path.open("rb") as stream:
         if stream.read(4) != b"\x7fELF":
             continue
-    result = subprocess.run(["readelf", "--version-info", "--wide", str(path)],
+    result = subprocess.run(["readelf", "--file-header", "--version-info", "--wide", str(path)],
                             capture_output=True, text=True, env={"LC_ALL": "C"})
     if result.returncode:
         errors.append({"file": name, "error": result.stderr})
         continue
     in_needs = False
     has_needs = False
+    machine = None
     versions = set()
     for line in result.stdout.splitlines():
+        if line.lstrip().startswith("Machine:"):
+            machine = line.split(":", 1)[1].strip()
         if line.startswith("Version "):
             in_needs = line.startswith("Version needs section")
             has_needs |= in_needs
         if in_needs:
             versions.update(re.findall(r"\bName: (GLIBC_[A-Za-z0-9_.]+)", line))
+    if machine != expected_machine:
+        errors.append({"file": name, "error": f"Expected {expected_machine} ELF, got {machine}"})
     dynamic = subprocess.run(["readelf", "--dynamic", "--wide", str(path)],
                              capture_output=True, text=True, env={"LC_ALL": "C"})
     if dynamic.returncode or ("(VERNEED)" in dynamic.stdout and not has_needs):
@@ -73,16 +84,16 @@ for path, name in sorted(files, key=lambda item: item[1]):
         if highest is None or numeric > highest:
             highest = numeric
         if numeric > limit:
-            errors.append({"file": name, "error": "Above Ubuntu 22.04 baseline: " + version})
-    records.append({"file": name, "required_versions": sorted(versions)})
+            errors.append({"file": name, "error": "Above Ubuntu 24.04 baseline: " + version})
+    records.append({"file": name, "machine": machine, "required_versions": sorted(versions)})
 if not records:
     errors.append({"error": "No ELF files were checked"})
-print(json.dumps({"ok": not errors, "maximum_allowed": "GLIBC_2.35",
+print(json.dumps({"ok": not errors, "maximum_allowed": "GLIBC_2.39",
                   "highest_required": "GLIBC_" + ".".join(map(str, highest)) if highest else None,
                   "elf_files_checked": len(records), "errors": errors,
                   "files": records}, indent=2))
 if errors:
-    raise SystemExit("AppImage glibc baseline verification failed; see glibc.json")
+    raise SystemExit("AppImage ELF architecture or glibc verification failed; see glibc.json")
 PY
 
 for name in "${libraries[@]}"; do

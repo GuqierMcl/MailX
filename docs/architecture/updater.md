@@ -41,12 +41,13 @@
       "darwin-aarch64": { "signature": "<.sig 文件内容>", "url": "https://github.com/GuqierMcl/MailX/releases/download/v0.2.0/MailX.app.tar.gz" },
       "darwin-x86_64": { "signature": "…", "url": "…" },
       "windows-x86_64": { "signature": "…", "url": "…" },
-      "linux-x86_64": { "signature": "…", "url": "…" }
+      "linux-x86_64": { "signature": "…", "url": "…" },
+      "linux-aarch64": { "signature": "…", "url": "…" }
     }
   }
   ```
 
-  文件名由 `scripts/release-assets.mjs` 统一改为 `MailX_<版本>_<平台><扩展名>`，平台取发布矩阵的名字（`macos-arm64`、`macos-x64`、`windows-x64`、`linux-x64`），`.sig` 跟随同名：`MailX_0.1.0-alpha.4_macos-arm64.dmg`、`MailX_0.1.0-alpha.4_windows-x64-setup.exe`、`MailX_0.1.0-alpha.4_macos-x64.app.tar.gz`。用户按操作系统选下载，架构只在名字里体现。缺任何一个平台都让工作流失败，不发出不完整的 `latest.json`。
+  文件名由 `scripts/release-assets.mjs` 统一改为 `MailX_<版本>_<平台><扩展名>`，平台取发布矩阵的名字，`.sig` 跟随同名。`linux-x86_64` 对应 `_linux-x64.AppImage`，`linux-aarch64` 对应 `_linux-arm64.AppImage`。清单按当前版本的完整文件名匹配，每个更新包和签名都必须齐全。
 - 更新说明取自 `notes`：一次请求同时拿到版本与说明，不访问 GitHub API。在网页上修改 Release 正文不会同步到 `notes`，正本仍是 `CHANGELOG.md`。
 
 ## 5. 网络路径

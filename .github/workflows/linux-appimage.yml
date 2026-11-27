@@ -15,32 +15,24 @@ env:
 
 jobs:
   startup:
-    name: Ubuntu 22.04 startup and tray fallback
-    runs-on: ubuntu-22.04
+    name: Linux installers (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux-x64, os: ubuntu-24.04 }
+          - { platform: linux-arm64, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - name: Install Linux build dependencies
-        timeout-minutes: 8
-        run: |
-          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
-            if [ -f "$source" ]; then
-              sudo sed -i -E 's#https?://azure[.]archive[.]ubuntu[.]com/ubuntu(/|[[:space:]]|$)#https://archive.ubuntu.com/ubuntu\1#g' "$source"
-            fi
-          done
-          if [ -f /etc/apt/apt-mirrors.txt ]; then
-            printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
-          fi
-          apt_options=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_options[@]}" update --error-on=any
-          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
-            libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev libasound2-dev \
-            pkg-config patchelf
+        timeout-minutes: 20
+        run: bash scripts/install-linux-build-deps.sh --packaging
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ubuntu-22.04
+          key: ${{ matrix.os }}
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
@@ -48,35 +40,60 @@ jobs:
       - name: Prepare Linux tray dependencies
         run: bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEMP/tauri-linux-appimage.json"
       # Manual checks never use the release environment or signing credentials.
-      - name: Build unsigned AppImage
+      - name: Build unsigned Linux installers
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
         run: |
           bun run tauri build \
             --config "$RUNNER_TEMP/tauri-linux-appimage.json" \
-            --bundles appimage \
+            --bundles deb,rpm,appimage \
             --config '{"bundle":{"createUpdaterArtifacts":false}}'
-      - name: Check clean runtime and missing-tray fallback
+      - name: Check installer architectures
+        id: installers
+        env:
+          PLATFORM: ${{ matrix.platform }}
         run: |
           shopt -s nullglob
           appimages=(target/release/bundle/appimage/*.AppImage)
-          if [ "${#appimages[@]}" -ne 1 ]; then
-            echo 'Expected exactly one built AppImage.' >&2
+          debs=(target/release/bundle/deb/*.deb)
+          rpms=(target/release/bundle/rpm/*.rpm)
+          if [ "${#appimages[@]}" -ne 1 ] || [ "${#debs[@]}" -ne 1 ] || [ "${#rpms[@]}" -ne 1 ]; then
+            echo 'Expected exactly one DEB, RPM and AppImage.' >&2
             exit 1
           fi
-          bash scripts/smoke-linux-appimage.sh "${appimages[0]}"
-      - name: Preserve AppImage for diagnosis
+          bash scripts/check-linux-installers.sh "$PLATFORM" "${debs[0]}" "${rpms[0]}" "${appimages[0]}"
+          printf 'deb=%s\nappimage=%s\n' "${debs[0]}" "${appimages[0]}" >> "$GITHUB_OUTPUT"
+      - name: Check AppImage startup and missing-tray fallback
+        env:
+          APPIMAGE: ${{ steps.installers.outputs.appimage }}
+        run: bash scripts/smoke-linux-appimage.sh "$APPIMAGE"
+      - name: Install the DEB on clean Ubuntu 24.04
+        env:
+          DEB: ${{ steps.installers.outputs.deb }}
+        run: |
+          docker run --rm --env DEBIAN_FRONTEND=noninteractive \
+            --mount "type=bind,src=$(realpath "$DEB"),dst=/tmp/MailX.deb,readonly" \
+            ubuntu:24.04 bash -ec '
+              apt-get -o Acquire::Retries=3 update --error-on=any
+              apt-get -o Acquire::Retries=3 install -y --no-install-recommends /tmp/MailX.deb
+              test -x /usr/bin/mailx-desktop
+              test -x /usr/bin/mailx-mcp
+            '
+      - name: Preserve installers for diagnosis
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: linux-appimage
-          path: target/release/bundle/appimage/*.AppImage
+          name: installers-${{ matrix.platform }}
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage
           if-no-files-found: warn
           retention-days: 1
       - name: Preserve Linux AppImage evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: linux-appimage-evidence
+          name: linux-appimage-evidence-${{ matrix.platform }}
           path: target/linux-appimage-evidence
           if-no-files-found: warn

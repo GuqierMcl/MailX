@@ -7,15 +7,20 @@
 export const REPOSITORY = 'GuqierMcl/MailX'
 export const RELEASES_URL = `https://github.com/${REPOSITORY}/releases`
 
-export type DownloadId = 'macos-arm64' | 'macos-x64' | 'windows-x64' | 'linux-appimage' | 'linux-deb' | 'linux-rpm'
+export type LinuxArchitecture = 'x64' | 'arm64'
+type LinuxFormat = 'appimage' | 'deb' | 'rpm'
+export type DownloadId = 'macos-arm64' | 'macos-x64' | 'windows-x64' | `linux-${LinuxArchitecture}-${LinuxFormat}`
 
 const SUFFIXES: Record<DownloadId, string> = {
   'macos-arm64': '_macos-arm64.dmg',
   'macos-x64': '_macos-x64.dmg',
   'windows-x64': '_windows-x64-setup.exe',
-  'linux-appimage': '_linux-x64.AppImage',
-  'linux-deb': '_linux-x64.deb',
-  'linux-rpm': '_linux-x64.rpm',
+  'linux-x64-appimage': '_linux-x64.AppImage',
+  'linux-x64-deb': '_linux-x64.deb',
+  'linux-x64-rpm': '_linux-x64.rpm',
+  'linux-arm64-appimage': '_linux-arm64.AppImage',
+  'linux-arm64-deb': '_linux-arm64.deb',
+  'linux-arm64-rpm': '_linux-arm64.rpm',
 }
 
 export interface Download {

@@ -18,6 +18,12 @@ describe("renamed", () => {
     expect(renamed("MailX_0.1.0-alpha.4_amd64.AppImage", "0.1.0-alpha.4", "linux-x64")).toBe(
       "MailX_0.1.0-alpha.4_linux-x64.AppImage",
     );
+    expect(renamed("MailX_0.1.0-alpha.4_arm64.deb", "0.1.0-alpha.4", "linux-arm64")).toBe(
+      "MailX_0.1.0-alpha.4_linux-arm64.deb",
+    );
+    expect(renamed("MailX-0.1.0-alpha.4-1.aarch64.rpm", "0.1.0-alpha.4", "linux-arm64")).toBe(
+      "MailX_0.1.0-alpha.4_linux-arm64.rpm",
+    );
   });
 
   test("a signature keeps its bundle's name and gains .sig", () => {
@@ -67,17 +73,16 @@ describe("renameAssets", () => {
 
   test("the renamed assets are what the updater manifest expects", () => {
     const files = [];
+    const bundles = {
+      "macos-arm64": "MailX.app.tar.gz",
+      "macos-x64": "MailX.app.tar.gz",
+      "windows-x64": "MailX_0.1.0-alpha.4_x64-setup.exe",
+      "linux-x64": "MailX_0.1.0-alpha.4_amd64.AppImage",
+      "linux-arm64": "MailX_0.1.0-alpha.4_aarch64.AppImage",
+    };
     for (const platform of PLATFORMS) {
-      const source =
-        platform === "macos-arm64"
-          ? ["MailX_0.1.0-alpha.4_aarch64.dmg", "MailX.app.tar.gz", "MailX.app.tar.gz.sig"]
-          : platform === "macos-x64"
-            ? ["MailX_0.1.0-alpha.4_x64.dmg", "MailX.app.tar.gz", "MailX.app.tar.gz.sig"]
-            : platform === "windows-x64"
-              ? ["MailX_0.1.0-alpha.4_x64-setup.exe", "MailX_0.1.0-alpha.4_x64-setup.exe.sig"]
-              : ["MailX_0.1.0-alpha.4_amd64.AppImage", "MailX_0.1.0-alpha.4_amd64.AppImage.sig"];
-      const dir = bundle([]);
-      for (const name of source) writeFileSync(join(dir, name), `sig: ${name}`);
+      const name = bundles[platform];
+      const dir = bundle([name, `${name}.sig`]);
       renameAssets(dir, "0.1.0-alpha.4", platform);
       files.push(...readdirSync(dir));
       rmSync(dir, { recursive: true, force: true });
@@ -91,14 +96,16 @@ describe("renameAssets", () => {
       files,
       readSignature: (name) => `sig: ${name}`,
     });
-    expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "windows-x86_64"]);
+    expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "darwin-x86_64", "linux-aarch64", "linux-x86_64", "windows-x86_64"]);
     expect(manifest.platforms["darwin-x86_64"].url).toEndWith("MailX_0.1.0-alpha.4_macos-x64.app.tar.gz");
     expect(manifest.platforms["darwin-aarch64"].url).toEndWith("MailX_0.1.0-alpha.4_macos-arm64.app.tar.gz");
+    expect(manifest.platforms["linux-x86_64"].url).toEndWith("MailX_0.1.0-alpha.4_linux-x64.AppImage");
+    expect(manifest.platforms["linux-aarch64"].url).toEndWith("MailX_0.1.0-alpha.4_linux-arm64.AppImage");
   });
 
   test("an unknown platform is refused before anything moves", () => {
     const dir = bundle(["MailX_0.1.0-alpha.4_aarch64.dmg"]);
-    expect(() => renameAssets(dir, "0.1.0-alpha.4", "linux-arm64")).toThrow(UnknownPlatform);
+    expect(() => renameAssets(dir, "0.1.0-alpha.4", "linux-armhf")).toThrow(UnknownPlatform);
     expect(readdirSync(dir)).toEqual(["MailX_0.1.0-alpha.4_aarch64.dmg"]);
   });
 
@@ -125,15 +132,15 @@ describe("the command line", () => {
   test("names the files in a directory", () => {
     directory = mkdtempSync(join(tmpdir(), "mailx-assets-"));
     mkdirSync(join(directory, "dist"));
-    writeFileSync(join(directory, "dist", "MailX_0.1.0-alpha.4_amd64.deb"), "deb");
+    writeFileSync(join(directory, "dist", "MailX_0.1.0-alpha.4_arm64.deb"), "deb");
     const result = Bun.spawnSync({
-      cmd: ["bun", "scripts/release-assets.mjs", "--dir", join(directory, "dist"), "--version", "0.1.0-alpha.4", "--platform", "linux-x64"],
+      cmd: ["bun", "scripts/release-assets.mjs", "--dir", join(directory, "dist"), "--version", "0.1.0-alpha.4", "--platform", "linux-arm64"],
       cwd: `${import.meta.dirname}/..`,
       stderr: "pipe",
       stdout: "pipe",
     });
     expect(result.exitCode).toBe(0);
-    expect(readdirSync(join(directory, "dist"))).toEqual(["MailX_0.1.0-alpha.4_linux-x64.deb"]);
+    expect(readdirSync(join(directory, "dist"))).toEqual(["MailX_0.1.0-alpha.4_linux-arm64.deb"]);
   });
 
   test("exits non-zero for an unknown platform", () => {
