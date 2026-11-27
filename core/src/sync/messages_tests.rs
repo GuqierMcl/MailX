@@ -131,7 +131,7 @@ fn commands(validity: u32, uids: &[u32]) -> Script {
         .map(u32::to_string)
         .collect::<Vec<_>>()
         .join(" ");
-    vec![
+    let mut script = vec![
         ("LOGIN ".into(), "{tag} OK authenticated\r\n".into()),
         (
             "CAPABILITY".into(),
@@ -155,7 +155,14 @@ fn commands(validity: u32, uids: &[u32]) -> Script {
             "UID SEARCH SINCE ".into(),
             format!("* SEARCH {search}\r\n{{tag}} OK searched\r\n"),
         ),
-    ]
+    ];
+    if !uids.is_empty() {
+        script.push((
+            "UID SEARCH FLAGGED".into(),
+            "* SEARCH\r\n{tag} OK searched\r\n".into(),
+        ));
+    }
+    script
 }
 
 fn header(uid: u32, subject: &str) -> String {
@@ -987,7 +994,7 @@ async fn every_completed_folder_rejection_continues_on_the_same_connection() {
                 header(2, "Must not commit") + "{tag} OK\r\n",
             ));
         }
-        let index = rejected_step.min(3);
+        let index = if rejected_step >= 3 { 4 } else { rejected_step };
         inbox.truncate(index + 1);
         inbox[index].1 = if rejected_step >= 3 {
             header(2, "Must not commit") + "{tag} NO private rejected contents\r\n"
@@ -1721,7 +1728,7 @@ async fn a_refresh_wakes_a_worker_waiting_out_its_backoff() {
     let mut fixture = fixture_with_config(account_config);
     let diagnostics = Arc::new(Capture::default());
     Arc::get_mut(&mut fixture.shared).unwrap().events = diagnostics.clone();
-    let wake = std::sync::Arc::new(tokio::sync::Notify::new());
+    let wake = std::sync::Arc::new(super::SyncWake::default());
     let (_activity, activity) = tokio::sync::watch::channel(Activity::Active);
     let worker = tokio::spawn(super::run(
         fixture.shared.clone(),
@@ -1744,7 +1751,7 @@ async fn a_refresh_wakes_a_worker_waiting_out_its_backoff() {
     .await
     .unwrap();
     // The first retry is due in at least one second; a wake must beat that.
-    wake.notify_one();
+    wake.notify();
     let woken = tokio::time::timeout(Duration::from_millis(600), async {
         loop {
             let state = sequence(&fixture);
@@ -1821,4 +1828,307 @@ async fn provider_policy_stops_before_reconnect_or_later_folders_and_keeps_cache
         .unwrap();
     assert!(page.items.iter().any(|mail| mail.subject == "Cached"));
     peer.await.unwrap();
+}
+
+#[tokio::test]
+async fn idle_and_manual_refresh_bypass_unchanged_status_skip_for_flag_changes() {
+    let fixture = fixture();
+    let targets = replace_targets(&fixture, &[("INBOX", true), ("Sent", true)]);
+    let mut memory = FolderMemory::new();
+
+    // Round 1: initial full sync caches both INBOX and Sent in FolderMemory.
+    let mut initial = authenticate_commands();
+    initial.extend([
+        (
+            "STATUS \"INBOX\"".into(),
+            "* STATUS \"INBOX\" (MESSAGES 1 UNSEEN 0 UIDNEXT 10 UIDVALIDITY 21)\r\n{tag} OK\r\n"
+                .into(),
+        ),
+        (
+            "EXAMINE \"INBOX\"".into(),
+            "* 1 EXISTS\r\n* OK [UIDVALIDITY 21] ok\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH SINCE ".into(),
+            "* SEARCH 2\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH FLAGGED".into(),
+            "* SEARCH\r\n{tag} OK\r\n".into(),
+        ),
+    ]);
+    add_headers(&mut initial, &[(2, "Inbox Mail")]);
+    initial.extend([
+        (
+            "STATUS \"Sent\"".into(),
+            "* STATUS \"Sent\" (MESSAGES 1 UNSEEN 0 UIDNEXT 10 UIDVALIDITY 22)\r\n{tag} OK\r\n"
+                .into(),
+        ),
+        (
+            "EXAMINE \"Sent\"".into(),
+            "* 1 EXISTS\r\n* OK [UIDVALIDITY 22] ok\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH SINCE ".into(),
+            "* SEARCH 3\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH FLAGGED".into(),
+            "* SEARCH\r\n{tag} OK\r\n".into(),
+        ),
+    ]);
+    add_headers(&mut initial, &[(3, "Sent Mail")]);
+    let (session, peer) = scripted_session(initial).await;
+    assert!(matches!(
+        sync_targets(
+            &fixture.shared,
+            &fixture.token,
+            targets.clone(),
+            session,
+            &mut memory,
+            None,
+            || async { Err(ImapError::Timeout) },
+        )
+        .await,
+        Outcome::Synced
+    ));
+    peer.await.unwrap();
+
+    // Round 2 (IDLE wake): STATUS is unchanged for both folders, so only INBOX
+    // reconciles its flags (picking up \Flagged) while Sent still skips.
+    apply_reconcile(
+        &mut memory,
+        &targets,
+        Reconcile {
+            all: false,
+            inbox: true,
+        },
+    );
+    let mut idle_round = authenticate_commands();
+    idle_round.extend([
+        (
+            "STATUS \"INBOX\"".into(),
+            "* STATUS \"INBOX\" (MESSAGES 1 UNSEEN 0 UIDNEXT 10 UIDVALIDITY 21)\r\n{tag} OK\r\n"
+                .into(),
+        ),
+        (
+            "EXAMINE \"INBOX\"".into(),
+            "* 1 EXISTS\r\n* OK [UIDVALIDITY 21] ok\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH SINCE ".into(),
+            "* SEARCH 2\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH FLAGGED".into(),
+            "* SEARCH 2\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID FETCH 2 (UID FLAGS)".into(),
+            "* 1 FETCH (UID 2 FLAGS (\\Seen \\Flagged))\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "STATUS \"Sent\"".into(),
+            "* STATUS \"Sent\" (MESSAGES 1 UNSEEN 0 UIDNEXT 10 UIDVALIDITY 22)\r\n{tag} OK\r\n"
+                .into(),
+        ),
+    ]);
+    let (session, peer) = scripted_session(idle_round).await;
+    assert!(matches!(
+        sync_targets(
+            &fixture.shared,
+            &fixture.token,
+            targets.clone(),
+            session,
+            &mut memory,
+            None,
+            || async { Err(ImapError::Timeout) },
+        )
+        .await,
+        Outcome::Synced
+    ));
+    peer.await.unwrap();
+
+    let starred = |subject: &str| {
+        fixture
+            .service
+            .lock()
+            .unwrap()
+            .list_emails(&EmailListQuery::default())
+            .unwrap()
+            .items
+            .into_iter()
+            .find(|mail| mail.subject == subject)
+            .unwrap()
+            .is_starred
+    };
+    assert!(starred("Inbox Mail"));
+    assert!(!starred("Sent Mail"));
+
+    // Round 3 (manual refresh): STATUS is still unchanged, yet every folder
+    // reconciles its flags (clearing INBOX star and setting Sent star).
+    apply_reconcile(
+        &mut memory,
+        &targets,
+        Reconcile {
+            all: true,
+            inbox: false,
+        },
+    );
+    let mut refresh_round = authenticate_commands();
+    refresh_round.extend([
+        (
+            "STATUS \"INBOX\"".into(),
+            "* STATUS \"INBOX\" (MESSAGES 1 UNSEEN 0 UIDNEXT 10 UIDVALIDITY 21)\r\n{tag} OK\r\n"
+                .into(),
+        ),
+        (
+            "EXAMINE \"INBOX\"".into(),
+            "* 1 EXISTS\r\n* OK [UIDVALIDITY 21] ok\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH SINCE ".into(),
+            "* SEARCH 2\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH FLAGGED".into(),
+            "* SEARCH\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID FETCH 2 (UID FLAGS)".into(),
+            "* 1 FETCH (UID 2 FLAGS (\\Seen))\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "STATUS \"Sent\"".into(),
+            "* STATUS \"Sent\" (MESSAGES 1 UNSEEN 0 UIDNEXT 10 UIDVALIDITY 22)\r\n{tag} OK\r\n"
+                .into(),
+        ),
+        (
+            "EXAMINE \"Sent\"".into(),
+            "* 1 EXISTS\r\n* OK [UIDVALIDITY 22] ok\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH SINCE ".into(),
+            "* SEARCH 3\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH FLAGGED".into(),
+            "* SEARCH 3\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID FETCH 3 (UID FLAGS)".into(),
+            "* 1 FETCH (UID 3 FLAGS (\\Seen \\Flagged))\r\n{tag} OK\r\n".into(),
+        ),
+    ]);
+    let (session, peer) = scripted_session(refresh_round).await;
+    assert!(matches!(
+        sync_targets(
+            &fixture.shared,
+            &fixture.token,
+            targets,
+            session,
+            &mut memory,
+            None,
+            || async { Err(ImapError::Timeout) },
+        )
+        .await,
+        Outcome::Synced
+    ));
+    peer.await.unwrap();
+
+    assert!(!starred("Inbox Mail"));
+    assert!(starred("Sent Mail"));
+}
+
+#[tokio::test]
+async fn starred_messages_outside_the_date_window_are_synced_and_unstarred_cleanly() {
+    let fixture = fixture();
+    let old_time = chrono::Utc::now() - chrono::Duration::days(90);
+    let recent_time = chrono::Utc::now() - chrono::Duration::hours(2);
+
+    // Round 1: UID 200 is inside the 30-day window; UID 50 is 90 days old and starred.
+    let mut first = authenticate_commands();
+    first.extend([
+        (
+            "STATUS ".into(),
+            "* STATUS INBOX (MESSAGES 2 UNSEEN 0 UIDNEXT 201 UIDVALIDITY 21)\r\n{tag} OK\r\n"
+                .into(),
+        ),
+        (
+            "EXAMINE ".into(),
+            "* 2 EXISTS\r\n* OK [UIDVALIDITY 21] ok\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH SINCE ".into(),
+            "* SEARCH 200\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH FLAGGED".into(),
+            "* SEARCH 50\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID FETCH 50,200 (UID FLAGS INTERNALDATE".into(),
+            format!(
+                "{}{}{}",
+                header_with(200, "Recent", "\\Seen", recent_time),
+                header_with(50, "Old Star", "\\Seen \\Flagged", old_time),
+                "{tag} OK headers\r\n"
+            ),
+        ),
+    ]);
+    run(&fixture, first, true).await.unwrap();
+
+    let starred_page = fixture
+        .service
+        .lock()
+        .unwrap()
+        .list_emails(&EmailListQuery {
+            starred: Some(true),
+            ..EmailListQuery::default()
+        })
+        .unwrap();
+    assert_eq!(starred_page.items.len(), 1);
+    assert_eq!(starred_page.items[0].subject, "Old Star");
+
+    // Round 2: UID 50 is unstarred remotely (no longer returned by UID SEARCH FLAGGED),
+    // yet refresh_flags still checks it and clears is_starred without deleting it.
+    let mut second = authenticate_commands();
+    second.extend([
+        (
+            "STATUS ".into(),
+            "* STATUS INBOX (MESSAGES 2 UNSEEN 0 UIDNEXT 201 UIDVALIDITY 21)\r\n{tag} OK\r\n"
+                .into(),
+        ),
+        (
+            "EXAMINE ".into(),
+            "* 2 EXISTS\r\n* OK [UIDVALIDITY 21] ok\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH SINCE ".into(),
+            "* SEARCH 200\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID SEARCH FLAGGED".into(),
+            "* SEARCH\r\n{tag} OK\r\n".into(),
+        ),
+        (
+            "UID FETCH 50,200 (UID FLAGS)".into(),
+            "* 1 FETCH (UID 200 FLAGS (\\Seen))\r\n* 2 FETCH (UID 50 FLAGS (\\Seen))\r\n{tag} OK\r\n"
+                .into(),
+        ),
+    ]);
+    run(&fixture, second, true).await.unwrap();
+
+    let all = fixture
+        .service
+        .lock()
+        .unwrap()
+        .list_emails(&EmailListQuery::default())
+        .unwrap();
+    let old = all
+        .items
+        .iter()
+        .find(|mail| mail.subject == "Old Star")
+        .expect("unstarred older message remains visible instead of being marked deleted");
+    assert!(!old.is_starred);
 }

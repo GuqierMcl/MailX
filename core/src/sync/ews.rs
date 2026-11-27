@@ -318,7 +318,7 @@ fn store_snapshot(
         )?)? > 0;
     }
     let cached = service.cached_uids(target)?;
-    let cached_ids: HashSet<_> = cached.iter().map(|(uid, _)| *uid).collect();
+    let cached_ids: HashSet<_> = cached.iter().map(|(uid, _, _)| *uid).collect();
     let keys: Vec<_> = items
         .iter()
         .map(|item| (item.id.clone(), item.change_key.clone()))
@@ -331,7 +331,7 @@ fn store_snapshot(
     if !capped {
         let remote: HashSet<_> = items.iter().map(|item| item.id.as_str()).collect();
         let mut deleted = Vec::new();
-        for (uid, received) in &cached {
+        for (uid, received, _) in &cached {
             if received.as_str() >= cursor.window_start.as_str()
                 && let Some(item) = service.ews_item(target, *uid)?
                 && !remote.contains(item.item_id.as_str())

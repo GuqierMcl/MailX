@@ -939,6 +939,19 @@ impl Session {
             .await
     }
 
+    pub(crate) async fn search_flagged(
+        &mut self,
+        mut mailbox: MailboxInfo,
+    ) -> Result<Vec<u32>, ImapError> {
+        self.search(
+            "UID SEARCH FLAGGED",
+            Some(&mut mailbox),
+            None,
+            ImapSearchKind::Flagged,
+        )
+        .await
+    }
+
     pub(crate) async fn search_uids(&mut self, requested: &[u32]) -> Result<Vec<u32>, ImapError> {
         let query = format!("UID SEARCH UID {}", nonempty_uid_set(requested)?);
         self.search(&query, None, Some(requested), ImapSearchKind::Uids)

@@ -28,7 +28,7 @@ impl Harness {
         let sessions = Arc::new(Mutex::new(VecDeque::from(sessions)));
         let health = Arc::new(watch::channel(IdleHealth::Starting).0);
         let control = Arc::new(IdleControl::default());
-        let sync_wake = Arc::new(Notify::new());
+        let sync_wake = Arc::new(SyncWake::default());
         let wakes = Arc::new(AtomicUsize::new(0));
         {
             let (sync_wake, wakes) = (sync_wake.clone(), wakes.clone());
@@ -296,7 +296,7 @@ async fn credential_failures_disable_idle() {
     let health = Arc::new(watch::channel(IdleHealth::Starting).0);
     let context = WatchContext {
         health: health.clone(),
-        sync_wake: Arc::new(Notify::new()),
+        sync_wake: Arc::new(SyncWake::default()),
         control: Arc::new(IdleControl::default()),
         timing: Timing::default(),
     };
@@ -427,7 +427,7 @@ async fn a_reconnect_signal_during_connect_does_not_bounce_the_new_session() {
     let connects = Arc::new(AtomicU32::new(0));
     let health = Arc::new(watch::channel(IdleHealth::Starting).0);
     let control = Arc::new(IdleControl::default());
-    let sync_wake = Arc::new(Notify::new());
+    let sync_wake = Arc::new(SyncWake::default());
     let context = WatchContext {
         health: health.clone(),
         sync_wake,

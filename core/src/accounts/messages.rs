@@ -275,7 +275,10 @@ impl AccountService {
         self.storage.ensure_generation(target, window_start)
     }
 
-    pub(crate) fn cached_uids(&self, target: &SyncTarget) -> Result<Vec<(u32, String)>, AppError> {
+    pub(crate) fn cached_uids(
+        &self,
+        target: &SyncTarget,
+    ) -> Result<Vec<(u32, String, bool)>, AppError> {
         self.storage.cached_uids(target)
     }
 
