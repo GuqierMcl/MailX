@@ -207,14 +207,20 @@ impl Storage {
         Ok(cursor)
     }
 
-    pub(crate) fn cached_uids(&self, target: &SyncTarget) -> Result<Vec<(u32, String)>, AppError> {
+    pub(crate) fn cached_uids(
+        &self,
+        target: &SyncTarget,
+    ) -> Result<Vec<(u32, String, bool)>, AppError> {
         if !current_target(&self.db, target)? {
             return Ok(vec![]);
         }
-        let mut statement = self.db.prepare("SELECT uid, received_at FROM messages WHERE folder_id = ?1 AND uid_validity = ?2 AND remote_state = 'present' ORDER BY uid")?;
+        let mut statement = self.db.prepare(
+            "SELECT uid, received_at, is_flagged FROM messages
+             WHERE folder_id = ?1 AND uid_validity = ?2 AND remote_state = 'present' ORDER BY uid",
+        )?;
         Ok(statement
             .query_map(params![target.folder_id, target.uid_validity], |row| {
-                Ok((row.get(0)?, row.get(1)?))
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
             })?
             .collect::<Result<_, _>>()?)
     }

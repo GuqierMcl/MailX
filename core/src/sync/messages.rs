@@ -16,6 +16,9 @@ use super::manager::{Shared, SyncError, WorkerToken, with_store};
 
 const WINDOW_DAYS: i64 = 30;
 const WINDOW_LIMIT: usize = 1_000;
+/// Cap on starred messages outside the ordinary date window pulled per folder,
+/// so a mailbox with thousands of historical stars stays bounded.
+const FLAGGED_WINDOW_LIMIT: usize = 500;
 const HEADER_BATCH_SIZE: usize = 200;
 const FLAGS_BATCH_SIZE: usize = 500;
 const FLAGS_RETRY_BATCH_SIZE: usize = 25;
@@ -59,33 +62,65 @@ struct MessagePlan {
 
 /// SEARCH has already completed successfully. Its full result, rather than
 /// the capped selection, is the only authority for disappearance in this range.
+/// Starred messages outside the date window are fetched up to
+/// [`FLAGGED_WINDOW_LIMIT`] and existing starred cache rows always refresh
+/// their flags so unstarring an older message converges without treating it as
+/// deleted.
 fn plan_messages(
     cursor: &FolderSyncCursor,
-    cached: &[(u32, String)],
+    cached: &[(u32, String, bool)],
     server_uids: &[u32],
+    flagged_uids: &[u32],
 ) -> MessagePlan {
     let remote: HashSet<u32> = server_uids.iter().copied().collect();
-    let cached_ids: HashSet<u32> = cached.iter().map(|(uid, _)| *uid).collect();
+    let cached_ids: HashSet<u32> = cached.iter().map(|(uid, _, _)| *uid).collect();
     let mut selected: Vec<u32> = remote.iter().copied().collect();
     selected.sort_unstable_by(|a, b| b.cmp(a));
     let capped = selected.len() > WINDOW_LIMIT;
     selected.truncate(WINDOW_LIMIT);
+
+    let selected_ids: HashSet<u32> = selected.iter().copied().collect();
+    let mut extra_flagged: Vec<u32> = flagged_uids
+        .iter()
+        .copied()
+        .filter(|uid| !selected_ids.contains(uid))
+        .collect();
+    extra_flagged.sort_unstable_by(|a, b| b.cmp(a));
+    extra_flagged.dedup();
+    extra_flagged.truncate(FLAGGED_WINDOW_LIMIT);
+
+    let mut fetch: Vec<u32> = selected
+        .iter()
+        .chain(extra_flagged.iter())
+        .filter(|uid| !cached_ids.contains(uid))
+        .copied()
+        .collect();
+    fetch.sort_unstable_by(|a, b| b.cmp(a));
+    fetch.dedup();
+
+    let mut refresh_flags: Vec<u32> = selected
+        .into_iter()
+        .chain(extra_flagged)
+        .filter(|uid| cached_ids.contains(uid))
+        .chain(
+            cached
+                .iter()
+                .filter(|(_, _, is_flagged)| *is_flagged)
+                .map(|(uid, _, _)| *uid),
+        )
+        .collect();
+    refresh_flags.sort_unstable_by(|a, b| b.cmp(a));
+    refresh_flags.dedup();
+
     MessagePlan {
-        fetch: selected
-            .iter()
-            .filter(|uid| !cached_ids.contains(uid))
-            .copied()
-            .collect(),
-        refresh_flags: selected
-            .into_iter()
-            .filter(|uid| cached_ids.contains(uid))
-            .collect(),
+        fetch,
+        refresh_flags,
         deleted: cached
             .iter()
-            .filter(|(uid, received_at)| {
+            .filter(|(uid, received_at, _)| {
                 received_at.as_str() >= cursor.window_start.as_str() && !remote.contains(uid)
             })
-            .map(|(uid, _)| *uid)
+            .map(|(uid, _, _)| *uid)
             .collect(),
         capped,
     }
@@ -180,9 +215,23 @@ pub(super) async fn sync_folder(
     let since = NaiveDate::parse_from_str(&cursor.window_start, "%Y-%m-%d")
         .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?;
     let remote = session.search_since(since, mailbox).await?;
+    let flagged = if mailbox.exists == Some(0) && remote.is_empty() {
+        Vec::new()
+    } else {
+        let mut flagged_mailbox = mailbox;
+        if !remote.is_empty() {
+            flagged_mailbox.exists = None;
+        }
+        match session.search_flagged(flagged_mailbox).await {
+            Ok(uids) => uids,
+            // Servers that refuse FLAGGED search still sync the ordinary window.
+            Err(ImapError::Rejected) => Vec::new(),
+            Err(error) => return Err(error.into()),
+        }
+    };
     let guard = target.clone();
     let cached = with_store(shared, token, move |service| service.cached_uids(&guard)).await?;
-    let plan = plan_messages(&cursor, &cached, &remote);
+    let plan = plan_messages(&cursor, &cached, &remote, &flagged);
     // Commit known disappearances before any new identity can release a local
     // snapshot against an already-removed server copy from this round.
     let guard = target.clone();
@@ -487,7 +536,7 @@ mod tests {
 
     #[test]
     fn initial_sync_uses_actual_uids_in_descending_order() {
-        let plan = plan_messages(&cursor(), &[], &[2, 98, 4, 98]);
+        let plan = plan_messages(&cursor(), &[], &[2, 98, 4, 98], &[]);
         assert_eq!(plan.fetch, [98, 4, 2]);
         assert!(plan.refresh_flags.is_empty());
         assert!(plan.deleted.is_empty());
@@ -498,8 +547,8 @@ mod tests {
     fn incremental_plan_does_not_skip_holes_below_the_high_water_mark() {
         let mut cursor = cursor();
         cursor.highest_uid = 100;
-        let cached = vec![(100, "2026-10-17T00:00:00.000Z".into())];
-        let plan = plan_messages(&cursor, &cached, &[99, 100, 101]);
+        let cached = vec![(100, "2026-10-17T00:00:00.000Z".into(), false)];
+        let plan = plan_messages(&cursor, &cached, &[99, 100, 101], &[]);
         assert_eq!(plan.fetch, [101, 99]);
         assert_eq!(plan.refresh_flags, [100]);
     }
@@ -507,8 +556,8 @@ mod tests {
     #[test]
     fn capped_selection_never_implies_deletion_of_unselected_remote_mail() {
         let remote: Vec<_> = (1..=1001).collect();
-        let cached = vec![(1, "2026-10-17T00:00:00.000Z".into())];
-        let plan = plan_messages(&cursor(), &cached, &remote);
+        let cached = vec![(1, "2026-10-17T00:00:00.000Z".into(), false)];
+        let plan = plan_messages(&cursor(), &cached, &remote, &[]);
         assert!(plan.capped);
         assert_eq!(plan.fetch.len(), WINDOW_LIMIT);
         assert_eq!(plan.fetch.first(), Some(&1001));
@@ -519,14 +568,14 @@ mod tests {
     #[test]
     fn deletion_only_reconciles_the_successfully_enumerated_window() {
         let cached = vec![
-            (1, "2026-09-17T23:59:59.999Z".into()),
-            (2, "2026-09-18T00:00:00.000Z".into()),
-            (3, "2026-10-17T00:00:00.000Z".into()),
+            (1, "2026-09-17T23:59:59.999Z".into(), false),
+            (2, "2026-09-18T00:00:00.000Z".into(), false),
+            (3, "2026-10-17T00:00:00.000Z".into(), false),
         ];
-        let plan = plan_messages(&cursor(), &cached, &[3]);
+        let plan = plan_messages(&cursor(), &cached, &[3], &[]);
         assert_eq!(plan.deleted, [2]);
         assert_eq!(plan.refresh_flags, [3]);
-        assert_eq!(plan_messages(&cursor(), &cached, &[]).deleted, [2, 3]);
+        assert_eq!(plan_messages(&cursor(), &cached, &[], &[]).deleted, [2, 3]);
     }
 
     #[test]
@@ -534,8 +583,36 @@ mod tests {
         // The store switches the generation and supplies no old present rows.
         let mut cursor = cursor();
         cursor.uid_validity = 43;
-        let plan = plan_messages(&cursor, &[], &[1, 2]);
+        let plan = plan_messages(&cursor, &[], &[1, 2], &[]);
         assert_eq!(plan.fetch, [2, 1]);
         assert!(plan.deleted.is_empty());
+    }
+
+    #[test]
+    fn flagged_messages_outside_the_date_window_are_fetched_bounded_and_refreshed_on_unstar() {
+        let cached = vec![
+            (5, "2026-08-01T00:00:00.000Z".into(), true),
+            (10, "2026-08-10T00:00:00.000Z".into(), true),
+            (100, "2026-10-17T00:00:00.000Z".into(), false),
+        ];
+        // UID 5 was unstarred remotely (no longer in flagged_uids), UID 10 is still
+        // starred, UID 20 is a newly discovered historical star outside the date window.
+        let plan = plan_messages(&cursor(), &cached, &[100, 101], &[10, 20, 100]);
+        assert_eq!(plan.fetch, [101, 20]);
+        assert_eq!(plan.refresh_flags, [100, 10, 5]);
+        assert!(
+            plan.deleted.is_empty(),
+            "unstarring an older message must never treat it as deleted"
+        );
+        assert!(!plan.capped);
+
+        // Historical stars beyond FLAGGED_WINDOW_LIMIT keep the newest ones without
+        // marking the ordinary date window as capped.
+        let many_flagged: Vec<u32> = (1..=(FLAGGED_WINDOW_LIMIT as u32 + 25)).collect();
+        let bounded = plan_messages(&cursor(), &[], &[10_000], &many_flagged);
+        assert_eq!(bounded.fetch.len(), 1 + FLAGGED_WINDOW_LIMIT);
+        assert_eq!(bounded.fetch.first(), Some(&10_000));
+        assert_eq!(bounded.fetch.last(), Some(&26));
+        assert!(!bounded.capped);
     }
 }

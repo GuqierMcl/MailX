@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime};
 
@@ -337,6 +338,66 @@ impl Shared {
     }
 }
 
+/// Which cached `STATUS` snapshots should be discarded on the next round so
+/// flags (such as `\Flagged`) that `STATUS` cannot reflect are reconciled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Reconcile {
+    pub(super) all: bool,
+    pub(super) inbox: bool,
+}
+
+/// Signal into an account's sync worker, optionally forcing a full flag/header
+/// reconciliation instead of skipping folders whose `STATUS` looks unchanged.
+#[derive(Default)]
+pub(super) struct SyncWake {
+    notify: tokio::sync::Notify,
+    reconcile_all: AtomicBool,
+    reconcile_inbox: AtomicBool,
+}
+
+impl SyncWake {
+    pub(super) fn notify(&self) {
+        self.notify.notify_one();
+    }
+
+    pub(super) fn notify_reconcile_all(&self) {
+        self.reconcile_all.store(true, Ordering::Release);
+        self.notify.notify_one();
+    }
+
+    pub(super) fn notify_reconcile_inbox(&self) {
+        self.reconcile_inbox.store(true, Ordering::Release);
+        self.notify.notify_one();
+    }
+
+    pub(super) fn notified(&self) -> tokio::sync::futures::Notified<'_> {
+        self.notify.notified()
+    }
+
+    pub(super) fn take_reconcile(&self) -> Reconcile {
+        Reconcile {
+            all: self.reconcile_all.swap(false, Ordering::AcqRel),
+            inbox: self.reconcile_inbox.swap(false, Ordering::AcqRel),
+        }
+    }
+}
+
+fn apply_reconcile(
+    memory: &mut messages::FolderMemory,
+    targets: &[(String, String)],
+    reconcile: Reconcile,
+) {
+    if reconcile.all {
+        memory.clear();
+    } else if reconcile.inbox {
+        for (folder_id, remote_name) in targets {
+            if remote_name.eq_ignore_ascii_case("INBOX") {
+                memory.remove(folder_id);
+            }
+        }
+    }
+}
+
 pub(crate) struct SyncManager {
     shared: Arc<Shared>,
     runtime: Handle,
@@ -345,7 +406,7 @@ pub(crate) struct SyncManager {
     retired: Mutex<HashSet<String>>,
     workers: Mutex<HashMap<String, JoinHandle<()>>>,
     /// Ends the wait between rounds early when the user asks for a refresh.
-    wakers: Arc<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>>,
+    wakers: Arc<Mutex<HashMap<String, Arc<SyncWake>>>>,
     /// One write-back worker per account, beside its sync worker.
     writers: Mutex<HashMap<String, Writer>>,
     /// IDLE watchers, shared with the sleep ticker.
@@ -369,7 +430,7 @@ const WATCHER_GRACE: Duration = Duration::from_secs(5);
 /// interrupted are overdue. Reconnect IDLE at once and run a sync round.
 fn wake_after_sleep(
     watchers: &Mutex<HashMap<String, Watcher>>,
-    wakers: &Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
+    wakers: &Mutex<HashMap<String, Arc<SyncWake>>>,
 ) {
     if let Ok(watchers) = watchers.lock() {
         for (_, control) in watchers.values() {
@@ -378,7 +439,7 @@ fn wake_after_sleep(
     }
     if let Ok(wakers) = wakers.lock() {
         for wake in wakers.values() {
-            wake.notify_one();
+            wake.notify_reconcile_all();
         }
     }
 }
@@ -503,7 +564,7 @@ impl SyncManager {
                                 .ok()
                                 .and_then(|wakers| wakers.get(&account).cloned())
                         {
-                            sync.notify_one();
+                            sync.notify();
                         }
                     }
                     match end {
@@ -569,7 +630,7 @@ impl SyncManager {
             .and_then(|wakers| wakers.get(account_id).cloned());
         match (running, wake) {
             (true, Some(wake)) => {
-                wake.notify_one();
+                wake.notify_reconcile_all();
                 true
             }
             _ => false,
@@ -610,7 +671,7 @@ impl SyncManager {
             .ok()
             .and_then(|wakers| wakers.get(account_id).cloned());
         if let Some(wake) = wake {
-            wake.notify_one();
+            wake.notify_reconcile_all();
             true
         } else {
             false
@@ -627,7 +688,7 @@ impl SyncManager {
             .ok()
             .and_then(|wakers| wakers.get(account_id).cloned())
         {
-            wake.notify_one();
+            wake.notify();
         }
     }
 
@@ -687,7 +748,7 @@ impl SyncManager {
         };
         drop(service);
         let shared = self.shared.clone();
-        let wake = Arc::new(tokio::sync::Notify::new());
+        let wake = Arc::new(SyncWake::default());
         if let Ok(mut wakers) = self.wakers.lock() {
             wakers.insert(account_id.to_owned(), wake.clone());
         }
@@ -720,7 +781,7 @@ impl SyncManager {
         &self,
         account_id: &str,
         token: WorkerToken,
-        sync_wake: Arc<tokio::sync::Notify>,
+        sync_wake: Arc<SyncWake>,
         health: Arc<tokio::sync::watch::Sender<IdleHealth>>,
     ) {
         let Ok(mut watchers) = self.watchers.lock() else {
@@ -899,7 +960,7 @@ pub(super) fn record_round(
 async fn run(
     shared: Arc<Shared>,
     token: WorkerToken,
-    wake: Arc<tokio::sync::Notify>,
+    wake: Arc<SyncWake>,
     mut activity: tokio::sync::watch::Receiver<Activity>,
     mut idle_health: tokio::sync::watch::Receiver<IdleHealth>,
 ) {
@@ -912,6 +973,10 @@ async fn run(
     loop {
         if shared.policy_blocked(&token) {
             return;
+        }
+        let reconcile = wake.take_reconcile();
+        if reconcile.all {
+            memory.clear();
         }
         shared.begin_round(&token);
         let before = revision_total(&shared, &token);
@@ -926,6 +991,7 @@ async fn run(
             &token,
             &mut last_folder_refresh,
             &mut memory,
+            reconcile,
             diagnostics.as_ref(),
         )
         .await;
@@ -1013,7 +1079,7 @@ async fn run(
 async fn wait_for_next_round(
     pause: &Pause,
     cadence: &mut Cadence,
-    wake: &tokio::sync::Notify,
+    wake: &SyncWake,
     activity: &mut tokio::sync::watch::Receiver<Activity>,
     idle_health: &mut tokio::sync::watch::Receiver<IdleHealth>,
 ) -> bool {
@@ -1128,6 +1194,7 @@ async fn sync_once(
     token: &WorkerToken,
     last_folder_refresh: &mut Option<Instant>,
     memory: &mut messages::FolderMemory,
+    reconcile: Reconcile,
     diagnostics: Option<&RoundDiagnostics>,
 ) -> Outcome {
     if token.is_ews {
@@ -1161,6 +1228,7 @@ async fn sync_once(
         Ok(targets) => targets,
         Err(error) => return from_sync_error(error),
     };
+    apply_reconcile(memory, &cached, reconcile);
     shared.reconcile_targets(token, &cached, false);
     if shared.policy_blocked(token) {
         return classify(ImapError::ProviderPolicy);
@@ -1556,6 +1624,13 @@ mod tests {
         let _ = sync_signal.notified().now_or_never();
         assert!(manager.refresh_for_agent(&account.id));
         assert!(sync_signal.notified().now_or_never().is_some());
+        assert_eq!(
+            sync_signal.take_reconcile(),
+            Reconcile {
+                all: true,
+                inbox: false,
+            }
+        );
         assert_eq!(manager.states().pop().unwrap().generation, old.generation);
         manager.shared.block_policy(&old);
         let signal = manager.writers.lock().unwrap()[&account.id].1.clone();
@@ -1573,7 +1648,7 @@ mod tests {
         assert_eq!(failed.phase, SyncPhase::Failed);
         assert!(!failed.failure.unwrap().will_retry);
         manager.workers.lock().unwrap()[&account.id].abort();
-        let wake = Arc::new(tokio::sync::Notify::new());
+        let wake = Arc::new(SyncWake::default());
         super::run(
             manager.shared.clone(),
             old.clone(),
@@ -1710,7 +1785,7 @@ mod tests {
         done: tokio::task::JoinHandle<bool>,
         started: Instant,
         activity: tokio::sync::watch::Sender<Activity>,
-        wake: Arc<tokio::sync::Notify>,
+        wake: Arc<SyncWake>,
         health: tokio::sync::watch::Sender<IdleHealth>,
     }
 
@@ -1727,7 +1802,7 @@ mod tests {
         ) -> Self {
             let (sender, mut receiver) = tokio::sync::watch::channel(activity);
             let (health, mut health_receiver) = tokio::sync::watch::channel(idle);
-            let wake = Arc::new(tokio::sync::Notify::new());
+            let wake = Arc::new(SyncWake::default());
             let task_wake = wake.clone();
             let started = Instant::now();
             let done = tokio::spawn(async move {
@@ -1912,7 +1987,7 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(3)).await;
         waiting.activity.send(Activity::Active).unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
-        waiting.wake.notify_one();
+        waiting.wake.notify_reconcile_all();
         let waited = waiting.finished_within(Duration::from_secs(1)).await;
         assert_eq!(waited, Some(Duration::from_secs(4)));
     }
@@ -1925,7 +2000,7 @@ mod tests {
             super::super::cadence::BACKGROUND_CAP
         );
         let (sender, mut receiver) = tokio::sync::watch::channel(Activity::Background);
-        let wake = tokio::sync::Notify::new();
+        let wake = SyncWake::default();
         let (_health, mut health_receiver) = tokio::sync::watch::channel(IdleHealth::Starting);
         // The pinned future borrows the cadence; the block ends that borrow before it is read again.
         {
@@ -1956,10 +2031,56 @@ mod tests {
         for activity in [Activity::Active, Activity::Background] {
             let mut waiting = Waiting::start(Pause::Cadence, quiet_cadence(30), activity);
             tokio::time::sleep(Duration::from_secs(1)).await;
-            waiting.wake.notify_one();
+            waiting.wake.notify_reconcile_all();
             let waited = waiting.finished_within(Duration::from_secs(1)).await;
             assert_eq!(waited, Some(Duration::from_secs(1)), "{activity:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn refresh_marks_full_reconcile_while_plain_wake_does_not() {
+        let directory = TempDir::new().unwrap();
+        let mut service =
+            AccountService::open(directory.path(), Arc::new(MemorySecrets::default())).unwrap();
+        let account = service
+            .create(
+                serde_json::from_value(json!({
+                    "requestId": uuid::Uuid::new_v4().to_string(),
+                    "config": config(json!({"kind": "direct"}))
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        let service = Arc::new(Mutex::new(service));
+        let manager = SyncManager::new(
+            service.clone(),
+            Handle::current(),
+            Arc::new(|_: &CoreEvent| {}),
+        );
+        manager.restart(&account.id);
+        let signal = manager.wakers.lock().unwrap()[&account.id].clone();
+        let _ = signal.notified().now_or_never();
+        let _ = signal.take_reconcile();
+
+        manager.wake(&account.id);
+        assert!(signal.notified().now_or_never().is_some());
+        assert_eq!(signal.take_reconcile(), Reconcile::default());
+
+        assert!(manager.refresh(&account.id));
+        assert!(signal.notified().now_or_never().is_some());
+        assert_eq!(
+            signal.take_reconcile(),
+            Reconcile {
+                all: true,
+                inbox: false,
+            }
+        );
+        assert_eq!(
+            signal.take_reconcile(),
+            Reconcile::default(),
+            "taking the flag clears it for subsequent ordinary polls"
+        );
+        manager.shutdown();
     }
 
     #[tokio::test(start_paused = true)]

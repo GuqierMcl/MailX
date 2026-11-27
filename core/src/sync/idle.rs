@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::{Notify, watch};
 use tokio::time::Instant;
 
-use super::manager::{Shared, SyncError, WorkerToken, with_store};
+use super::manager::{Shared, SyncError, SyncWake, WorkerToken, with_store};
 use super::writeback::retry_delay;
 use crate::accounts::sync_plan::PlanError;
 use crate::error::ErrorCode;
@@ -87,7 +87,7 @@ pub(super) enum ConnectFailure {
 /// Everything the watcher loop needs besides the connection itself.
 pub(super) struct WatchContext {
     pub health: Arc<watch::Sender<IdleHealth>>,
-    pub sync_wake: Arc<Notify>,
+    pub sync_wake: Arc<SyncWake>,
     pub control: Arc<IdleControl>,
     pub timing: Timing,
 }
@@ -266,7 +266,7 @@ async fn serve(mut session: Session, context: &WatchContext) -> Ended {
     let _ = tokio::time::timeout(Duration::ZERO, context.control.reconnect.notified()).await;
     context.set_health(IdleHealth::Live);
     // Catch up on whatever arrived before IDLE began or while we were away.
-    context.sync_wake.notify_one();
+    context.sync_wake.notify_reconcile_inbox();
 
     let mut deadline = Instant::now() + context.timing.reidle;
     let mut quiet_until: Option<Instant> = None;
@@ -305,11 +305,11 @@ async fn serve(mut session: Session, context: &WatchContext) -> Ended {
                 let now = Instant::now();
                 if quiet_until.is_some_and(|quiet| now >= quiet) {
                     quiet_until = None;
-                    context.sync_wake.notify_one();
+                    context.sync_wake.notify_reconcile_inbox();
                 }
                 if now >= deadline {
                     if quiet_until.take().is_some() {
-                        context.sync_wake.notify_one();
+                        context.sync_wake.notify_reconcile_inbox();
                     }
                     let Some(next) = re_idle(idle).await else {
                         return Ended::Retry;
