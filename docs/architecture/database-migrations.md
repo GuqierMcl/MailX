@@ -119,6 +119,10 @@ frontend/src/features/startup/
 
 `0036_unread_sender_index.sql` 为 `messages` 建立部分索引 `messages_unread_by_sender`（`folder_id, lower(from_address)`，仅 `is_read = 0` 的行），「此刻」概况按发件地址汇总收件箱未读时只读未读行，不扫描整个收件箱；不新增表，不改已有数据。
 
+### 历史同步范围与后台回填状态
+
+`0037_history_sync.sql` 为 `accounts` 增加可空的 `sync_window`（单账号同步范围覆盖，空值表示跟随全局设置），并为 `folder_sync_cursors` 增加历史回填的目标日期、已覆盖起点、游标边界、已拉取/总计封数、任务状态（`idle` / `running` / `paused` / `completed` / `failed`）与受控失败码。已有账号与游标保持为空和 `idle`，不重抓或隐藏既有缓存。
+
 ## 4. 版本与执行规则
 
 ### 4.1 沿用 v1 记录格式

@@ -117,6 +117,7 @@ pub(crate) struct EwsPage {
     pub scanned: usize,
     /// None only for a server-confirmed last page. Invalid/stuck cursors fail.
     pub next_offset: Option<usize>,
+    pub total_in_view: Option<usize>,
 }
 
 pub(crate) struct EwsClient {
@@ -215,12 +216,27 @@ impl EwsClient {
         offset: usize,
         limit: usize,
     ) -> Result<EwsPage, EwsError> {
+        self.items_range(folder_id, Some(since), None, offset, limit)
+            .await
+    }
+
+    pub(crate) async fn items_range(
+        &mut self,
+        folder_id: &str,
+        since: Option<DateTime<Utc>>,
+        before: Option<DateTime<Utc>>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<EwsPage, EwsError> {
         if !(1..=500).contains(&limit) || offset > 1_000_000 {
             return Err(EwsError::Protocol);
         }
         let response = self
             .http
-            .post("FindItem", soap::items(folder_id, since, offset, limit))
+            .post(
+                "FindItem",
+                soap::items_range(folder_id, since, before, offset, limit),
+            )
             .await?;
         soap::parse_items(&response, offset)
     }

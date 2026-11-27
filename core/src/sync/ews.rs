@@ -186,12 +186,32 @@ async fn sync_folder(
     };
     let now = Utc::now();
     let initial_since = (now.date_naive() - Duration::days(WINDOW_DAYS)).to_string();
+    let global_window = shared.global_sync_window();
     let guard = target.clone();
-    let cursor = with_store(shared, token, move |service| {
-        service.ensure_generation(&guard, &initial_since)
+    let account_id_for_window = token.account_id.clone();
+    let today = now.date_naive();
+    let (cursor, scheduled) = with_store(shared, token, move |service| {
+        let Some(cursor) = service.ensure_generation(&guard, &initial_since)? else {
+            return Ok((None, false));
+        };
+        let mut scheduled = false;
+        if cursor.created {
+            let effective = service
+                .get(&account_id_for_window)?
+                .sync_window
+                .unwrap_or(global_window);
+            if effective != crate::settings::SyncWindow::Days30 {
+                scheduled =
+                    service.schedule_account_backfill(&account_id_for_window, effective, today)?;
+            }
+        }
+        Ok((Some(cursor), scheduled))
     })
-    .await?
-    .ok_or(SyncError::Stale)?;
+    .await?;
+    let cursor = cursor.ok_or(SyncError::Stale)?;
+    if scheduled {
+        shared.emit_backfill_tasks();
+    }
     let since = NaiveDate::parse_from_str(&cursor.window_start, "%Y-%m-%d")
         .map_err(|_| AppError::new(ErrorCode::StorageIncompatible))?
         .and_hms_opt(0, 0, 0)
@@ -412,7 +432,7 @@ fn store_snapshot(
     Ok(round)
 }
 
-fn flags(item: &EwsItem) -> Vec<String> {
+pub(super) fn flags(item: &EwsItem) -> Vec<String> {
     let mut flags = Vec::new();
     if item.is_read {
         flags.push("\\Seen".into());
@@ -429,7 +449,7 @@ fn identifier(value: &str) -> Option<String> {
         .then(|| value.to_owned())
 }
 
-fn message_record(uid: u32, item: &EwsItem, now: DateTime<Utc>) -> MessageRecord {
+pub(super) fn message_record(uid: u32, item: &EwsItem, now: DateTime<Utc>) -> MessageRecord {
     MessageRecord {
         uid,
         message_id_header: item.internet_message_id.as_deref().and_then(identifier),

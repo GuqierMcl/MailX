@@ -32,7 +32,7 @@ const items = [
 ]
 
 function page(rows: EmailSummary[]): EmailPage {
-  return { items: rows, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: false, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }
+  return { items: rows, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: false, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false } }
 }
 
 /** What the host does for `groupSenders`: Alice's mail collapses into her newest message. */

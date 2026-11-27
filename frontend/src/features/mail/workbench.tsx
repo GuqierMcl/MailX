@@ -41,6 +41,8 @@ import { MailRail } from './mail-rail'
 import { MailSidebar } from './mail-sidebar'
 import { ReaderToggle } from './reader-toggle'
 import { RefreshAllButton } from './refresh-all-button'
+import { SyncTasksButton } from './sync-tasks-button'
+import { useBackfillTasks } from './use-backfill-tasks'
 import { folderLabel, mailboxTitle, STARRED_EXCLUDED_ROLES, type Mailbox } from './mailbox'
 import { acceptsSyncState, folderSyncStatus } from './folder-sync-state'
 import { useEmailBody, type OpenedEmail } from './use-email-body'
@@ -131,6 +133,9 @@ export function Workbench({ client }: { client: MailxClient }) {
   const [syncStates, setSyncStates] = useState<Record<string, AccountSyncState>>({})
   const syncSnapshots = useRef<Record<string, AccountSyncState>>({})
   const removedAccounts = useRef(new Set<string>())
+  const { tasks: backfillTasks, setTasks: setBackfillTasks } = useBackfillTasks(client)
+  const [loadingOlderFolderId, setLoadingOlderFolderId] = useState<string | null>(null)
+  const [loadOlderError, setLoadOlderError] = useState<string | null>(null)
   // The message the reader shows. It is its own state, not "whichever listed message
   // matches": changing mailbox, filter or search, or the list refreshing, never
   // closes it. Only opening another message, closing it, or it ceasing to exist does.
@@ -690,6 +695,18 @@ export function Workbench({ client }: { client: MailxClient }) {
   const loadMore = () => {
     if (list.hasNextPage && !list.isFetching) void list.fetchNextPage()
   }
+  const handleLoadOlder = useCallback(() => {
+    if (!folderId) return
+    setLoadOlderError(null)
+    setLoadingOlderFolderId(folderId)
+    client.loadOlderFolder(folderId).then((next) => {
+      setBackfillTasks(next)
+    }).catch((error: unknown) => {
+      setLoadOlderError(errorText(error))
+    }).finally(() => {
+      setLoadingOlderFolderId((current) => current === folderId ? null : current)
+    })
+  }, [client, folderId, setBackfillTasks])
 
   // The assistant: the capsule and Cmd/Ctrl+J open its island beside the mail; on the Now page they
   // go to the page's own input, where the same conversation lives.
@@ -1034,6 +1051,7 @@ export function Workbench({ client }: { client: MailxClient }) {
         <TitleBarActions side="center">
           <MailSearch value={mailView ? search : ''} scope={searchScope} onOpen={() => setPaletteOpen(true)} onClear={() => setSearch('')} />
         </TitleBarActions>
+        <SyncTasksButton client={client} accounts={accounts} tasks={backfillTasks} onTasksChange={setBackfillTasks} />
         <CommandPalette
           client={client}
           open={paletteOpen}
@@ -1181,6 +1199,25 @@ export function Workbench({ client }: { client: MailxClient }) {
               selection={selection}
               selectionActions={selectionActions}
               reveal={reveal}
+              historyCoverage={(() => {
+                const latestCoverage = pages?.at(-1)?.coverage
+                const singleFolderView = activeMailbox.kind === 'folder' && !contactView
+                const activeAccountBackfill = folderId
+                  ? backfillTasks.find((task) => task.accountId === selectedAccountId && task.phase === 'running')
+                  : undefined
+                if (!mailView || !latestCoverage || latestCoverage.historyReachedEnd || !latestCoverage.syncedAfter) return undefined
+                return {
+                  syncedAfter: latestCoverage.syncedAfter,
+                  historyReachedEnd: latestCoverage.historyReachedEnd,
+                  canLoadOlder: singleFolderView,
+                  loadingOlder: Boolean(loadingOlderFolderId === folderId || activeAccountBackfill),
+                  loadOlderError: singleFolderView ? loadOlderError : null,
+                  onLoadOlder: singleFolderView ? handleLoadOlder : undefined,
+                  onAdjustSyncRange: singleFolderView && selectedAccountId
+                    ? () => setAccountsTarget({ accountId: selectedAccountId })
+                    : () => setSettings({ section: 'mailEnhancements' }),
+                }
+              })()}
             />
             </div>
             )}

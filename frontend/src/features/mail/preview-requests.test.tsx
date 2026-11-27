@@ -165,7 +165,7 @@ describe('preview display', () => {
 describe('preview results', () => {
   const page = (items: EmailSummary[]): EmailPage => ({
     items, nextCursor: null,
-    coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false },
+    coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false },
   })
 
   function setup() {

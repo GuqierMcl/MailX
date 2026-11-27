@@ -681,7 +681,7 @@ describe('add account wizard', () => {
       expect(request.sessionId).toBe(SESSION)
       expect(request.requestId).toMatch(/^[0-9a-f-]{36}$/)
       // Only the profile comes from the page; the host takes the rest from the session.
-      expect(request).toEqual({ sessionId: SESSION, requestId: request.requestId, profile: { displayName: '我的邮箱', color: null, senderName: null, useProviderIcon: true } })
+      expect(request).toEqual({ sessionId: SESSION, requestId: request.requestId, profile: { displayName: '我的邮箱', color: null, senderName: null, useProviderIcon: true, syncWindow: null } })
     })
 
     it('asks for the address, prefilled, when the mail server will not open the sign-in name, without another browser trip', async () => {

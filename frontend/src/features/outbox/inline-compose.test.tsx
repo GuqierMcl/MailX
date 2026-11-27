@@ -44,7 +44,7 @@ async function setup({ mode = 'inline', saved = [], readingMode = 'split' }: { m
   const client = testClient([account])
   client.listFolders.mockResolvedValue([inbox])
   client.listSyncStates.mockResolvedValue([exampleSyncState({ folders: [exampleFolderSyncState('inbox')] })])
-  client.listEmails.mockResolvedValue({ items: mails, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } })
+  client.listEmails.mockResolvedValue({ items: mails, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false } })
   client.getEmail.mockImplementation(async (id) => detail(mails.find((row) => row.id === id)!))
   const drafts = new Map<string, Draft>(saved.map((row) => [row.id, row]))
   client.createDraft.mockImplementation(async () => { drafts.set(NEW_ID, draft(NEW_ID)); return structuredClone(drafts.get(NEW_ID)!) })

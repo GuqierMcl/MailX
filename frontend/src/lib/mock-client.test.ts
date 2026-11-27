@@ -493,7 +493,7 @@ describe('mock batch actions for the list selection', () => {
 })
 
 describe('mock browser sign-in', () => {
-  const profile = { displayName: 'Outlook', color: null, senderName: null, useProviderIcon: true }
+  const profile = { displayName: 'Outlook', color: null, senderName: null, useProviderIcon: true, syncWindow: null }
   const route = { kind: 'direct' as const }
   beforeEach(() => { localStorage.clear(); vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers(); localStorage.clear() })

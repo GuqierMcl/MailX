@@ -5,7 +5,9 @@ import { Cancel01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 import { Field, FieldContent, FieldDescription, FieldError, FieldLabel, FieldTitle } from '@/components/ui/field'
 import { CustomColorSwatch } from '@/components/custom-color-swatch'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import type { SyncWindow } from '@/generated/accounts'
 import { cn } from '@/lib/utils'
 import { ACCOUNT_COLORS } from './account-color'
 import { AccountAvatar } from './account-avatar'
@@ -33,11 +35,17 @@ type ProfileFieldsProps = {
   onColorChange(color: string | null): void
   /** Every step of the custom color picker, to preview before it settles; defaults to `onColorChange`. */
   onColorPreview?(color: string): void
+  syncWindow?: SyncWindow | null
+  globalSyncWindow?: SyncWindow
+  onSyncWindowChange?(value: SyncWindow | null): void
   disabled?: boolean
 }
 
+const SYNC_WINDOWS: SyncWindow[] = ['days30', 'days90', 'year1', 'all']
+const FOLLOW_GLOBAL = 'follow'
+
 /** Name and identification color: how the account looks in MailX, nothing more. */
-export function ProfileFields({ displayName, color, providerId, useProviderIcon = true, onUseProviderIconChange, nameError, senderName, senderNameError, onSenderNameChange, onSenderNameCommit, onDisplayNameChange, onDisplayNameCommit, onColorChange, onColorPreview, disabled }: ProfileFieldsProps) {
+export function ProfileFields({ displayName, color, providerId, useProviderIcon = true, onUseProviderIconChange, nameError, senderName, senderNameError, onSenderNameChange, onSenderNameCommit, onDisplayNameChange, onDisplayNameCommit, onColorChange, onColorPreview, syncWindow, globalSyncWindow, onSyncWindowChange, disabled }: ProfileFieldsProps) {
   useTranslation()
   const customColor = color !== null && !ACCOUNT_COLORS.some((preset) => preset.value === color)
   const choices: { value: string | null; name: string }[] = [{ value: null, name: t('accounts:noColor') }, ...ACCOUNT_COLORS]
@@ -112,6 +120,41 @@ export function ProfileFields({ displayName, color, providerId, useProviderIcon 
         </div>
         <FieldDescription>{t('accounts:identificationColorHint')}</FieldDescription>
       </Field>
+      {onSyncWindowChange && (() => {
+        const followLabel = globalSyncWindow
+          ? t('accounts:syncWindowFollowGlobal', { value: t(`settings:syncWindowOption.${globalSyncWindow}`) })
+          : t('accounts:syncWindowFollow')
+        const syncWindowItems: Record<string, string> = {
+          [FOLLOW_GLOBAL]: followLabel,
+          ...Object.fromEntries(SYNC_WINDOWS.map((option) => [option, t(`settings:syncWindowOption.${option}`)])),
+        }
+        return (
+        <Field>
+          <FieldLabel htmlFor="accountSyncWindow">{t('accounts:syncWindow')}</FieldLabel>
+          <Select
+            value={syncWindow ?? FOLLOW_GLOBAL}
+            items={syncWindowItems}
+            disabled={disabled}
+            onValueChange={(value) => onSyncWindowChange(value === FOLLOW_GLOBAL ? null : value as SyncWindow)}
+          >
+            <SelectTrigger id="accountSyncWindow" aria-label={t('accounts:syncWindow')} className="w-56">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={FOLLOW_GLOBAL}>
+                {followLabel}
+              </SelectItem>
+              {SYNC_WINDOWS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {syncWindowItems[option]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <FieldDescription>{t('accounts:syncWindowHint')}</FieldDescription>
+        </Field>
+        )
+      })()}
     </div>
   )
 }

@@ -29,6 +29,7 @@ pub struct DiagnosticContext {
 pub enum ImapSearchKind {
     Since,
     Flagged,
+    History,
     Unseen,
     Uids,
 }

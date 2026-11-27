@@ -23,7 +23,7 @@ function setup() {
   let visible = true
   client.listFolders.mockResolvedValue([inbox, { ...inbox, id: 'trash', name: 'Trash', role: 'trash' }])
   client.listSyncStates.mockResolvedValue([exampleSyncState({ folders: [exampleFolderSyncState('inbox')] })])
-  client.listEmails.mockImplementation(async () => ({ items: visible ? [mail] : [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 1, syncedAfter: null, syncedBefore: null, windowCapped: false } }))
+  client.listEmails.mockImplementation(async () => ({ items: visible ? [mail] : [], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 1, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false } }))
   const detail: EmailDetail = { summary: mail, body: { text: 'Your code is 001234', hasHtml: false, remoteImagesBlocked: 0, truncated: false }, bodyFailure: null, to: [], cc: [], replyTo: [], attachments: [] }
   client.getEmail.mockResolvedValue(detail)
   client.getVerificationCode.mockImplementation(async (emailId) => ({ emailId, state: 'ready', code: '001234', recognitionId: 'recognized' }))

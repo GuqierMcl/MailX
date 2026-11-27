@@ -43,6 +43,16 @@ export type ContactHeading = {
   onBack: () => void
 }
 
+export type HistoryCoveragePrompt = {
+  syncedAfter: string | null
+  historyReachedEnd: boolean
+  canLoadOlder: boolean
+  loadingOlder?: boolean
+  loadOlderError?: string | null
+  onLoadOlder?: () => void
+  onAdjustSyncRange?: () => void
+}
+
 type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' | 'isAggregated'> & {
   title: string
   /** The account owning this folder or local archive, shown beside the title. */
@@ -101,6 +111,7 @@ type EmailListProps = Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' |
   selectionActions?: SelectionActions
   /** Scrolls this row into view; a new object each time it is asked (keyboard moves). */
   reveal?: RevealRequest | null
+  historyCoverage?: HistoryCoveragePrompt
 }
 
 /** A request to bring a row into view; `seq` repeats a request for the same row. */
@@ -193,7 +204,7 @@ function useSelectionKeys(selection: ListSelection | undefined, actions: Selecti
   }, [exit, selectAll])
 }
 
-function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, mailboxLabel, groupByDate = true, weekStartsOn = 'monday', onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection, reveal }: EmailListProps) {
+function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, onAggregate, isAggregated, sentView = false, emails, accounts, loading, syncStatus, error, filter, search, indexedBodies = 0, selectedId, previewLines, mailboxLabel, groupByDate = true, weekStartsOn = 'monday', onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, onSelect, hasMore, loadingMore, refreshing, stale, loadMoreError, onLoadMore, selection, reveal, historyCoverage }: EmailListProps) {
   useTranslation()
   const pending = loading && emails.length === 0
   const showSkeleton = useDelayedFlag(pending)
@@ -270,6 +281,7 @@ function EmailRows({ contact, initialScrollTop, onScrollOffset, onViewContact, o
       verification={verification}
       viewingContact={contact?.address ?? null} onViewContact={onViewContact} onAggregate={onAggregate} isAggregated={isAggregated}
       initialScrollTop={initialScrollTop} onScrollOffset={onScrollOffset} reveal={reveal}
+      historyCoverage={historyCoverage}
     />
   )
 }
@@ -361,9 +373,10 @@ type VirtualRowsProps = {
   initialScrollTop?: number
   onScrollOffset?: (offset: number) => void
   reveal?: RevealRequest | null
+  historyCoverage?: HistoryCoveragePrompt
 } & Pick<EmailMenuCallbacks, 'onViewContact' | 'onAggregate' | 'isAggregated'>
 
-function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, mailboxLabel, groupByDate, weekStartsOn, onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset, reveal }: VirtualRowsProps) {
+function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLines, mailboxLabel, groupByDate, weekStartsOn, onRequestPreviews, verification, onFlag, onArchive, onDelete, onRemoveLocal, canArchive, onRespond, hasMore, loadingMore, refreshing, loadMoreError, windowCapped, searchHint, onSelect, onLoadMore, selection, viewingContact, onViewContact, onAggregate, isAggregated, initialScrollTop, onScrollOffset, reveal, historyCoverage }: VirtualRowsProps) {
   const { i18n } = useTranslation()
   const dates = useDateBoundaries(weekStartsOn)
   const boundaries = groupByDate ? dates : null
@@ -666,6 +679,41 @@ function VirtualRows({ sentView, emails, accounts, stale, selectedId, previewLin
           <Button variant="outline" disabled={loadingMore || refreshing} onClick={onLoadMore}>
             {loadingMore ? t('mail:loadingEllipsis') : t('mail:loadMore')}
           </Button>
+        </div>
+      )}
+      {!hasMore && historyCoverage && !historyCoverage.historyReachedEnd && historyCoverage.syncedAfter && (
+        <div className="flex flex-col items-center gap-1 px-3 pb-3 text-center text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+            <span>{t('mail:syncRangeSyncedAfter', { date: historyCoverage.syncedAfter })}</span>
+            {historyCoverage.canLoadOlder && historyCoverage.onLoadOlder && (
+              <Button
+                type="button"
+                variant="link"
+                size="xs"
+                className="h-auto p-0 text-xs"
+                disabled={historyCoverage.loadingOlder}
+                onClick={historyCoverage.onLoadOlder}
+              >
+                {historyCoverage.loadingOlder ? t('mail:loadingOlder') : t('mail:loadOlder')}
+              </Button>
+            )}
+            {historyCoverage.onAdjustSyncRange && (
+              <Button
+                type="button"
+                variant="link"
+                size="xs"
+                className="h-auto p-0 text-xs"
+                onClick={historyCoverage.onAdjustSyncRange}
+              >
+                {t('mail:adjustSyncRange')}
+              </Button>
+            )}
+          </div>
+          {historyCoverage.loadOlderError && (
+            <p role="alert" className="text-destructive">
+              {historyCoverage.loadOlderError}
+            </p>
+          )}
         </div>
       )}
       {windowCapped && !searchHint && (

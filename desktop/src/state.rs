@@ -349,6 +349,9 @@ impl DesktopState {
                     if let Ok(activity) = self.0.activity.lock() {
                         core.set_activity(*activity);
                     }
+                    if let Some(snapshot) = self.notification_snapshot() {
+                        let _ = core.set_sync_window(snapshot.settings.mail.sync_window);
+                    }
                     *current = Some(core);
                     StartupStatus::Ready {
                         revision: self.next_revision(),

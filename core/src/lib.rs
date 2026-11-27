@@ -87,10 +87,11 @@ pub use settings::{
     GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailSettings, MailTheme, MailboxLabel,
     McpSettings, NotificationSettings, NotificationSound, NowArrangement, NowSettings,
     PreviewLines, ReadingMode, RemoteImagePolicy, SecuritySettings, ServiceRoute, SettingsChanged,
-    SettingsPatch, SettingsSnapshot, SettingsStore, StartupView, ThemeMode, TranslationProviderId,
-    TranslationSettings, WeekStartsOn, mail_body_css,
+    SettingsPatch, SettingsSnapshot, SettingsStore, StartupView, SyncWindow, ThemeMode,
+    TranslationProviderId, TranslationSettings, WeekStartsOn, mail_body_css,
 };
 pub use startup::StartupStatus;
+pub use sync::backfill::{AccountBackfillTask, BackfillControlAction, BackfillPhase};
 pub use sync::manager::{
     AccountSyncState, FlagWriteBack, FolderSyncPhase, FolderSyncState, MessagesDeleted,
     SyncFailure, SyncFailureCode, SyncPhase,

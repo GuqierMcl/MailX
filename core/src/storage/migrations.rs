@@ -247,6 +247,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["messages"],
         sql: include_str!("migrations/0036_unread_sender_index.sql"),
     },
+    Migration {
+        version: 37,
+        description: "account sync window and folder historical backfill state",
+        required_tables: &["accounts", "folder_sync_cursors"],
+        sql: include_str!("migrations/0037_history_sync.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -651,7 +657,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 36);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 37);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -1567,8 +1573,39 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            36
+            37
         );
+    }
+
+    #[test]
+    fn history_sync_migration_preserves_existing_accounts_and_cursors() {
+        let (_directory, mut db) = open_db();
+        apply(&mut db, &manifest_up_to(36)).unwrap();
+        db.execute_batch(
+            "INSERT INTO accounts(id,revision,display_name,email_address,mailbox_source_id,created_at,updated_at)
+             VALUES ('a',1,'Work','a@example.test','src','t','t');
+             INSERT INTO folders(id,account_id,mailbox_source_id,remote_name,name,role,selectable,attributes,unread_count,total_count,synced_at)
+             VALUES ('f','a','src','INBOX','INBOX','inbox',1,'[]',0,0,'t');
+             INSERT INTO folder_sync_cursors(folder_id,uid_validity,window_start,window_capped,backfill_done,history_complete,highest_uid,updated_at)
+             VALUES ('f',42,'2026-10-01',0,1,1,99,'t');",
+        )
+        .unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        apply(&mut db, MIGRATIONS).unwrap();
+        let sync_window: Option<String> = db
+            .query_row("SELECT sync_window FROM accounts WHERE id='a'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(sync_window.is_none());
+        let cursor: (String, i64, String, Option<String>) = db
+            .query_row(
+                "SELECT window_start, history_fetched, history_state, history_covered_since FROM folder_sync_cursors WHERE folder_id='f'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(cursor, ("2026-10-01".into(), 0, "idle".into(), None));
     }
 
     #[test]

@@ -36,7 +36,7 @@ function setup(options: { drafts?: Draft[]; outbox?: OutboxItem[] } = {}) {
   const client = testClient([account])
   client.listFolders.mockResolvedValue([inbox])
   client.listSyncStates.mockResolvedValue([exampleSyncState({ folders: [exampleFolderSyncState('inbox')] })])
-  client.listEmails.mockResolvedValue({ items: [mail], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } })
+  client.listEmails.mockResolvedValue({ items: [mail], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false } })
   client.getEmail.mockResolvedValue(detail)
   const drafts = options.drafts ?? []
   const outbox = { current: options.outbox ?? [] }

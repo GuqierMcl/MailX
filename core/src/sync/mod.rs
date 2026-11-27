@@ -1,5 +1,6 @@
 //! Background synchronization with mail servers.
 
+pub(crate) mod backfill;
 pub(crate) mod bodies;
 pub(crate) mod cadence;
 mod diagnostics;

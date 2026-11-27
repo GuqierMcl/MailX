@@ -32,6 +32,8 @@ import type {
   OAuthSessionHandle,
   OAuthSignInResult,
   AccountSyncState,
+  AccountBackfillTask,
+  BackfillControlAction,
   AppError,
   ApiResult,
   AttachmentPolicy,
@@ -216,6 +218,14 @@ export interface MailxClient {
   onDeletions(listener: (deleted: MessagesDeleted) => void): () => void
   /** Asks the account's sync worker to run its next round now. */
   refreshSync(accountId: string): Promise<void>
+  /** Lists active, paused, or failed historical backfill tasks. */
+  listBackfillTasks(): Promise<AccountBackfillTask[]>
+  /** Extends one folder's covered history by 90 days earlier and wakes its worker. */
+  loadOlderFolder(folderId: string): Promise<AccountBackfillTask[]>
+  /** Pauses, resumes, or cancels one account's historical backfill. */
+  controlBackfill(accountId: string, action: BackfillControlAction): Promise<AccountBackfillTask[]>
+  /** Receives historical backfill progress snapshots. */
+  onBackfill(listener: (tasks: AccountBackfillTask[]) => void): () => void
   /** `null` unless the user enabled sender avatars and the sender has one. */
   getAvatar(accountId: string, address: string): Promise<AvatarImage | null>
   /**
@@ -476,6 +486,7 @@ export type NotificationOpen = { accountId: string; emailId: string | null; outb
 
 /** Host events (`mailx://...`) that the clients subscribe to. */
 export const HOST_EVENTS = {
+  backfill: 'mailx://backfill',
   outbox: 'mailx://outbox',
   sentCopies: 'mailx://sent-copies',
   drafts: 'mailx://drafts',
@@ -631,6 +642,10 @@ export function createDesktopClient(): MailxClient {
       return () => { disposed = true; unlisten?.() }
     },
     refreshSync: (accountId) => call<void>('sync_refresh', { accountId }),
+    listBackfillTasks: () => call<AccountBackfillTask[]>('sync_backfill_tasks'),
+    loadOlderFolder: (folderId) => call<AccountBackfillTask[]>('sync_load_older_folder', { folderId }),
+    controlBackfill: (accountId, action) => call<AccountBackfillTask[]>('sync_control_backfill', { accountId, action }),
+    onBackfill: (listener) => subscribe<AccountBackfillTask[]>(HOST_EVENTS.backfill, listener),
     getAvatar: (accountId, address) => call<AvatarImage | null>('avatars_get', { accountId, address }),
     saveAttachment: (emailId, attachmentId) => call<'saved' | 'cancelled'>('attachments_save', { emailId, attachmentId }),
     clearImageCache: () => call<void>('image_cache_clear'),

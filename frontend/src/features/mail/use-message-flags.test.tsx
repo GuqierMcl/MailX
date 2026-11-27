@@ -34,7 +34,7 @@ function setup(initial: EmailSummary = email(), configure?: (client: ReturnType<
   configure?.(client)
   const queryClient: QueryClient = createQueryClient()
   queryClient.setQueryData<InfiniteData<EmailPage>>(KEY, {
-    pages: [{ items: [initial], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }],
+    pages: [{ items: [initial], nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false } }],
     pageParams: [null],
   })
   const wrapper = ({ children }: { children: ReactNode }) => (

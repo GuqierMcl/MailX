@@ -33,7 +33,7 @@ function inbox(unreadCount: number): Folder {
 }
 
 function page(items: EmailSummary[]): EmailPage {
-  return { items, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false } }
+  return { items, nextCursor: null, coverage: { headersComplete: true, bodiesComplete: true, indexedBodies: 0, syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false } }
 }
 
 function activityOf(overrides: Partial<OverviewActivity> = {}): OverviewActivity {

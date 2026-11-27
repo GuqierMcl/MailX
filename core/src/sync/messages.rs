@@ -204,12 +204,32 @@ pub(super) async fn sync_folder(
     };
     let now = Utc::now();
     let window_start = (now.date_naive() - Duration::days(WINDOW_DAYS)).to_string();
+    let global_window = shared.global_sync_window();
     let guard = target.clone();
-    let cursor = with_store(shared, token, move |service| {
-        service.ensure_generation(&guard, &window_start)
+    let account_id_for_window = account_id.to_owned();
+    let today = now.date_naive();
+    let (cursor, scheduled) = with_store(shared, token, move |service| {
+        let Some(cursor) = service.ensure_generation(&guard, &window_start)? else {
+            return Ok((None, false));
+        };
+        let mut scheduled = false;
+        if cursor.created {
+            let effective = service
+                .get(&account_id_for_window)?
+                .sync_window
+                .unwrap_or(global_window);
+            if effective != crate::settings::SyncWindow::Days30 {
+                scheduled =
+                    service.schedule_account_backfill(&account_id_for_window, effective, today)?;
+            }
+        }
+        Ok((Some(cursor), scheduled))
     })
-    .await?
-    .ok_or(SyncError::Stale)?;
+    .await?;
+    let cursor = cursor.ok_or(SyncError::Stale)?;
+    if scheduled {
+        shared.emit_backfill_tasks();
+    }
     // A new generation hides the old messages and resets coverage.
     *changed |= cursor.created;
     let since = NaiveDate::parse_from_str(&cursor.window_start, "%Y-%m-%d")
@@ -468,6 +488,13 @@ mod tests {
             highest_uid: 0,
             updated_at: "2026-10-18T00:00:00.000Z".into(),
             created: false,
+            history_target_date: None,
+            history_covered_since: None,
+            history_cursor_before: None,
+            history_fetched: 0,
+            history_total: None,
+            history_state: "idle".into(),
+            history_failure_code: None,
         }
     }
 

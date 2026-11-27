@@ -4,7 +4,8 @@ use chrono::{DateTime, SecondsFormat, Utc};
 
 use super::{AccountService, validate_email_id, validate_uuid};
 pub(crate) use crate::storage::messages::{
-    CodeSource, FolderSyncCursor, NewMailRows, SenderCount, SentRecipient, SyncTarget, TopSender,
+    BackfillFolderJob, CodeSource, FolderSyncCursor, NewMailRows, SenderCount, SentRecipient,
+    SyncTarget, TopSender,
 };
 use crate::{
     AppError,
@@ -362,6 +363,82 @@ impl AccountService {
         flags: &[(u32, Vec<String>)],
     ) -> Result<Option<usize>, AppError> {
         self.storage.apply_flags(target, flags)
+    }
+
+    pub(crate) fn schedule_account_backfill(
+        &mut self,
+        account_id: &str,
+        window: crate::settings::SyncWindow,
+        today: chrono::NaiveDate,
+    ) -> Result<bool, AppError> {
+        validate_uuid(account_id, "accountId")?;
+        self.storage
+            .schedule_account_backfill(account_id, window, today)
+    }
+
+    pub(crate) fn load_older_folder(
+        &mut self,
+        folder_id: &str,
+        days: i64,
+    ) -> Result<(String, bool), AppError> {
+        validate_uuid(folder_id, "folderId")?;
+        self.storage.load_older_folder(folder_id, days)
+    }
+
+    pub(crate) fn control_account_backfill(
+        &mut self,
+        account_id: &str,
+        action: crate::sync::backfill::BackfillControlAction,
+    ) -> Result<bool, AppError> {
+        validate_uuid(account_id, "accountId")?;
+        self.storage.control_account_backfill(account_id, action)
+    }
+
+    pub(crate) fn next_backfill_folder(
+        &self,
+        account_id: &str,
+        source: &str,
+    ) -> Result<Option<BackfillFolderJob>, AppError> {
+        self.storage.next_backfill_folder(account_id, source)
+    }
+
+    pub(crate) fn update_backfill_progress(
+        &mut self,
+        target: &SyncTarget,
+        fetched_delta: u32,
+        total: Option<u32>,
+        covered_since: Option<&str>,
+        cursor_before: Option<&str>,
+    ) -> Result<Option<usize>, AppError> {
+        self.storage.update_backfill_progress(
+            target,
+            fetched_delta,
+            total,
+            covered_since,
+            cursor_before,
+        )
+    }
+
+    pub(crate) fn complete_backfill_folder(
+        &mut self,
+        target: &SyncTarget,
+        covered_since: &str,
+    ) -> Result<Option<usize>, AppError> {
+        self.storage.complete_backfill_folder(target, covered_since)
+    }
+
+    pub(crate) fn fail_backfill_folder(
+        &mut self,
+        target: &SyncTarget,
+        code: crate::sync::manager::SyncFailureCode,
+    ) -> Result<Option<usize>, AppError> {
+        self.storage.fail_backfill_folder(target, code)
+    }
+
+    pub(crate) fn backfill_tasks(
+        &self,
+    ) -> Result<Vec<crate::sync::backfill::AccountBackfillTask>, AppError> {
+        self.storage.backfill_tasks()
     }
 }
 

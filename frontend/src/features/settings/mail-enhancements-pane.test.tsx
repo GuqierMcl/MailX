@@ -17,7 +17,7 @@ describe('mail enhancement settings', () => {
     expect(screen.getByText(/邮件列表、阅读区或系统通知/)).toBeInTheDocument()
     await userEvent.click(toggle)
     await waitFor(() => expect(toggle).toBeChecked())
-    expect(client.updateSettings).toHaveBeenLastCalledWith({ mail: { trashVerificationMailAfterCopy: true } })
+    expect(client.updateSettings).toHaveBeenLastCalledWith({ mail: { trashVerificationMailAfterCopy: true, syncWindow: 'days30' } })
     expect((await client.getSettings()).settings.notifications.enabled).toBe(false)
   })
 

@@ -63,14 +63,48 @@ fn fields(names: &[&str]) -> String {
         .collect()
 }
 
-pub(super) fn items(id: &str, since: DateTime<Utc>, offset: usize, limit: usize) -> String {
+pub(super) fn items_range(
+    id: &str,
+    since: Option<DateTime<Utc>>,
+    before: Option<DateTime<Utc>>,
+    offset: usize,
+    limit: usize,
+) -> String {
+    let restriction = match (since, before) {
+        (Some(since), Some(before)) => format!(
+            concat!(
+                "<m:Restriction><t:And>",
+                "<t:IsGreaterThanOrEqualTo><t:FieldURI FieldURI=\"item:DateTimeReceived\"/>",
+                "<t:FieldURIOrConstant><t:Constant Value=\"{since}\"/></t:FieldURIOrConstant></t:IsGreaterThanOrEqualTo>",
+                "<t:IsLessThanOrEqualTo><t:FieldURI FieldURI=\"item:DateTimeReceived\"/>",
+                "<t:FieldURIOrConstant><t:Constant Value=\"{before}\"/></t:FieldURIOrConstant></t:IsLessThanOrEqualTo>",
+                "</t:And></m:Restriction>"
+            ),
+            since = since.to_rfc3339(),
+            before = before.to_rfc3339(),
+        ),
+        (Some(since), None) => format!(
+            concat!(
+                "<m:Restriction><t:IsGreaterThanOrEqualTo><t:FieldURI FieldURI=\"item:DateTimeReceived\"/>",
+                "<t:FieldURIOrConstant><t:Constant Value=\"{since}\"/></t:FieldURIOrConstant></t:IsGreaterThanOrEqualTo></m:Restriction>"
+            ),
+            since = since.to_rfc3339(),
+        ),
+        (None, Some(before)) => format!(
+            concat!(
+                "<m:Restriction><t:IsLessThanOrEqualTo><t:FieldURI FieldURI=\"item:DateTimeReceived\"/>",
+                "<t:FieldURIOrConstant><t:Constant Value=\"{before}\"/></t:FieldURIOrConstant></t:IsLessThanOrEqualTo></m:Restriction>"
+            ),
+            before = before.to_rfc3339(),
+        ),
+        (None, None) => String::new(),
+    };
     envelope(format!(
         concat!(
             "<m:FindItem Traversal=\"Shallow\"><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape>",
             "<t:AdditionalProperties>{properties}</t:AdditionalProperties></m:ItemShape>",
             "<m:IndexedPageItemView MaxEntriesReturned=\"{limit}\" Offset=\"{offset}\" BasePoint=\"Beginning\"/>",
-            "<m:Restriction><t:IsGreaterThanOrEqualTo><t:FieldURI FieldURI=\"item:DateTimeReceived\"/>",
-            "<t:FieldURIOrConstant><t:Constant Value=\"{since}\"/></t:FieldURIOrConstant></t:IsGreaterThanOrEqualTo></m:Restriction>",
+            "{restriction}",
             "<m:SortOrder><t:FieldOrder Order=\"Descending\"><t:FieldURI FieldURI=\"item:DateTimeReceived\"/></t:FieldOrder></m:SortOrder>",
             "<m:ParentFolderIds><t:FolderId Id=\"{id}\"/></m:ParentFolderIds></m:FindItem>"
         ),
@@ -87,7 +121,7 @@ pub(super) fn items(id: &str, since: DateTime<Utc>, offset: usize, limit: usize)
             "message:From",
             "message:References"
         ]),
-        since = since.to_rfc3339(),
+        restriction = restriction,
         id = escape(id),
         limit = limit,
         offset = offset
@@ -542,10 +576,14 @@ pub(super) fn parse_items(bytes: &[u8], offset: usize) -> Result<EwsPage, EwsErr
             references: text(node, "References"),
         });
     }
+    let total_in_view = root
+        .attribute("TotalItemsInView")
+        .and_then(|value| value.parse::<usize>().ok());
     Ok(EwsPage {
         items,
         scanned: count,
         next_offset: page_offset(root, offset, count)?,
+        total_in_view,
     })
 }
 

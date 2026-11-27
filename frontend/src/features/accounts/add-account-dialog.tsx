@@ -155,7 +155,7 @@ export function AddAccountDialog({ client, open, accounts, onClose, onCreated }:
     guard.setBusy(true)
     setSaveError(null)
     try {
-      const profile = { displayName: name, color, senderName: senderName.trim() || null, useProviderIcon }
+      const profile = { displayName: name, color, senderName: senderName.trim() || null, useProviderIcon, syncWindow: null }
       let saved: Account
       if (step.signedIn) {
         // The address, servers and route come from the host's session, not from this page.

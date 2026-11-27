@@ -5,7 +5,7 @@ import { createMockClient } from './mock-client'
 function config(useProviderIcon = true): Extract<AccountConfigInput, { imap: unknown }> {
   return {
     displayName: 'QQ 账号', color: '#2563eb', senderName: null,
-    useProviderIcon,
+    useProviderIcon, syncWindow: null,
     emailAddress: 'synthetic@qq.com', providerId: 'qq',
     imap: { host: 'imap.qq.com', port: 993, tls: 'implicit', username: 'synthetic@qq.com' },
     smtp: { host: 'smtp.qq.com', port: 465, tls: 'implicit', username: 'synthetic@qq.com' },
@@ -43,7 +43,7 @@ describe('mock account provider icon preference', () => {
     const client = createMockClient()
     const account = await client.createAccount({ requestId: crypto.randomUUID(), config: config() })
     const other = await client.createAccount({ requestId: crypto.randomUUID(), config: config() })
-    const profile = { displayName: account.displayName, color: account.color, senderName: account.senderName }
+    const profile = { displayName: account.displayName, color: account.color, senderName: account.senderName, syncWindow: account.syncWindow }
     const saved = await client.updateProfile({ accountId: account.id, profile: { ...profile, useProviderIcon: false } })
     expect(saved).toMatchObject({ useProviderIcon: false, revision: account.revision, color: account.color })
     expect((await client.getAccount(other.id)).useProviderIcon).toBe(true)

@@ -33,7 +33,9 @@ use crate::send::types::{
     ResolveUnknownRequest, UnknownResolution,
 };
 use crate::send::{OutboxManager, SendConfig};
+use crate::settings::{SettingsStore, SyncWindow};
 use crate::storage::outbox::Changed;
+use crate::sync::backfill::{AccountBackfillTask, BackfillControlAction};
 use crate::sync::bodies::BodyManager;
 use crate::sync::manager::{AccountSyncState, SyncManager};
 use crate::sync::previews::PreviewManager;
@@ -202,6 +204,11 @@ impl MailxCore {
             runtime.clone(),
             events.clone(),
         ));
+        let initial_window = SettingsStore::open(path)
+            .ok()
+            .and_then(|store| store.get().ok())
+            .map_or(SyncWindow::Days30, |snap| snap.settings.mail.sync_window);
+        sync.set_global_sync_window(initial_window);
         sync.watch_for_sleep();
         for account in &accounts {
             sync.restart(&account.id);
@@ -386,12 +393,30 @@ impl MailxCore {
         Ok(account)
     }
 
-    /// Updates an account's profile. Sync and body downloads keep running.
+    /// Updates an account's profile. Sync and body downloads keep running, and
+    /// an expanded per-account sync window schedules historical backfill.
     pub fn update_account_profile(
         &self,
         request: UpdateProfileRequest,
     ) -> Result<Account, AppError> {
-        self.accounts()?.update_profile(request)
+        let (account, queued) = {
+            let mut service = self.accounts()?;
+            let account = service.update_profile(request)?;
+            let effective = account
+                .sync_window
+                .unwrap_or_else(|| self.sync.global_sync_window());
+            let queued = service.schedule_account_backfill(
+                &account.id,
+                effective,
+                chrono::Utc::now().date_naive(),
+            )?;
+            (account, queued)
+        };
+        if queued {
+            self.sync.wake_backfill(&account.id);
+        }
+        self.sync.emit_backfill_tasks();
+        Ok(account)
     }
 
     pub fn mail_folders(&self, account_id: &str) -> Result<Vec<Folder>, AppError> {
@@ -1052,6 +1077,75 @@ impl MailxCore {
     /// Current sync state of every account that has a worker.
     pub fn sync_states(&self) -> Vec<AccountSyncState> {
         self.sync.states()
+    }
+
+    /// Updates the global default sync window used by accounts without a
+    /// per-account override and wakes workers whose backfill queue expanded.
+    pub fn set_sync_window(
+        &self,
+        window: SyncWindow,
+    ) -> Result<Vec<AccountBackfillTask>, AppError> {
+        self.sync.set_global_sync_window(window);
+        let today = chrono::Utc::now().date_naive();
+        let (to_wake, tasks) = {
+            let mut service = self.accounts()?;
+            let accounts = service.list()?;
+            let mut to_wake = Vec::new();
+            for account in accounts {
+                if account.sync_window.is_none()
+                    && service.schedule_account_backfill(&account.id, window, today)?
+                {
+                    to_wake.push(account.id);
+                }
+            }
+            let tasks = service.backfill_tasks()?;
+            (to_wake, tasks)
+        };
+        for account_id in to_wake {
+            self.sync.wake_backfill(&account_id);
+        }
+        self.events.emit(&CoreEvent::Backfill(tasks.clone()));
+        Ok(tasks)
+    }
+
+    /// Current historical backfill tasks across all accounts.
+    pub fn backfill_tasks(&self) -> Result<Vec<AccountBackfillTask>, AppError> {
+        self.accounts()?.backfill_tasks()
+    }
+
+    /// Extends one folder's covered history by 90 days earlier and wakes its worker.
+    pub fn load_older_folder(&self, folder_id: &str) -> Result<Vec<AccountBackfillTask>, AppError> {
+        const LOAD_OLDER_DAYS: i64 = 90;
+        let (account_id, queued, tasks) = {
+            let mut service = self.accounts()?;
+            let (account_id, queued) = service.load_older_folder(folder_id, LOAD_OLDER_DAYS)?;
+            let tasks = service.backfill_tasks()?;
+            (account_id, queued, tasks)
+        };
+        if queued {
+            self.sync.wake_backfill(&account_id);
+        }
+        self.events.emit(&CoreEvent::Backfill(tasks.clone()));
+        Ok(tasks)
+    }
+
+    /// Pauses, resumes or cancels an account's historical backfill.
+    pub fn control_backfill(
+        &self,
+        account_id: &str,
+        action: BackfillControlAction,
+    ) -> Result<Vec<AccountBackfillTask>, AppError> {
+        let (changed, tasks) = {
+            let mut service = self.accounts()?;
+            let changed = service.control_account_backfill(account_id, action)?;
+            let tasks = service.backfill_tasks()?;
+            (changed, tasks)
+        };
+        if changed && action == BackfillControlAction::Resume {
+            self.sync.wake_backfill(account_id);
+        }
+        self.events.emit(&CoreEvent::Backfill(tasks.clone()));
+        Ok(tasks)
     }
 }
 

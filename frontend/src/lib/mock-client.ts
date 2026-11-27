@@ -5,6 +5,7 @@ import type {
   AiState,
   EmailListQuery,
   Account,
+  AccountBackfillTask,
   AccountRemoval,
   AccountConfigInput,
   OAuthSessionHandle,
@@ -108,7 +109,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
   // A stored settings file that opens on the inbox (the app default is the Now page): the workbench tests start from the list.
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false } }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false, syncWindow: 'days30' }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false } }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -119,7 +120,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           ['appearance', 'security', 'layout', 'notifications', 'compose'].every((key) =>
             typeof value.settings[key as keyof typeof value.settings] === 'object')) {
         // Like the core, fields a stored copy lacks (saved by an older preview) take their defaults.
-        settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true }, translation: value.settings.translation ?? settings.settings.translation,
+        settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true, syncWindow: value.settings.mail?.syncWindow ?? 'days30' }, translation: value.settings.translation ?? settings.settings.translation,
           assistant: { ...settings.settings.assistant, ...value.settings.assistant },
           now: { ...DEFAULT_NOW, ...value.settings.now },
           layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
@@ -138,6 +139,13 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const previewListeners = new Set<(previews: EmailPreviews) => void>()
   let previewRequest = 0
   const draftListeners = new Set<(change: DraftChanged) => void>()
+  const backfillTasks: AccountBackfillTask[] = []
+  const backfillListeners = new Set<(tasks: AccountBackfillTask[]) => void>()
+  const emitBackfill = () => {
+    const snapshot = structuredClone(backfillTasks)
+    backfillListeners.forEach((listener) => listener(snapshot))
+    return snapshot
+  }
   let mcpStatus: McpStatus = { state: 'off' }
   const mcpConfig: McpClientConfig = { command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', args: ['--discovery', '/Users/mock/Library/Application Support/MailX/mcp-discovery.json'], display: { command: '/Applications/MailX.app/Contents/MacOS/mailx-mcp', discovery: '~/Library/Application Support/MailX/mcp-discovery.json' } }
   let mcpAgents = mockMcpAgents(mcpConfig)
@@ -652,7 +660,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (current.revision !== expectedRevision) {
         throw new MailxClientError({ code: 'conflict', message: '配置已被修改，请重新加载后重试。', field: null })
       }
-      const config = { ...connection, displayName: current.displayName, color: current.color, senderName: current.senderName, useProviderIcon: current.useProviderIcon }
+      const config = { ...connection, displayName: current.displayName, color: current.color, senderName: current.senderName, useProviderIcon: current.useProviderIcon, syncWindow: current.syncWindow }
       accounts[index] = { ...accountFromConfig(accountId, expectedRevision + 1, config), createdAt: current.createdAt }
       return structuredClone(accounts[index])
     },
@@ -661,7 +669,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       if (index < 0) throw notFound()
       const displayName = profile.displayName.trim()
       if (!displayName) throw new MailxClientError({ code: 'validation', message: '请填写账号名称。', field: 'displayName' })
-      accounts[index] = { ...accounts[index], displayName, color: profile.color?.toLowerCase() || null, senderName: profile.senderName?.trim() || null, useProviderIcon: profile.useProviderIcon ?? true, updatedAt: new Date().toISOString() }
+      accounts[index] = { ...accounts[index], displayName, color: profile.color?.toLowerCase() || null, senderName: profile.senderName?.trim() || null, useProviderIcon: profile.useProviderIcon ?? true, syncWindow: profile.syncWindow ?? null, updatedAt: new Date().toISOString() }
       return structuredClone(accounts[index])
     },
     async removeAccount({ accountId, expectedRevision }) {
@@ -732,7 +740,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
         coverage: {
           headersComplete: true, bodiesComplete: false,
           indexedBodies: inScope.filter((email) => email.summary.bodyState === 'ready').length,
-          syncedAfter: null, syncedBefore: null, windowCapped: false,
+          syncedAfter: null, syncedBefore: null, windowCapped: false, historyReachedEnd: false,
         },
       }
     },
@@ -962,6 +970,36 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     },
     onDeletions: () => () => undefined,
     refreshSync: async () => undefined,
+    listBackfillTasks: async () => structuredClone(backfillTasks),
+    async loadOlderFolder(folderId) {
+      const folder = folders.find((row) => row.id === folderId)
+      if (!folder) throw notFound()
+      if (!backfillTasks.some((task) => task.accountId === folder.accountId)) {
+        backfillTasks.push({
+          accountId: folder.accountId,
+          phase: 'running',
+          targetDate: '2026-07-01',
+          coveredSince: '2026-09-01',
+          fetched: 0,
+          total: 25,
+          activeFolderName: folder.name,
+          failure: null,
+        })
+      }
+      return emitBackfill()
+    },
+    async controlBackfill(accountId, action) {
+      const index = backfillTasks.findIndex((task) => task.accountId === accountId)
+      if (index >= 0) {
+        if (action === 'cancel') backfillTasks.splice(index, 1)
+        else backfillTasks[index] = { ...backfillTasks[index], phase: action === 'pause' ? 'paused' : 'running', failure: null }
+      }
+      return emitBackfill()
+    },
+    onBackfill(listener) {
+      backfillListeners.add(listener)
+      return () => { backfillListeners.delete(listener) }
+    },
     getAvatar: async () => null,
     saveAttachment: async () => 'saved' as const,
     clearImageCache: async () => undefined,
@@ -1311,7 +1349,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           const next = JSON.parse(event.newValue) as typeof settings
           if (typeof next.revision === 'number' && next.revision > settings.revision &&
               (next.effectiveLocale === 'en' || next.effectiveLocale === 'zh-CN') && next.settings?.general) {
-            settings = { ...next, settings: { ...next.settings, mail: { trashVerificationMailAfterCopy: next.settings.mail?.trashVerificationMailAfterCopy === true }, now: { ...DEFAULT_NOW, ...next.settings.now } } }
+            settings = { ...next, settings: { ...next.settings, mail: { trashVerificationMailAfterCopy: next.settings.mail?.trashVerificationMailAfterCopy === true, syncWindow: next.settings.mail?.syncWindow ?? 'days30' }, now: { ...DEFAULT_NOW, ...next.settings.now } } }
             listener({ revision: settings.revision })
           }
         } catch { /* Ignore an invalid preview cache. */ }
@@ -1471,14 +1509,14 @@ function registeredServers(providerId: string, emailAddress: string): { imap: im
 }
 
 /** Builds the account like the host: address, servers and route from the session, the rest from the profile. */
-function oauthAccountFromSession(id: string, session: CreateSession, profile: Pick<AccountConfigInput, 'displayName' | 'color' | 'senderName' | 'useProviderIcon'>): Account {
+function oauthAccountFromSession(id: string, session: CreateSession, profile: Pick<AccountConfigInput, 'displayName' | 'color' | 'senderName' | 'useProviderIcon'> & { syncWindow?: AccountConfigInput['syncWindow'] }): Account {
   const endpoint = (suffix: string) => ({ id: `${id}-${suffix}`, generation: 1, credentialConfigured: true, trust: 'trusted' as const })
   const address = session.mailbox ?? ''
   const { providerId } = session
   const placeholder = { issuer: '', clientRegistrationId: '', authorizationSubject: null, targetMailboxResource: null }
   return {
     ...accountFromConfig(id, 1, {
-      ...profile, emailAddress: address, providerId, route: session.route,
+      ...profile, syncWindow: profile.syncWindow ?? null, emailAddress: address, providerId, route: session.route,
       ...registeredServers(providerId, address),
       authentication: { kind: 'oauth2', configuration: { providerId, ...placeholder } },
     }),
@@ -1519,6 +1557,7 @@ function accountFromConfig(id: string, revision: number, config: AccountConfigIn
     displayName: config.displayName,
     color: config.color ?? null,
     useProviderIcon: config.useProviderIcon ?? true,
+    syncWindow: config.syncWindow ?? null,
     senderName: config.senderName?.trim() || null,
     emailAddress: config.emailAddress,
     providerId: config.providerId,
@@ -1540,6 +1579,7 @@ const DEFAULT_ACCOUNTS: Account[] = [
   accountFromConfig(WORK, 1, {
     displayName: '工作邮箱',
     useProviderIcon: true,
+    syncWindow: null,
     color: '#2563eb',
     senderName: null,
     emailAddress: 'lin.wei@example.com',
@@ -1552,6 +1592,7 @@ const DEFAULT_ACCOUNTS: Account[] = [
   accountFromConfig(PERSONAL, 1, {
     displayName: '个人邮箱',
     useProviderIcon: true,
+    syncWindow: null,
     color: '#16a34a',
     senderName: null,
     emailAddress: 'linwei.home@example.org',

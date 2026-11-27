@@ -337,5 +337,9 @@
   "ewsDiscoveryStatusunsupported": "此服务器未提供支持的 Exchange 认证方式。",
   "ewsDiscoveryStatusprotocol": "服务器返回了无法识别的设置响应。",
   "ewsVerifyConnection": "验证连接",
-  "ewsVerifyingConnection": "正在验证连接…"
+  "ewsVerifyingConnection": "正在验证连接…",
+  "syncWindow": "同步范围",
+  "syncWindowHint": "新邮件与星标邮件始终自动同步；调小范围时会保留本机已同步的旧邮件。",
+  "syncWindowFollow": "跟随全局默认",
+  "syncWindowFollowGlobal": "跟随全局默认（{{value}}）"
 }
