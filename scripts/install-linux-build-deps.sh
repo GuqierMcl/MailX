@@ -6,7 +6,7 @@ packages=(
   librsvg2-dev libdbus-1-dev libasound2-dev pkg-config
 )
 case "${1:-}" in
-  --packaging) packages+=(patchelf xdg-utils rpm rpm2cpio cpio) ;;
+  --packaging) packages+=(patchelf xdg-utils rpm libarchive-tools) ;;
   '') ;;
   *) echo 'Usage: bash scripts/install-linux-build-deps.sh [--packaging]' >&2; exit 2 ;;
 esac

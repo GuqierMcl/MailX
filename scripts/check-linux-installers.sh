@@ -45,10 +45,14 @@ require_arch "$deb" "$deb_arch" "$(dpkg-deb -f "$deb" Architecture)"
 require_arch "$rpm" "$rpm_arch" "$(rpm -qp --qf '%{ARCH}' "$rpm")"
 dpkg-deb -x "$deb" "$scratch/deb"
 mkdir "$scratch/rpm"
-rpm2cpio "$rpm" | (cd "$scratch/rpm" && cpio --extract --make-directories --no-absolute-filenames --quiet)
+# Tauri's RPM writer does not emit the archive-size tag rpm2cpio expects.
+bsdtar -xf "$rpm" -C "$scratch/rpm"
 
 check_elf "$appimage"
-(cd "$scratch" && "$appimage" --appimage-extract > /dev/null)
+if ! (cd "$scratch" && "$appimage" --appimage-extract > extract.log 2>&1); then
+  tail -n 20 "$scratch/extract.log" >&2
+  fail "Could not extract $appimage."
+fi
 for root in "$scratch/deb" "$scratch/rpm" "$scratch/squashfs-root"; do
   check_elf "$root/usr/bin/mailx-desktop"
   check_elf "$root/usr/bin/mailx-mcp"
