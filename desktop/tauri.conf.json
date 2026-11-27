@@ -34,6 +34,14 @@
     "createUpdaterArtifacts": true,
     "active": true,
     "targets": ["app", "dmg", "nsis", "deb", "rpm", "appimage"],
+    "linux": {
+      "deb": {
+        "depends": ["libasound2t64 | libasound2", "libdbus-1-3"]
+      },
+      "rpm": {
+        "depends": ["libasound.so.2()(64bit)", "libdbus-1.so.3()(64bit)"]
+      }
+    },
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico"

@@ -58,7 +58,7 @@ const strings = {
     others: '其他系统',
     macos: { name: 'macOS', note: '已通过 Apple 公证，下载后可以直接打开。', arm: 'Apple 芯片（M 系列）', intel: 'Intel 芯片', which: '不确定是哪种？点左上角苹果菜单 →“关于本机”，看“芯片”或“处理器”一栏。' },
     windows: { name: 'Windows', note: '适用于 64 位 Windows。第一次打开时如果出现蓝色提示，点“更多信息”→“仍要运行”。', setup: '下载安装程序' },
-    linux: { name: 'Linux', note: 'AppImage 可以在应用内自动更新；deb、rpm 需要手动安装新版本。', appimage: 'AppImage', deb: 'deb（Debian / Ubuntu）', rpm: 'rpm（Fedora / openSUSE）' },
+    linux: { name: 'Linux', note: 'AppImage 可以在应用内自动更新；deb、rpm 需要手动安装新版本。', ubuntuMinimum: 'Ubuntu 用户请使用 24.04 或更新版本。', x64: 'x64（Intel / AMD）', arm64: 'ARM64', appimage: 'AppImage', deb: 'deb（Debian / Ubuntu）', rpm: 'rpm（Fedora / openSUSE）' },
     fallback: '暂时无法读取最新版本，请前往 GitHub 下载。',
     allReleases: '全部版本',
     checksums: '校验文件（SHA-256）',

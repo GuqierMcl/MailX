@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a clean Ubuntu 22.04 runtime, then check the AppImage with and without
+# Build a clean Ubuntu 24.04 runtime, then check the AppImage with and without
 # its bundled AppIndicator. Neither scenario has host tray packages or network.
 set -euo pipefail
 
@@ -160,12 +160,12 @@ evidence=$(realpath "${2:-target/linux-appimage-evidence}")
 image_name="mailx-appimage-smoke:$(id -u)"
 
 cat > "$evidence/Dockerfile" <<'DOCKERFILE'
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 ARG TEST_UID
 ARG TEST_GID
 RUN apt-get update && apt-get install -y --no-install-recommends \
       dbus-x11 xvfb xauth xdotool x11-utils binutils python3 procps util-linux \
-      libwebkit2gtk-4.1-0 libxdo3 libssl3 librsvg2-2 libasound2 fonts-dejavu-core \
+      libwebkit2gtk-4.1-0 libxdo3 libssl3t64 librsvg2-2 libasound2t64 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid "$TEST_GID" mailx-smoke \
     && useradd --uid "$TEST_UID" --gid "$TEST_GID" --create-home mailx-smoke

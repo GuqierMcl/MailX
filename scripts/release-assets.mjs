@@ -5,6 +5,7 @@
 //   MailX_0.1.0-alpha.4_macos-x64.app.tar.gz
 //   MailX_0.1.0-alpha.4_windows-x64-setup.exe
 //   MailX_0.1.0-alpha.4_linux-x64.AppImage
+//   MailX_0.1.0-alpha.4_linux-arm64.AppImage
 //
 // The platform label is the release matrix's name. Extensions stay, and a
 // `.sig` keeps its whole base name so `updater-manifest.mjs` can pair it with
@@ -17,7 +18,7 @@ import { readdirSync, renameSync } from "node:fs";
 import { resolve } from "node:path";
 
 /** The release matrix entries, in the order the release publishes them. */
-export const PLATFORMS = ["macos-arm64", "macos-x64", "windows-x64", "linux-x64"];
+export const PLATFORMS = ["macos-arm64", "macos-x64", "windows-x64", "linux-x64", "linux-arm64"];
 
 /** Longest first: `.app.tar.gz` must win over any shorter suffix. */
 const EXTENSIONS = [".app.tar.gz", "-setup.exe", ".AppImage", ".dmg", ".deb", ".rpm"];
@@ -29,6 +30,10 @@ export class UnknownPlatform extends Error {
   }
 }
 
+export function releaseAssetName(version, platform, extension) {
+  return `MailX_${version}_${platform}${extension}`;
+}
+
 /**
  * The new name for `name`, or null when the file is not an installer or a
  * signature the release publishes.
@@ -38,7 +43,7 @@ export function renamed(name, version, platform) {
   const base = signature ? name.slice(0, -".sig".length) : name;
   const extension = EXTENSIONS.find((candidate) => base.endsWith(candidate));
   if (extension === undefined) return null;
-  return `MailX_${version}_${platform}${extension}${signature ? ".sig" : ""}`;
+  return `${releaseAssetName(version, platform, extension)}${signature ? ".sig" : ""}`;
 }
 
 /** Renames every asset in `directory`; returns the old and new names. */

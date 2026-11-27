@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { MissingPlatforms, PLATFORMS, buildManifest, notesForUpdater } from "./updater-manifest.mjs";
 
 const assets = [
-  "MailX_0.2.0_aarch64.app.tar.gz",
-  "MailX_0.2.0_x64.app.tar.gz",
-  "MailX_0.2.0_x64-setup.exe",
-  "MailX_0.2.0_amd64.AppImage",
+  "MailX_0.2.0_macos-arm64.app.tar.gz",
+  "MailX_0.2.0_macos-x64.app.tar.gz",
+  "MailX_0.2.0_windows-x64-setup.exe",
+  "MailX_0.2.0_linux-x64.AppImage",
+  "MailX_0.2.0_linux-arm64.AppImage",
 ];
 const all = assets.flatMap((name) => [name, `${name}.sig`]);
 
@@ -30,18 +31,35 @@ describe("latest.json", () => {
     expect(built.version).toBe("0.2.0");
     expect(built.pub_date).toBe("2026-11-01T08:00:00Z");
     expect(built.platforms["darwin-aarch64"]).toEqual({
-      signature: "signature of MailX_0.2.0_aarch64.app.tar.gz.sig",
-      url: "https://github.com/GuqierMcl/MailX/releases/download/v0.2.0/MailX_0.2.0_aarch64.app.tar.gz",
+      signature: "signature of MailX_0.2.0_macos-arm64.app.tar.gz.sig",
+      url: "https://github.com/GuqierMcl/MailX/releases/download/v0.2.0/MailX_0.2.0_macos-arm64.app.tar.gz",
     });
-    expect(built.platforms["windows-x86_64"].url).toEndWith("MailX_0.2.0_x64-setup.exe");
-    expect(built.platforms["linux-x86_64"].url).toEndWith("MailX_0.2.0_amd64.AppImage");
+    expect(built.platforms["windows-x86_64"].url).toEndWith("MailX_0.2.0_windows-x64-setup.exe");
+  });
+
+  test("pairs each Linux architecture with its signed AppImage regardless of file order", () => {
+    const baseUrl = "https://example.com/download/v0.2.0";
+    for (const files of [all, [...all].reverse()]) {
+      const built = manifest(files, { baseUrl });
+      expect(built.platforms["linux-x86_64"]).toEqual({
+        signature: "signature of MailX_0.2.0_linux-x64.AppImage.sig",
+        url: `${baseUrl}/MailX_0.2.0_linux-x64.AppImage`,
+      });
+      expect(built.platforms["linux-aarch64"]).toEqual({
+        signature: "signature of MailX_0.2.0_linux-arm64.AppImage.sig",
+        url: `${baseUrl}/MailX_0.2.0_linux-arm64.AppImage`,
+      });
+    }
   });
 
   test("fails, naming what is missing, when a platform has no bundle or signature", () => {
     const cases = [
-      [all.filter((name) => !name.includes("aarch64")), ["darwin-aarch64"]],
-      [all.filter((name) => name !== "MailX_0.2.0_x64-setup.exe.sig"), ["windows-x86_64"]],
-      [all.filter((name) => !name.includes("x64.app.tar.gz")), ["darwin-x86_64"]],
+      [all.filter((name) => !name.includes("macos-arm64")), ["darwin-aarch64"]],
+      [all.filter((name) => name !== "MailX_0.2.0_windows-x64-setup.exe.sig"), ["windows-x86_64"]],
+      [all.filter((name) => !name.includes("macos-x64")), ["darwin-x86_64"]],
+      [all.filter((name) => name !== "MailX_0.2.0_linux-x64.AppImage"), ["linux-x86_64"]],
+      [all.filter((name) => name !== "MailX_0.2.0_linux-arm64.AppImage.sig"), ["linux-aarch64"]],
+      [all.map((name) => name.includes("linux-arm64") ? name.replace("0.2.0", "0.1.0") : name), ["linux-aarch64"]],
       [[], PLATFORMS.map((platform) => platform.key)],
     ];
     for (const [files, missing] of cases) {
@@ -57,8 +75,17 @@ describe("latest.json", () => {
   });
 
   test("ignores the other installers that ships in the same directory", () => {
-    const built = manifest([...all, "MailX_0.2.0_x64.dmg", "MailX_0.2.0_amd64.deb", "MailX_0.2.0_x86_64.rpm", "SHA256SUMS.txt"]);
+    const built = manifest([
+      ...all,
+      "MailX_0.2.0_macos-x64.dmg",
+      "MailX_0.2.0_linux-x64.deb",
+      "MailX_0.2.0_linux-x64.rpm",
+      "MailX_0.2.0_linux-arm64.deb",
+      "MailX_0.2.0_linux-arm64.rpm",
+      "SHA256SUMS.txt",
+    ]);
     expect(built.platforms["linux-x86_64"].url).toEndWith(".AppImage");
+    expect(built.platforms["linux-aarch64"].url).toEndWith(".AppImage");
   });
 
   test("notes come from the changelog without the prerelease banner or install footer", () => {
@@ -116,13 +143,13 @@ describe("the command line", () => {
     expect(result.exitCode).toBe(0);
     const written = JSON.parse(readFileSync(join(directory, "latest.json"), "utf8"));
     expect(written.notes).toBe("- 更新。");
-    expect(Object.keys(written.platforms)).toHaveLength(4);
+    expect(Object.keys(written.platforms)).toHaveLength(5);
   });
 
   test("exits non-zero without writing a partial manifest", () => {
     directory = mkdtempSync(join(tmpdir(), "mailx-updater-"));
-    writeFileSync(join(directory, "MailX_0.2.0_x64-setup.exe"), "binary");
-    writeFileSync(join(directory, "MailX_0.2.0_x64-setup.exe.sig"), "signature");
+    writeFileSync(join(directory, "MailX_0.2.0_windows-x64-setup.exe"), "binary");
+    writeFileSync(join(directory, "MailX_0.2.0_windows-x64-setup.exe.sig"), "signature");
     const result = Bun.spawnSync({
       cmd: ["bun", "scripts/updater-manifest.mjs", "--version", "0.2.0", "--dir", directory, "--base-url", "https://example.com/v0.2.0"],
       cwd: import.meta.dirname + "/..",

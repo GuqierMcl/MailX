@@ -12,7 +12,7 @@
 - **正文边界专项验证**：修改正文 CSP、sandbox、自定义协议、链接拦截或升级 Tauri / Wry 时，按受影响行为和平台安排[专项原生验证](validation.md#body-native-validation)，记录验证方法、实际结果与未覆盖范围。普通前端和 Rust 检查不等同于真实引擎的隔离验证。
 - **安装包冒烟**：对草稿中的各平台安装包验证安装启动、登录、同步、阅读、搜索、写信发信与附件、删除撤销、本机归档、退出 / 后台运行，以及 MCP、自启动和本次变更。按平台、客户端和服务商记录范围，未覆盖项明确保留为限制；既有手测或容器启动证据不能替代候选安装包的验证。
 - **更新路径**：用带更新器的旧版验证升级后数据可用，检查默认自动下载、关闭开关后手动下载、立即重启与退出时安装。补齐取消、断网重试、缓存恢复和安装失败反馈，按相邻版本和跨度升级分别记录。检查方法见[更新器验证计划](../architecture/updater.md#10-验证计划)。
-- **安装说明**：按实际签名状态核对首次启动提示、安装包平台 / 架构、`SHA256SUMS.txt`、四平台更新包与 `.sig`、`latest.json`。更新包验签与操作系统代码签名是两件事。
+- **安装说明**：按实际签名状态核对首次启动提示、安装包平台 / 架构、`SHA256SUMS.txt`、各平台更新包与 `.sig`、`latest.json`。更新包验签与操作系统代码签名是两件事。
 
 从预发布版转为正式版时，用 `bun run version:bump release --dry-run` 预览，再执行 `bun run version:bump release`；它会去掉预发布后缀，并将 `[Unreleased]` 归并为当日的小节。随后运行 `bun run version:check --release` 和 `bun run release:notes`，按下文流程合并发版 PR、打标签、验证草稿，最后发布。
 
@@ -93,16 +93,16 @@ CI 的变更检测把 PR 分成四类：只改文档、只改官网（可同时�
 
 `.github/workflows/release.yml`：
 
-Linux 安装包使用 Ubuntu 22.04 构建，使主程序及包内动态库的 glibc 基线兼容该系统；升级构建环境前需验证最老支持系统的实际启动。
+Linux x64 与 ARM64 安装包均在原生 Ubuntu 24.04 环境构建，以 glibc 2.39 为基线。提高系统基线时需验证新基线上的实际启动，并在发布说明里告知旧系统用户先升级操作系统。既有 x64 AppImage 更新器按架构从 Latest 选择产物，无法按用户的 Linux 版本筛选。验证过渡版本时可使用工作流产物或 GitHub Pre-release，避免旧系统提前收到不兼容的自动更新。
 
 Linux 构建先运行 `bun scripts/prepare-linux-appimage.mjs --out "$RUNNER_TEMP/tauri-linux-appimage.json"`，再把该临时配置传给 `bun run tauri build --config "$RUNNER_TEMP/tauri-linux-appimage.json"`。脚本从构建机的 `pkg-config` 库目录解析 AppIndicator、Ayatana Indicator/Ido 与 dbusmenu 的五个 SONAME，检查 ELF、SONAME 和依赖闭包，并把真实文件复制到 AppImage 的 `usr/lib`。这组库由托盘后端动态加载，普通链接依赖扫描会遗漏；其余依赖和 RPATH 仍由 linuxdeploy 处理。macOS 与 Windows 继续使用原构建命令。
 
 - **触发**：推送 `v*` 标签；或在 Actions 页手动 `Run workflow`（只构建、产物留在该次运行里 7 天，不创建 Release，用来调试工作流）。
 - **verify**：标签必须等于仓库版本（`v` + `package.json` 的 `version`）；`CHANGELOG.md` 必须可发布；标签指向的提交必须是 `main` 的祖先，且该提交在 `main` 上的 `CI result` 必须已经通过（发版提交在 `main` 上的判定规则见上文“发版 PR 的 CI”）。版本后缀只决定发布说明中的预发布提示，不设置 GitHub 的 Pre-release 标记。
-- **build**：macOS arm64（`macos-26`）、macOS x64（`macos-26-intel`）、Windows x64（`windows-2025`）、Linux x64（`ubuntu-22.04`），都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。macOS 包必须用 SDK 26 或更新版本构建：macOS 26 起，用旧 SDK 构建的应用会进入兼容模式，红绿灯的大小和位置与标题栏布局不符。构建后由 `scripts/check-macos-sdk.sh` 用 `otool` 检查 `.app` 内每个可执行文件的 SDK 版本，同时识别 Intel 低部署目标使用的 `LC_VERSION_MIN_MACOSX` 与较新目标的 `LC_BUILD_VERSION`；未知或低于 26 均失败；本地开发构建使用本机的 Xcode 或命令行工具，版本可能与 CI 不同。收集时统一改为 `MailX_<版本>_<平台><扩展名>`，例如 `MailX_<版本>_macos-arm64.app.tar.gz` 与 `MailX_<版本>_macos-x64.app.tar.gz`。任一平台失败即整体失败。
-- **release**：仅标签触发，全部平台成功后，用 `scripts/updater-manifest.mjs` 从收集到的包与 `CHANGELOG.md` 生成 `latest.json`（缺 `darwin-aarch64`、`darwin-x86_64`、`windows-x86_64`、`linux-x86_64` 任何一个就直接失败，不发出不完整的清单），再生成 `SHA256SUMS.txt` 并创建草稿 Release。同一标签重跑会替换自己上一次的草稿，已发布的 Release 绝不覆盖。
+- **build**：macOS arm64（`macos-26`）、macOS x64（`macos-26-intel`）、Windows x64（`windows-2025`）、Linux x64（`ubuntu-24.04`）、Linux ARM64（`ubuntu-24.04-arm`），都在 GitHub 的 `release` 环境里运行。`bun run tauri build` 生成 `.dmg`、`-setup.exe`、`.deb`、`.rpm`、`.AppImage`，并在 `bundle.createUpdaterArtifacts` 打开时额外生成可自更新的包（macOS `.app.tar.gz`、Windows NSIS `-setup.exe`、Linux `.AppImage`）与各自的 `.sig`。macOS 包必须用 SDK 26 或更新版本构建：macOS 26 起，用旧 SDK 构建的应用会进入兼容模式，红绿灯的大小和位置与标题栏布局不符。构建后由 `scripts/check-macos-sdk.sh` 用 `otool` 检查 `.app` 内每个可执行文件的 SDK 版本，同时识别 Intel 低部署目标使用的 `LC_VERSION_MIN_MACOSX` 与较新目标的 `LC_BUILD_VERSION`；未知或低于 26 均失败；本地开发构建使用本机的 Xcode 或命令行工具，版本可能与 CI 不同。收集时统一改为 `MailX_<版本>_<平台><扩展名>`，例如 `MailX_<版本>_macos-arm64.app.tar.gz` 与 `MailX_<版本>_macos-x64.app.tar.gz`。任一平台失败即整体失败。
+- **release**：仅标签触发，全部平台成功后，用 `scripts/updater-manifest.mjs` 从收集到的包与 `CHANGELOG.md` 生成 `latest.json`（缺 `darwin-aarch64`、`darwin-x86_64`、`windows-x86_64`、`linux-x86_64`、`linux-aarch64` 任何一个就直接失败，不发出不完整的清单），再生成 `SHA256SUMS.txt` 并创建草稿 Release。同一标签重跑会替换自己上一次的草稿，已发布的 Release 绝不覆盖。
 
-改动工作流或 runner 标签（如 `macos-26-intel`）后，建议合并到 main，再在 Actions 页对 main 手动触发一次，确认四个平台都能出包后再打标签；`release` 环境只允许 main 和 `v*` 标签，其他分支的试构建会被拒绝；runner 标签若已下线需要改。
+改动 Linux 打包或 runner 后，先通过手动 Linux AppImage 工作流验证分支上的无签名包。在 main 上手动触发 Release 工作流，核对全部构建及签名产物后再打标签。`release` 环境只允许 main 和 `v*` 标签。
 
 ## 7. 出问题时
 

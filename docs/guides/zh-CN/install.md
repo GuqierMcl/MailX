@@ -19,7 +19,9 @@ description: 在 macOS、Windows 和 Linux 上安装 MailX，并保持版本最�
 
 ### Linux
 
-提供 **AppImage**、**deb**（Debian / Ubuntu）和 **rpm**（Fedora / openSUSE）三种格式：
+64 位 Intel 或 AMD 处理器请选择 **x64**，64 位 ARM 处理器请选择 **ARM64**。可以在终端运行 `uname -m` 查看，输出 `x86_64` 对应 x64，`aarch64` 对应 ARM64。
+
+请在下载页查看你的架构可用的安装格式，包括 **AppImage**、**deb**（Debian / Ubuntu）和 **rpm**（Fedora / openSUSE）。从提供 ARM64 安装包的版本起，Ubuntu 上两种架构均请使用 24.04 或更新版本。
 
 - **AppImage**：下载后即可运行，支持在应用内直接更新。
 - **deb / rpm**：通过系统的软件包管理器安装；有新版本时会收到提醒，需要手动下载安装。
