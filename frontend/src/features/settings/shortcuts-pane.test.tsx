@@ -26,7 +26,7 @@ describe('keyboard shortcut settings', () => {
     expect(container.querySelector('[data-off]')).toBeNull()
 
     await user.click(toggle)
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: false, startupView: 'inbox' } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: false, startupView: 'inbox' } }))
     await waitFor(() => expect(toggle).not.toBeChecked())
     expect(screen.getByText('单键快捷键已关闭，带修饰键的快捷键和 Esc 仍可用。')).toBeInTheDocument()
     const off = [...container.querySelectorAll('[data-off]')].map((row) => row.getAttribute('data-shortcut'))

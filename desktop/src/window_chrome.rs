@@ -71,18 +71,45 @@ pub(crate) fn browser_defaults_plugin<R: Runtime>() -> TauriPlugin<R> {
         .build_with_manual_injection()
 }
 
-/// Brings the existing window forward when a second launch is attempted. Before
-/// the window exists, the activation is remembered for its creation.
-pub(crate) fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
+/// Brings an already-existing main window forward. Returns `false` when no main
+/// window exists yet (or it has been released to background).
+pub(crate) fn focus_existing_main_window<R: Runtime>(app: &AppHandle<R>) -> bool {
     crate::autostart::record_activation(app);
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
-        return;
+        return false;
     };
     #[cfg(target_os = "macos")]
     let _ = app.show();
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
+    true
+}
+
+/// Brings the main window forward, recreating it when it was released to
+/// background (or skipped during a silent login launch). Before the window
+/// exists on initial startup, the activation is remembered for its creation.
+pub(crate) fn focus_main_window(app: &AppHandle) {
+    crate::lifecycle::cancel_releasing(app);
+    if focus_existing_main_window(app) {
+        return;
+    }
+    if crate::compose::is_quitting(app) || !crate::lifecycle::can_recreate_main_window(app) {
+        return;
+    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if crate::compose::is_quitting(&handle) {
+            return;
+        }
+        if focus_existing_main_window(&handle) {
+            return;
+        }
+        if create_main_window(&handle, true).is_ok() {
+            #[cfg(target_os = "macos")]
+            let _ = handle.show();
+        }
+    });
 }
 
 /// Traffic light inset for the 40px title bar. wry treats `y` as the height of
@@ -191,6 +218,8 @@ pub(crate) fn create_main_window(app: &AppHandle, visible: bool) -> tauri::Resul
     let window = builder.build()?;
     watch_state(&window);
     crate::compose::watch_close(&window);
+    crate::lifecycle::mark_main_created(app);
+    crate::badge::refresh(app);
     // A second launch can arrive after the caller sampled intent but before
     // build() registered the main window. Sample once more after registration;
     // later callbacks can find and show the window themselves.
@@ -590,7 +619,7 @@ mod tests {
     #[test]
     fn a_second_launch_before_the_window_exists_is_ignored() {
         let app = tauri::test::mock_app();
-        focus_main_window(app.handle());
+        focus_existing_main_window(app.handle());
         assert!(app.get_webview_window(MAIN_WINDOW).is_none());
     }
 
@@ -599,7 +628,7 @@ mod tests {
         let app = tauri::test::mock_app();
         app.manage(crate::autostart::StartupIntent::default());
         assert!(!crate::autostart::user_activated(app.handle()));
-        focus_main_window(app.handle());
+        focus_existing_main_window(app.handle());
         assert!(crate::autostart::user_activated(app.handle()));
     }
 
@@ -613,7 +642,7 @@ mod tests {
                 .build()
                 .unwrap();
         }
-        focus_main_window(app.handle());
+        focus_existing_main_window(app.handle());
         assert!(app.get_webview_window(MAIN_WINDOW).is_some());
         assert!(app.get_webview_window("other").is_some());
     }

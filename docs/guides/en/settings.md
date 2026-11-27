@@ -25,6 +25,7 @@ Under **Settings → Notifications**:
 Under **Settings → General**:
 
 - **When closing the main window**: asks by default whether to keep running in the background or quit, or you can set a fixed choice. Staying in the background keeps new-mail alerts and external AI tool connections working.
+- **Release UI memory in background**: off by default. When enabled, closing the main window to the background or starting silently keeps only the mail core running to lower memory usage; reopening the window reloads the interface and takes slightly longer.
 - **Launch at login**: off by default. When enabled, you can also turn on **Start silently** so MailX starts quietly in the background.
 - **Menu bar icon (macOS)**: on by default so you can reopen MailX from the top menu bar anytime.
 

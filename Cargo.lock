@@ -3254,6 +3254,7 @@ dependencies = [
  "libappindicator-sys",
  "mailx-core",
  "mailx-mcp-server",
+ "objc2-app-kit",
  "objc2-foundation",
  "percent-encoding",
  "plist",

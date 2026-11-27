@@ -30,18 +30,11 @@ fn dispatch_main(app: &AppHandle, id: &str) -> Result<(), AppError> {
         crate::compose::request_quit(app);
         return Ok(());
     }
-    let label = crate::window_chrome::MAIN_WINDOW;
-    if !crate::lifecycle::desktop_ready(app) {
+    if !crate::lifecycle::can_dispatch_desktop_action(app) {
         return Err(AppError::new(ErrorCode::CoreNotReady));
     }
-    focus(app, label).map_err(|_| AppError::new(ErrorCode::Internal))?;
-    // This is the listener whose subscription the ready handshake acknowledges.
-    app.emit_to(
-        tauri::EventTarget::webview_window(label),
-        "mailx://desktop-action",
-        serde_json::json!({ "menuCommand": id }),
-    )
-    .map_err(|_| AppError::new(ErrorCode::Internal))
+    crate::lifecycle::dispatch_desktop_action(app, serde_json::json!({ "menuCommand": id }));
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -246,6 +239,9 @@ mod macos {
     #[derive(Default)]
     struct Menus {
         by_window: HashMap<String, Vec<Group>>,
+        /// Last menu snapshot published by the main window, kept across
+        /// background UI release so macOS stays on the no-focus app menu.
+        main_fallback: Option<Vec<Group>>,
         displayed: Option<Vec<Group>>,
         built: Option<Built>,
         fallback_generation: u64,
@@ -319,7 +315,11 @@ mod macos {
             if let Some(groups) = focused.and_then(|label| self.by_window.get(label)) {
                 return Some(groups.clone());
             }
-            let mut groups = self.by_window.get(MAIN_WINDOW)?.clone();
+            let mut groups = self
+                .by_window
+                .get(MAIN_WINDOW)
+                .or(self.main_fallback.as_ref())?
+                .clone();
             for group in &mut groups {
                 allow_without_focus(&mut group.items);
             }
@@ -339,6 +339,9 @@ mod macos {
         let app = window.app_handle();
         let state = app.state::<State>();
         if let Ok(mut menus) = state.lock() {
+            if window.label() == MAIN_WINDOW {
+                menus.main_fallback = Some(groups.clone());
+            }
             menus.by_window.insert(window.label().to_owned(), groups);
         }
         refresh(app);
@@ -716,17 +719,23 @@ mod macos {
         if let Some(label) = id.strip_prefix("window:") {
             let _ = focus(app, label);
         } else if id == "mainWindow" {
-            let _ = focus(app, MAIN_WINDOW);
+            crate::window_chrome::focus_main_window(app);
         } else if id == "quit" {
             crate::compose::request_quit(app);
         } else if focused.is_none() && main_action(id) {
-            // The no-focus menu comes from main's subscribed webview and only
-            // exposes commands that main has already registered.
-            if focus(app, MAIN_WINDOW).is_ok() {
-                let _ = app.emit_to(
-                    tauri::EventTarget::webview_window(MAIN_WINDOW),
-                    ACTION_EVENT,
-                    id,
+            if app.get_webview_window(MAIN_WINDOW).is_some() && crate::lifecycle::desktop_ready(app)
+            {
+                if focus(app, MAIN_WINDOW).is_ok() {
+                    let _ = app.emit_to(
+                        tauri::EventTarget::webview_window(MAIN_WINDOW),
+                        ACTION_EVENT,
+                        id,
+                    );
+                }
+            } else {
+                crate::lifecycle::dispatch_desktop_action(
+                    app,
+                    serde_json::json!({ "menuCommand": id }),
                 );
             }
         } else if let Some(window) = focused {

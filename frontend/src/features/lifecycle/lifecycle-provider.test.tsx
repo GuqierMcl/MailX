@@ -13,7 +13,7 @@ import { LifecycleProvider } from './lifecycle-provider'
 import { InlineDraftUnsaved, registerQuitSave } from './prepare-quit'
 
 function fixture(patch: Partial<LifecycleSnapshot> = {}) {
-  let snapshot: LifecycleSnapshot = { revision: 1, platform: 'windows', backgroundAvailable: true, badgeAvailable: true, closeRequestId: 1, quitRequestId: null, quitting: false, quitTimedOut: false, ...patch }
+  let snapshot: LifecycleSnapshot = { revision: 1, platform: 'windows', backgroundAvailable: true, badgeAvailable: true, closeRequestId: 1, releaseRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false, ...patch }
   let listener: ((snapshot: LifecycleSnapshot) => void) | undefined
   const client = {
     getSnapshot: vi.fn<LifecycleClient['getSnapshot']>().mockImplementation(async () => snapshot),
@@ -22,6 +22,8 @@ function fixture(patch: Partial<LifecycleSnapshot> = {}) {
     quit: vi.fn<LifecycleClient['quit']>().mockResolvedValue(undefined),
     cancelQuit: vi.fn<LifecycleClient['cancelQuit']>().mockResolvedValue(undefined),
     confirmQuit: vi.fn<LifecycleClient['confirmQuit']>().mockResolvedValue(undefined),
+    confirmBackgroundRelease: vi.fn<LifecycleClient['confirmBackgroundRelease']>().mockResolvedValue(undefined),
+    cancelBackgroundRelease: vi.fn<LifecycleClient['cancelBackgroundRelease']>().mockResolvedValue(undefined),
     onDesktopAction: vi.fn<LifecycleClient['onDesktopAction']>().mockResolvedValue(() => undefined),
     setDesktopReady: vi.fn<LifecycleClient['setDesktopReady']>().mockResolvedValue(undefined),
   }
@@ -100,7 +102,7 @@ describe('main window close choice', () => {
     render(<LifecycleProvider client={client}><p>Main window</p></LifecycleProvider>)
     await waitFor(() => expect(client.getSnapshot).toHaveBeenCalled())
     publish({ closeRequestId: 9 })
-    await act(async () => complete({ revision: 1, platform: 'windows', backgroundAvailable: true, badgeAvailable: true, closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }))
+    await act(async () => complete({ revision: 1, platform: 'windows', backgroundAvailable: true, badgeAvailable: true, closeRequestId: null, releaseRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }))
     await userEvent.click(await screen.findByRole('button', { name: '取消' }))
     expect(client.resolveClose).toHaveBeenCalledWith({ requestId: 9, action: 'cancel', remember: false })
   })
@@ -240,6 +242,31 @@ describe('main window quit acknowledgement', () => {
     expect(progress).toHaveAttribute('data-quit-controls')
     await userEvent.click(screen.getByRole('button', { name: '取消退出' }))
     expect(client.cancelQuit).toHaveBeenCalledWith(31)
+  })
+
+  it('flushes inline draft saves before confirming a background release', async () => {
+    const { client, publish } = fixture({ closeRequestId: null })
+    let finish!: () => void
+    const save = vi.fn(() => new Promise<void>((resolve) => { finish = resolve }))
+    render(<LifecycleProvider client={client}><QuitSaver save={save} /></LifecycleProvider>)
+    await waitFor(() => expect(client.getSnapshot).toHaveBeenCalled())
+    publish({ releaseRequestId: 41 })
+    await waitFor(() => expect(save).toHaveBeenCalledOnce())
+    expect(client.confirmBackgroundRelease).not.toHaveBeenCalled()
+    await act(async () => finish())
+    await waitFor(() => expect(client.confirmBackgroundRelease).toHaveBeenCalledWith(41))
+  })
+
+  it('cancels a background release and reports failure when saving the inline draft fails', async () => {
+    const { client, publish } = fixture({ closeRequestId: null })
+    const save = vi.fn(async () => { throw new InlineDraftUnsaved() })
+    render(<LifecycleProvider client={client}><QuitSaver save={save} /></LifecycleProvider>)
+    await waitFor(() => expect(client.getSnapshot).toHaveBeenCalled())
+    publish({ releaseRequestId: 42 })
+    await waitFor(() => expect(client.cancelBackgroundRelease).toHaveBeenCalledWith(42))
+    expect(client.confirmBackgroundRelease).not.toHaveBeenCalled()
+    expect(await screen.findByRole('dialog', { name: '未能进入后台' })).toBeInTheDocument()
+    expect(screen.getByText('主窗口里正在写的邮件没能保存。')).toBeInTheDocument()
   })
 })
 

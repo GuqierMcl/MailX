@@ -12,6 +12,7 @@ export type LifecycleSnapshot = {
   /** The host can show the unread number on the app icon. */
   badgeAvailable: boolean
   closeRequestId: number | null
+  releaseRequestId: number | null
   quitRequestId: number | null
   quitting: boolean
   quitTimedOut: boolean
@@ -28,6 +29,8 @@ export interface LifecycleClient {
   quit(): Promise<void>
   cancelQuit(generation?: number): Promise<void>
   confirmQuit(generation: number): Promise<void>
+  confirmBackgroundRelease(generation: number): Promise<void>
+  cancelBackgroundRelease(generation?: number): Promise<void>
   onDesktopAction(listener: (action: DesktopAction) => void): Promise<() => void>
   setDesktopReady(ready: boolean): Promise<void>
 }
@@ -48,6 +51,8 @@ export function createDesktopLifecycleClient(): LifecycleClient | null {
     quit: () => call<void>('app_quit'),
     cancelQuit: (generation) => call<void>('app_cancel_quit', { generation: generation ?? null }),
     confirmQuit: (generation) => call<void>('app_confirm_quit', { generation }),
+    confirmBackgroundRelease: (generation) => call<void>('app_confirm_background_release', { generation }),
+    cancelBackgroundRelease: (generation) => call<void>('app_cancel_background_release', { generation: generation ?? null }),
     onDesktopAction: (listener) => getCurrentWebviewWindow().listen<DesktopAction>('mailx://desktop-action', ({ payload }) => listener(payload)),
     setDesktopReady: (ready) => call<void>('app_desktop_ready', { ready }),
   }
@@ -56,7 +61,7 @@ export function createDesktopLifecycleClient(): LifecycleClient | null {
 /** Browser previews simulate a close without closing the browser tab. */
 export function createPreviewLifecycleClient(platform: WindowPlatform, settings: Pick<MailxClient, 'getSettings' | 'updateSettings'>, backgroundAvailable = true) {
   // Like the desktop host: macOS and Linux show an app icon badge, Windows does not.
-  let snapshot: LifecycleSnapshot = { revision: 0, platform, backgroundAvailable, badgeAvailable: platform !== 'windows', closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }
+  let snapshot: LifecycleSnapshot = { revision: 0, platform, backgroundAvailable, badgeAvailable: platform !== 'windows', closeRequestId: null, releaseRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false }
   let requestId = 0
   const listeners = new Set<(snapshot: LifecycleSnapshot) => void>()
   const publish = (patch: Partial<LifecycleSnapshot>) => {
@@ -77,6 +82,8 @@ export function createPreviewLifecycleClient(platform: WindowPlatform, settings:
     quit: async () => { publish({ closeRequestId: null, quitting: false }) },
     cancelQuit: async () => { publish({ quitting: false }) },
     confirmQuit: async () => undefined,
+    confirmBackgroundRelease: async () => { publish({ releaseRequestId: null }) },
+    cancelBackgroundRelease: async () => { publish({ releaseRequestId: null }) },
     onDesktopAction: async () => () => undefined,
     setDesktopReady: async () => undefined,
     async requestClose() {

@@ -288,13 +288,16 @@ fn main() {
             // single-instance plugin has already let this process live.
             mcp::setup(app.handle(), &state);
             badge::setup(app.handle());
+            let tray_app = app.handle().clone();
+            state.add_ready_hook(move || tray::refresh(&tray_app));
             state.start_initialization();
             notifications::on_click(app.handle());
             let login_launch = autostart::is_login_launch(std::env::args());
-            window_chrome::create_main_window(
-                app.handle(),
-                !login_launch || autostart::user_activated(app.handle()),
-            )?;
+            if !login_launch || autostart::user_activated(app.handle()) {
+                window_chrome::create_main_window(app.handle(), true)?;
+            } else {
+                lifecycle::set_login_startup_deferred(app.handle());
+            }
             lifecycle::setup(app.handle());
             if login_launch {
                 autostart::prepare_startup(app.handle());
@@ -309,6 +312,8 @@ fn main() {
             lifecycle::app_quit,
             lifecycle::app_cancel_quit,
             lifecycle::app_confirm_quit,
+            lifecycle::app_confirm_background_release,
+            lifecycle::app_cancel_background_release,
             lifecycle::app_desktop_ready,
             autostart::autostart_get,
             autostart::autostart_set,
@@ -463,11 +468,16 @@ fn main() {
         .run(|_app, _event| {
             // Explicit quit bypasses the main-window close preference and waits
             // for UI persistence and active sending before committing exit.
-            if let tauri::RunEvent::ExitRequested { api, .. } = &_event
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = &_event
                 && !compose::is_exiting(_app)
             {
                 api.prevent_exit();
-                compose::request_quit(_app);
+                // Destroying the last window on purpose (releasing the UI to
+                // background) emits ExitRequested with `code: None`; keep the
+                // Rust core alive instead of quitting the application.
+                if !(code.is_none() && lifecycle::take_expected_window_empty_exit(_app)) {
+                    compose::request_quit(_app);
+                }
             }
             #[cfg(target_os = "macos")]
             if matches!(_event, tauri::RunEvent::Reopen { .. }) {

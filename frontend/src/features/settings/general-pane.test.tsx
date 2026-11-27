@@ -10,9 +10,11 @@ function show(patch: Partial<LifecycleSnapshot> = {}) {
   const client = testClient()
   const lifecycle: LifecycleClient = {
     getSnapshot: vi.fn(), onSnapshot: vi.fn(), resolveClose: vi.fn(),
-    quit: vi.fn().mockResolvedValue(undefined), cancelQuit: vi.fn(), confirmQuit: vi.fn(), onDesktopAction: vi.fn(), setDesktopReady: vi.fn(),
+    quit: vi.fn().mockResolvedValue(undefined), cancelQuit: vi.fn(), confirmQuit: vi.fn(),
+    confirmBackgroundRelease: vi.fn(), cancelBackgroundRelease: vi.fn(),
+    onDesktopAction: vi.fn(), setDesktopReady: vi.fn(),
   }
-  const snapshot: LifecycleSnapshot = { revision: 0, platform: 'windows', backgroundAvailable: true, badgeAvailable: true, closeRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false, ...patch }
+  const snapshot: LifecycleSnapshot = { revision: 0, platform: 'windows', backgroundAvailable: true, badgeAvailable: true, closeRequestId: null, releaseRequestId: null, quitRequestId: null, quitting: false, quitTimedOut: false, ...patch }
   render(<LifecycleContext.Provider value={{ client: lifecycle, snapshot }}><GeneralPane client={client} /></LifecycleContext.Provider>)
   return { client, lifecycle }
 }
@@ -25,13 +27,13 @@ describe('general window behavior settings', () => {
     expect(select).toHaveTextContent('每次询问')
     await userEvent.click(select)
     await userEvent.click(await screen.findByRole('option', { name: '最小化到系统托盘' }))
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'background', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'background', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' } }))
     expect(lifecycle.resolveClose).not.toHaveBeenCalled()
     expect(lifecycle.quit).not.toHaveBeenCalled()
     await waitFor(() => expect(select).not.toBeDisabled())
     await userEvent.click(select)
     await userEvent.click(await screen.findByRole('option', { name: '每次询问' }))
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' } }))
   })
 
   it('saves which page opens at startup', async () => {
@@ -41,7 +43,16 @@ describe('general window behavior settings', () => {
     expect(select).toHaveTextContent('收件箱')
     await userEvent.click(select)
     await userEvent.click(await screen.findByRole('option', { name: '此刻' }))
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'now' } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'now' } }))
+  })
+
+  it('toggles releasing UI memory in background and disables it when background is unavailable', async () => {
+    const { client } = show()
+    const toggle = await screen.findByRole('switch', { name: '后台运行时释放界面内存' })
+    await waitFor(() => expect(toggle).not.toBeDisabled())
+    expect(toggle).not.toBeChecked()
+    await userEvent.click(toggle)
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: true, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' } }))
   })
 
   it('disables background hiding when Linux has no available tray', async () => {
@@ -60,7 +71,7 @@ describe('general window behavior settings', () => {
     await waitFor(() => expect(toggle).not.toBeDisabled())
     expect(toggle).toBeChecked()
     await userEvent.click(toggle)
-    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' } }))
+    await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({ general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' } }))
     const select = screen.getByRole('combobox', { name: '关闭主窗口时' })
     await waitFor(() => expect(select).not.toBeDisabled())
     await userEvent.click(select)

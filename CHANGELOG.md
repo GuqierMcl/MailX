@@ -12,6 +12,10 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ## [Unreleased]
 
+### 🚀 Feature
+
+- Add an optional "Release UI memory in background" setting (off by default) that releases the main window interface when closing to the background or starting silently, keeping only the mail core running. / 新增可选的「后台运行时释放界面内存」设置（默认关闭），关闭主窗口进入后台或静默启动时释放界面资源，仅保留收信与同步内核。
+
 ### ✨ Optimization
 
 - Refine the startup screen with a minimalist breathing brand icon over the native translucent canvas on macOS and eliminate the initial blank frame before the logo appears. / 优化启动加载页，改为在画布与 macOS 原生毛玻璃材质上展示极简呼吸图标，并消除启动首帧显示图标前的空白闪烁。

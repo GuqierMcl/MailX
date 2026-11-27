@@ -80,10 +80,16 @@ impl DesktopState {
     }
 
     /// Called from the login-startup blocking worker, never on the UI thread.
-    pub(crate) fn silent_start(&self) -> bool {
+    pub(crate) fn startup_background_prefs(&self) -> (bool, bool) {
         self.settings_store()
             .and_then(|store| store.get())
-            .is_ok_and(|snapshot| snapshot.settings.general.silent_start)
+            .map(|snapshot| {
+                (
+                    snapshot.settings.general.silent_start,
+                    snapshot.settings.general.release_ui_in_background,
+                )
+            })
+            .unwrap_or((false, false))
     }
 
     /// Account the shared tools use when a call names none.

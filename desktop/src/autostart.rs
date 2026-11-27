@@ -128,20 +128,22 @@ pub(crate) fn prepare_startup(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let worker_app = app.clone();
-        let silent = tauri::async_runtime::spawn_blocking(move || {
+        let (silent, release_ui) = tauri::async_runtime::spawn_blocking(move || {
             let enabled = worker_app
                 .state::<AutostartState>()
                 .access(None)
                 .is_ok_and(|snapshot| snapshot.enabled);
-            enabled
-                && worker_app
-                    .state::<crate::state::DesktopState>()
-                    .silent_start()
+            let (silent_start, release_ui) = worker_app
+                .state::<crate::state::DesktopState>()
+                .startup_background_prefs();
+            (enabled && silent_start, release_ui)
         })
         .await
-        .unwrap_or(false);
+        .unwrap_or((false, false));
         let handle = app.clone();
-        let _ = app.run_on_main_thread(move || crate::lifecycle::startup_prepared(&handle, silent));
+        let _ = app.run_on_main_thread(move || {
+            crate::lifecycle::startup_prepared(&handle, silent, release_ui)
+        });
     });
 }
 

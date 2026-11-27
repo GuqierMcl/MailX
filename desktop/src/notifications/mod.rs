@@ -56,13 +56,13 @@ use mailx_core::{
     NewMail, NotificationSettings, NotificationSound, OutboxChanged, OutboxState, SupportedLocale,
 };
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, EventTarget, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
 use crate::window_chrome::{self, MAIN_WINDOW};
 
 /// Pushed to the main window when the user clicks a notification.
-const OPEN_EVENT: &str = "mailx://notification-open";
+pub(crate) const OPEN_EVENT: &str = "mailx://notification-open";
 /// Keys of the payload a notification carries back when it is clicked.
 const ACCOUNT_KEY: &str = "mailxAccountId";
 const EMAIL_KEY: &str = "mailxEmailId";
@@ -321,7 +321,7 @@ pub(crate) fn preview(sound: NotificationSound) {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OpenRequest {
+pub(crate) struct OpenRequest {
     account_id: String,
     email_id: Option<String>,
     /// Set for send results: the queue item to show.
@@ -330,7 +330,7 @@ struct OpenRequest {
 
 /// A click on a notification brings the window forward and tells the page
 /// what to show. Clicks on notifications of an older launch report nothing.
-pub(crate) fn on_click<R: Runtime>(app: &AppHandle<R>) {
+pub(crate) fn on_click(app: &AppHandle) {
     let handle = app.clone();
     let _ = app.notification().on_action(move |performed| {
         #[cfg(target_os = "macos")]
@@ -355,9 +355,8 @@ pub(crate) fn on_click<R: Runtime>(app: &AppHandle<R>) {
         let Some(account_id) = text(ACCOUNT_KEY) else {
             return;
         };
-        let _ = handle.emit_to(
-            EventTarget::webview_window(MAIN_WINDOW),
-            OPEN_EVENT,
+        crate::lifecycle::dispatch_open_request(
+            &handle,
             OpenRequest {
                 account_id,
                 email_id: text(EMAIL_KEY),
@@ -367,24 +366,25 @@ pub(crate) fn on_click<R: Runtime>(app: &AppHandle<R>) {
     });
 }
 
-/// Brings the main window forward (showing it when hidden) and asks the page
-/// to open one message, the same event a notification click sends. `false`
-/// when the main window does not exist.
-pub(crate) fn open_email<R: Runtime>(app: &AppHandle<R>, account_id: &str, email_id: &str) -> bool {
-    if app.get_webview_window(MAIN_WINDOW).is_none() {
+/// Brings the main window forward (showing or recreating it when hidden or
+/// released) and asks the page to open one message, the same event a
+/// notification click sends. `false` when the main window cannot be reached.
+pub(crate) fn open_email(app: &AppHandle, account_id: &str, email_id: &str) -> bool {
+    if app.get_webview_window(MAIN_WINDOW).is_none()
+        && !crate::lifecycle::can_recreate_main_window(app)
+    {
         return false;
     }
     window_chrome::focus_main_window(app);
-    app.emit_to(
-        EventTarget::webview_window(MAIN_WINDOW),
-        OPEN_EVENT,
+    crate::lifecycle::dispatch_open_request(
+        app,
         OpenRequest {
             account_id: account_id.to_owned(),
             email_id: Some(email_id.to_owned()),
             outbox_id: None,
         },
-    )
-    .is_ok()
+    );
+    true
 }
 
 #[cfg(test)]

@@ -310,7 +310,7 @@ export interface MailxClient {
   /** Plays one of MailX's own notification sounds; the system sound and none play nothing. */
   previewSound(sound: NotificationSound): Promise<void>
   /** Hears clicks on new-mail notifications: one message, or a whole account's arrivals. */
-  onNotificationOpen(listener: (request: NotificationOpen) => void): () => void
+  onNotificationOpen(listener: (request: NotificationOpen) => void, onReady?: () => void): () => void
 
   // --- Drafts and sending (docs/architecture/sending.md). Which window may call
   // what is enforced by the host: the composer window only reaches its own draft.
@@ -704,13 +704,16 @@ export function createDesktopClient(): MailxClient {
     setAutostart: (enabled) => call<AutostartSnapshot>('autostart_set', { enabled }),
     testNotification: () => call<void>('notifications_test'),
     previewSound: (sound) => call<void>('notifications_preview_sound', { sound }),
-    onNotificationOpen(listener) {
-      if (!available) return () => undefined
+    onNotificationOpen(listener, onReady) {
+      if (!available) { onReady?.(); return () => undefined }
       let disposed = false
       let unlisten: (() => void) | undefined
       getCurrentWebviewWindow()
         .listen<NotificationOpen>('mailx://notification-open', (event) => { if (!disposed) listener(event.payload) })
-        .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
+        .then((stop) => {
+          if (disposed) stop()
+          else { unlisten = stop; onReady?.() }
+        }, () => { if (!disposed) onReady?.() })
       return () => { disposed = true; unlisten?.() }
     },
     createDraft: (request) => call<Draft>('drafts_create', { request }),
