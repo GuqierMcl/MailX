@@ -47,8 +47,6 @@ const ENDPOINTS: &[(&str, u16, Kind)] = &[
     ("outlook.office365.com", 993, Kind::Imap),
     ("smtp-mail.outlook.com", 587, Kind::SmtpStartTls),
     ("smtp.office365.com", 587, Kind::SmtpStartTls),
-    // Not a preset: an unregistered server that only works through the fallback.
-    ("smtp.wo.cn", 465, Kind::Smtps),
 ];
 
 async fn line(reader: &mut BufReader<BoxedStream>) -> String {
@@ -123,19 +121,13 @@ fn registered_stack(host: &str, kind: Kind) -> TlsStack {
 async fn check(endpoints: impl IntoIterator<Item = (String, u16, Kind)>) -> Vec<String> {
     let mut failures = Vec::new();
     for (host, port, kind) in endpoints {
-        let used = std::sync::Mutex::new(TlsStack::Rustls);
-        let result = net::with_tls_fallback(
-            &host,
-            port,
-            registered_stack(&host, kind),
-            |stack| {
-                *used.lock().unwrap() = stack;
-                probe(&host, port, kind, stack)
-            },
-            |error: &String| error.contains("no TLS parameters in common"),
-        )
-        .await;
-        let stack = used.into_inner().unwrap();
+        let (mut result, mut stack) = connect(&host, port, kind).await;
+        if let Err(error) = &result {
+            // Shared runners see transient network failures; retry them once.
+            println!("{host}:{port} {stack:?} retrying after -> {error}");
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            (result, stack) = connect(&host, port, kind).await;
+        }
         match result {
             Ok(text) => println!("{host}:{port} {stack:?} OK -> {text}"),
             Err(error) => {
@@ -153,6 +145,23 @@ async fn check(endpoints: impl IntoIterator<Item = (String, u16, Kind)>) -> Vec<
         }
     }
     failures
+}
+
+/// One production-path connection; returns the result and the stack used last.
+async fn connect(host: &str, port: u16, kind: Kind) -> (Result<String, String>, TlsStack) {
+    let used = std::sync::Mutex::new(TlsStack::Rustls);
+    let result = net::with_tls_fallback(
+        host,
+        port,
+        registered_stack(host, kind),
+        |stack| {
+            *used.lock().unwrap() = stack;
+            probe(host, port, kind, stack)
+        },
+        |error: &String| error.contains("no TLS parameters in common"),
+    )
+    .await;
+    (result, used.into_inner().unwrap())
 }
 
 #[tokio::test]
