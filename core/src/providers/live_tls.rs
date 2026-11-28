@@ -1,8 +1,9 @@
 //! Real-server TLS checks, run on demand by the "Provider TLS" workflow:
 //! `cargo test -p mailx-core live_provider_tls -- --ignored --nocapture`.
 //!
-//! Every preset endpoint must greet through the production stack choice
-//! (`imap_tls_stack` for IMAP; SMTP always uses rustls). No login is made.
+//! Every endpoint must greet through the production stack choice: registered
+//! IMAP hosts use platform TLS, everything else starts on rustls and falls back
+//! through `net::with_tls_fallback`. No login is made.
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -16,7 +17,7 @@ enum Kind {
 }
 
 /// IMAP and SMTP endpoints the account presets and OAuth providers use.
-const PRESET_ENDPOINTS: &[(&str, u16, Kind)] = &[
+const ENDPOINTS: &[(&str, u16, Kind)] = &[
     ("imap.qq.com", 993, Kind::Imap),
     ("smtp.qq.com", 465, Kind::Smtps),
     ("imap.163.com", 993, Kind::Imap),
@@ -46,6 +47,8 @@ const PRESET_ENDPOINTS: &[(&str, u16, Kind)] = &[
     ("outlook.office365.com", 993, Kind::Imap),
     ("smtp-mail.outlook.com", 587, Kind::SmtpStartTls),
     ("smtp.office365.com", 587, Kind::SmtpStartTls),
+    // Not a preset: an unregistered server that only works through the fallback.
+    ("smtp.wo.cn", 465, Kind::Smtps),
 ];
 
 async fn line(reader: &mut BufReader<BoxedStream>) -> String {
@@ -110,7 +113,7 @@ async fn probe(host: &str, port: u16, kind: Kind, stack: TlsStack) -> Result<Str
     }
 }
 
-fn production_stack(host: &str, kind: Kind) -> TlsStack {
+fn registered_stack(host: &str, kind: Kind) -> TlsStack {
     match kind {
         Kind::Imap => super::imap_tls_stack(host),
         Kind::Smtps | Kind::SmtpStartTls => TlsStack::Rustls,
@@ -120,8 +123,20 @@ fn production_stack(host: &str, kind: Kind) -> TlsStack {
 async fn check(endpoints: impl IntoIterator<Item = (String, u16, Kind)>) -> Vec<String> {
     let mut failures = Vec::new();
     for (host, port, kind) in endpoints {
-        let stack = production_stack(&host, kind);
-        match probe(&host, port, kind, stack).await {
+        let used = std::sync::Mutex::new(TlsStack::Rustls);
+        let result = net::with_tls_fallback(
+            &host,
+            port,
+            registered_stack(&host, kind),
+            |stack| {
+                *used.lock().unwrap() = stack;
+                probe(&host, port, kind, stack)
+            },
+            |error: &String| error.contains("no TLS parameters in common"),
+        )
+        .await;
+        let stack = used.into_inner().unwrap();
+        match result {
             Ok(text) => println!("{host}:{port} {stack:?} OK -> {text}"),
             Err(error) => {
                 println!("{host}:{port} {stack:?} FAIL -> {error}");
@@ -129,7 +144,7 @@ async fn check(endpoints: impl IntoIterator<Item = (String, u16, Kind)>) -> Vec<
             }
         }
         if stack == TlsStack::Platform {
-            // Informational: if rustls starts working, the registration can go.
+            // Informational: if rustls starts working, platform TLS is not needed.
             let rustls = match probe(&host, port, kind, TlsStack::Rustls).await {
                 Ok(_) => "OK, platform TLS may no longer be needed".to_owned(),
                 Err(error) => error,
@@ -143,7 +158,7 @@ async fn check(endpoints: impl IntoIterator<Item = (String, u16, Kind)>) -> Vec<
 #[tokio::test]
 #[ignore = "contacts real mail servers"]
 async fn live_provider_tls_presets() {
-    let endpoints = PRESET_ENDPOINTS
+    let endpoints = ENDPOINTS
         .iter()
         .map(|&(host, port, kind)| (host.to_owned(), port, kind));
     let failures = check(endpoints).await;

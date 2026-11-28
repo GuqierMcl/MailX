@@ -287,9 +287,10 @@ impl fmt::Debug for DataStarted {
     }
 }
 
-/// Where TLS handshakes get their trust decisions. Production always uses the
-/// platform verifier through `net::upgrade_tls`; tests can substitute a trust
-/// store for their throwaway CA. There is no variant that skips verification.
+/// Where TLS handshakes get their trust decisions. Production always verifies
+/// against the operating system through `net::upgrade_tls_on`; tests can
+/// substitute a trust store for their throwaway CA. There is no variant that
+/// skips verification.
 #[derive(Clone)]
 pub(crate) enum TlsSource {
     Platform,
@@ -298,12 +299,43 @@ pub(crate) enum TlsSource {
 }
 
 impl TlsSource {
-    async fn upgrade(&self, stream: BoxedStream, host: &str) -> Result<BoxedStream, NetError> {
+    async fn upgrade(
+        &self,
+        stream: BoxedStream,
+        host: &str,
+        stack: net::TlsStack,
+    ) -> Result<BoxedStream, NetError> {
         match self {
-            Self::Platform => net::upgrade_tls(stream, host).await,
+            Self::Platform => net::upgrade_tls_on(stream, host, stack).await,
+            // The platform library cannot trust the test CA; tests stand in for
+            // it with the same rustls configuration to exercise the fallback.
             #[cfg(test)]
             Self::Test(config) => net::upgrade_tls_with(stream, host, config.clone()).await,
         }
+    }
+}
+
+/// A connection setup failure, remembering whether the TLS handshake found no
+/// parameters in common with the server (the only case that retries on the
+/// platform TLS stack).
+struct SetupFailure {
+    outcome: SmtpOutcome,
+    tls_incompatible: bool,
+}
+
+impl From<SmtpOutcome> for SetupFailure {
+    fn from(outcome: SmtpOutcome) -> Self {
+        Self {
+            outcome,
+            tls_incompatible: false,
+        }
+    }
+}
+
+fn tls_setup_failure(error: NetError) -> SetupFailure {
+    SetupFailure {
+        tls_incompatible: error.is_tls_incompatible(),
+        outcome: net_outcome(error),
     }
 }
 
@@ -675,12 +707,33 @@ async fn authenticated_connection(
     }
 }
 
+/// SMTP endpoints have no registered platform-TLS hosts; a server that shares
+/// no TLS parameters with rustls is retried once on the platform stack along
+/// the same route (see `net::with_tls_fallback`).
 async fn connect_and_authenticate(
     route: &NetRoute,
     login: &SmtpLogin,
     timeouts: &Timeouts,
     tls: &TlsSource,
 ) -> Result<(Conn, Capabilities), SmtpOutcome> {
+    net::with_tls_fallback(
+        &login.host,
+        login.port,
+        net::TlsStack::Rustls,
+        |stack| connect_and_authenticate_on(route, login, timeouts, tls, stack),
+        |failure: &SetupFailure| failure.tls_incompatible,
+    )
+    .await
+    .map_err(|failure| failure.outcome)
+}
+
+async fn connect_and_authenticate_on(
+    route: &NetRoute,
+    login: &SmtpLogin,
+    timeouts: &Timeouts,
+    tls: &TlsSource,
+    stack: net::TlsStack,
+) -> Result<(Conn, Capabilities), SetupFailure> {
     let secret = login
         .credential
         .secret()
@@ -691,9 +744,9 @@ async fn connect_and_authenticate(
         .map_err(net_outcome)?;
     let stream = match login.tls {
         TlsMode::Implicit => tls
-            .upgrade(stream, &login.host)
+            .upgrade(stream, &login.host, stack)
             .await
-            .map_err(net_outcome)?,
+            .map_err(tls_setup_failure)?,
         TlsMode::StartTls => stream,
     };
     let mut conn = Conn::new(stream);
@@ -703,31 +756,34 @@ async fn connect_and_authenticate(
         .await
         .map_err(io_outcome)?;
     if greeting.code != 220 {
-        return Err(unexpected(&greeting, secret));
+        return Err(unexpected(&greeting, secret).into());
     }
     let mut caps = ehlo(&mut conn, timeouts.command, secret).await?;
 
     if login.tls == TlsMode::StartTls {
         if !caps.starttls {
             conn.quit(timeouts.quit).await;
-            return Err(permanent(FailureReason::TlsUnavailable));
+            return Err(permanent(FailureReason::TlsUnavailable).into());
         }
         let reply = conn
             .command("STARTTLS", timeouts.command)
             .await
             .map_err(io_outcome)?;
         if reply.code != 220 {
-            return Err(unexpected(&reply, secret));
+            return Err(unexpected(&reply, secret).into());
         }
         // Nothing may follow the 220 until our handshake: bytes already in the
         // read buffer were sent in the clear by whoever controls the stream
         // (STARTTLS injection, RFC 3207 section 6) and must not be trusted or
         // replayed after the upgrade. Refuse instead of discarding.
         if !conn.reader.buffer().is_empty() {
-            return Err(permanent(FailureReason::Protocol));
+            return Err(permanent(FailureReason::Protocol).into());
         }
         let plain = conn.reader.into_inner();
-        let secured = tls.upgrade(plain, &login.host).await.map_err(net_outcome)?;
+        let secured = tls
+            .upgrade(plain, &login.host, stack)
+            .await
+            .map_err(tls_setup_failure)?;
         conn = Conn::new(secured);
         // Capabilities learned before TLS are discarded, not trusted.
         caps = ehlo(&mut conn, timeouts.command, secret).await?;

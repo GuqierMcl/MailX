@@ -5,10 +5,12 @@
 //! failure is reported as such and never falls back to a direct connection.
 //! TLS is verified against the operating system trust store.
 //!
-//! rustls is the TLS stack. A few registered mail endpoints only offer cipher
-//! suites rustls deliberately omits (finite-field DHE, static RSA key
-//! exchange); `TlsStack::Platform` runs those handshakes on the operating
-//! system library instead, over the same routed stream.
+//! rustls is the TLS stack. Some mail servers only offer cipher suites rustls
+//! deliberately omits (finite-field DHE, static RSA key exchange);
+//! `TlsStack::Platform` runs those handshakes on the operating system library
+//! instead, over the same route. Registered endpoints use it directly; other
+//! IMAP / SMTP endpoints fall back to it through `with_tls_fallback` only when
+//! the server rejects every parameter rustls offered.
 
 pub(crate) mod http;
 pub(crate) mod images;
@@ -16,12 +18,14 @@ mod proxy;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::future::Future;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use rustls::ClientConfig;
 use rustls::pki_types::ServerName;
+use rustls::{AlertDescription, ClientConfig};
 use rustls_platform_verifier::BuilderVerifierExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
@@ -67,6 +71,18 @@ pub(crate) enum NetError {
     /// The TLS handshake or certificate verification failed.
     Tls(String),
     Timeout,
+}
+
+/// Reason recorded when the server and rustls share no TLS version or cipher
+/// suite. Kept inside `Tls` so every existing mapping treats it as a TLS failure.
+const TLS_INCOMPATIBLE: &str = "no TLS parameters in common with the server";
+
+impl NetError {
+    /// The server rejected every TLS version and cipher suite rustls offered.
+    /// Certificate, timeout and connection failures never qualify.
+    pub(crate) fn is_tls_incompatible(&self) -> bool {
+        matches!(self, Self::Tls(reason) if reason == TLS_INCOMPATIBLE)
+    }
 }
 
 impl fmt::Display for NetError {
@@ -119,6 +135,69 @@ pub(crate) async fn upgrade_tls_on(
     match stack {
         TlsStack::Rustls => upgrade_tls(stream, host).await,
         TlsStack::Platform => platform_handshake(stream, host).await,
+    }
+}
+
+/// TLS stack learned per mail endpoint (lower-case host, port) in this process.
+fn learned_stacks() -> &'static Mutex<HashMap<(String, u16), TlsStack>> {
+    static LEARNED: OnceLock<Mutex<HashMap<(String, u16), TlsStack>>> = OnceLock::new();
+    LEARNED.get_or_init(Default::default)
+}
+
+fn learned_stack(key: &(String, u16)) -> Option<TlsStack> {
+    learned_stacks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(key)
+        .copied()
+}
+
+fn learn_stack(key: (String, u16), stack: TlsStack) {
+    learned_stacks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(key, stack);
+}
+
+/// Runs one mail connection attempt (`attempt` connects along the account
+/// route and performs the TLS handshake with the stack it is given).
+///
+/// A registered `Platform` endpoint uses the platform stack directly. Any other
+/// endpoint starts with rustls; only if `incompatible` says the server shared
+/// no TLS parameters with rustls is the whole attempt repeated once on the
+/// platform stack, which then serves that endpoint for the rest of the process.
+/// An endpoint that has completed a rustls attempt never falls back, so a
+/// forged alert cannot downgrade a server already known to work with rustls.
+pub(crate) async fn with_tls_fallback<T, E, Fut>(
+    host: &str,
+    port: u16,
+    registered: TlsStack,
+    mut attempt: impl FnMut(TlsStack) -> Fut,
+    incompatible: impl Fn(&E) -> bool,
+) -> Result<T, E>
+where
+    Fut: Future<Output = Result<T, E>>,
+{
+    if registered == TlsStack::Platform {
+        return attempt(TlsStack::Platform).await;
+    }
+    let key = (host.to_ascii_lowercase(), port);
+    let known = learned_stack(&key);
+    match attempt(known.unwrap_or(TlsStack::Rustls)).await {
+        Ok(value) => {
+            if known.is_none() {
+                learn_stack(key, TlsStack::Rustls);
+            }
+            Ok(value)
+        }
+        Err(error) if known.is_none() && incompatible(&error) => {
+            let result = attempt(TlsStack::Platform).await;
+            if result.is_ok() {
+                learn_stack(key, TlsStack::Platform);
+            }
+            result
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -194,9 +273,28 @@ async fn tls_handshake(
     Ok(stream)
 }
 
-fn tls_handshake_error(_error: std::io::Error) -> NetError {
-    // rustls and platform diagnostics can contain names from peer certificates.
-    tls_handshake_error_message()
+fn tls_handshake_error(error: std::io::Error) -> NetError {
+    // rustls and platform diagnostics can contain names from peer certificates;
+    // only the fact that negotiation found nothing in common is kept.
+    let incompatible = error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<rustls::Error>())
+        .is_some_and(|error| {
+            matches!(
+                error,
+                rustls::Error::PeerIncompatible(_)
+                    | rustls::Error::AlertReceived(
+                        AlertDescription::HandshakeFailure
+                            | AlertDescription::InsufficientSecurity
+                            | AlertDescription::ProtocolVersion
+                    )
+            )
+        });
+    if incompatible {
+        NetError::Tls(TLS_INCOMPATIBLE.into())
+    } else {
+        tls_handshake_error_message()
+    }
 }
 
 fn tls_handshake_error_message() -> NetError {
@@ -244,5 +342,130 @@ mod tests {
             );
             assert!(!format!("{sanitized:?}").contains("private-password-marker"));
         }
+    }
+
+    #[test]
+    fn only_negotiation_failures_count_as_tls_incompatible() {
+        let wrap = |error: rustls::Error| {
+            tls_handshake_error(std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+        };
+        for error in [
+            rustls::Error::AlertReceived(AlertDescription::HandshakeFailure),
+            rustls::Error::AlertReceived(AlertDescription::InsufficientSecurity),
+            rustls::Error::AlertReceived(AlertDescription::ProtocolVersion),
+            rustls::Error::PeerIncompatible(rustls::PeerIncompatible::NoCipherSuitesInCommon),
+        ] {
+            let mapped = wrap(error.clone());
+            assert!(mapped.is_tls_incompatible(), "{error:?}");
+            assert!(matches!(mapped, NetError::Tls(_)), "{error:?}");
+        }
+        for error in [
+            rustls::Error::AlertReceived(AlertDescription::BadCertificate),
+            rustls::Error::AlertReceived(AlertDescription::UnknownCA),
+            rustls::Error::InvalidCertificate(rustls::CertificateError::Expired),
+            rustls::Error::General("handshake_failure".into()),
+        ] {
+            assert!(!wrap(error.clone()).is_tls_incompatible(), "{error:?}");
+        }
+        for error in [
+            NetError::Timeout,
+            NetError::Connect("refused".into()),
+            NetError::Proxy("handshake failure".into()),
+            tls_handshake_error(std::io::Error::other("platform")),
+        ] {
+            assert!(!error.is_tls_incompatible(), "{error:?}");
+        }
+    }
+
+    /// Runs `with_tls_fallback` with scripted per-stack results and returns
+    /// the stacks attempted, in order.
+    async fn fallback(
+        host: &str,
+        registered: TlsStack,
+        rustls: Result<(), NetError>,
+        platform: Result<(), NetError>,
+    ) -> (Result<(), NetError>, Vec<TlsStack>) {
+        let tried = Mutex::new(Vec::new());
+        let result = with_tls_fallback(
+            host,
+            993,
+            registered,
+            |stack| {
+                tried.lock().unwrap().push(stack);
+                let result = match stack {
+                    TlsStack::Rustls => rustls.clone(),
+                    TlsStack::Platform => platform.clone(),
+                };
+                async move { result }
+            },
+            NetError::is_tls_incompatible,
+        )
+        .await;
+        (result, tried.into_inner().unwrap())
+    }
+
+    fn incompatible() -> Result<(), NetError> {
+        Err(NetError::Tls(TLS_INCOMPATIBLE.into()))
+    }
+
+    #[tokio::test]
+    async fn fallback_retries_once_and_remembers_the_platform_stack() {
+        use TlsStack::{Platform, Rustls};
+        let host = "Fallback-Learns.example";
+        let (result, tried) = fallback(host, Rustls, incompatible(), Ok(())).await;
+        assert!(result.is_ok());
+        assert_eq!(tried, [Rustls, Platform]);
+        // Learned per endpoint, case-insensitively: no second rustls attempt.
+        let (result, tried) =
+            fallback("fallback-learns.example", Rustls, incompatible(), Ok(())).await;
+        assert!(result.is_ok());
+        assert_eq!(tried, [Platform]);
+    }
+
+    #[tokio::test]
+    async fn fallback_keeps_rustls_when_it_ever_worked_or_the_failure_is_not_negotiation() {
+        use TlsStack::{Platform, Rustls};
+        let (_, tried) = fallback("fallback-sticky.example", Rustls, Ok(()), Ok(())).await;
+        assert_eq!(tried, [Rustls]);
+        let (result, tried) =
+            fallback("fallback-sticky.example", Rustls, incompatible(), Ok(())).await;
+        assert!(result.unwrap_err().is_tls_incompatible());
+        assert_eq!(tried, [Rustls]);
+
+        for error in [
+            NetError::Tls("handshake or certificate verification failed".into()),
+            NetError::Timeout,
+            NetError::Proxy("refused".into()),
+        ] {
+            let (result, tried) =
+                fallback("fallback-other.example", Rustls, Err(error.clone()), Ok(())).await;
+            assert_eq!(result, Err(error));
+            assert_eq!(tried, [Rustls]);
+        }
+
+        // A failed retry teaches nothing: the next connection starts on rustls.
+        let (result, tried) = fallback(
+            "fallback-fails.example",
+            Rustls,
+            incompatible(),
+            Err(NetError::Timeout),
+        )
+        .await;
+        assert_eq!(result, Err(NetError::Timeout));
+        assert_eq!(tried, [Rustls, Platform]);
+        let (_, tried) = fallback(
+            "fallback-fails.example",
+            Rustls,
+            incompatible(),
+            Err(NetError::Timeout),
+        )
+        .await;
+        assert_eq!(tried, [Rustls, Platform]);
+
+        // Registered endpoints go straight to the platform stack, no rustls try.
+        let (result, tried) =
+            fallback("fallback-registered.example", Platform, Ok(()), Ok(())).await;
+        assert!(result.is_ok());
+        assert_eq!(tried, [Platform]);
     }
 }

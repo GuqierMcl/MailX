@@ -131,7 +131,7 @@ SMTP 连接器已支持显式 OAuth 凭证的 XOAUTH2，且不向 PLAIN / LOGIN 
 
 ### 会话步骤
 
-1. 按账号路由 `net::connect`。465 端口立即走 `net::upgrade_tls`。
+1. 按账号路由 `net::connect`。465 端口立即升级 TLS（默认 rustls；服务器与 rustls 没有共同的协议参数时，整个连接改由系统 TLS 重试一次，见[连接 TLS 实现](provider-compatibility.md#7-连接-tls-实现)）。
 2. 587 端口：读问候语、`EHLO`，服务器必须声明 `STARTTLS`，否则失败（`tlsUnavailable`），绝不明文继续。发 `STARTTLS` 后，从包装器的共享槽里取出底层流，用 `net::upgrade_tls` 升级后放回，再发一次 `EHLO`。这样 IMAP 和 SMTP 只有一套证书验证；换流的实现：会话持有 `BufReader<BoxedStream>`；收到 `220` 后检查读缓冲为空（非空说明有人在明文里抢跑，按 `protocol` 永久失败，不丢弃也不重放），再 `into_inner()` 取出底层流交给 `net::upgrade_tls`，用结果建立新的读取器并重新 `EHLO`；握手前学到的能力一律丢弃。测试用 `TlsSource::Test`（仅 `#[cfg(test)]`，对应 `net::upgrade_tls_with`）注入测试 CA；生产只有 `TlsSource::Platform`，没有任何跳过验证的开关。
 3. 认证前核对凭证的受信端点（协议、主机、端口、TLS、用户名）：在建立登录计划时完成（`smtp_plan`，`TrustEndpoint::mail("smtp", ...)`），不符时返回永久失败，**不打开任何连接**。会话按服务器声明选用 `AUTH PLAIN`（优先）或 `LOGIN`；没有声明可用机制为 `authUnavailable`。
 4. 服务器声明了 `SIZE` 且快照超出时，在 `MAIL FROM` 之前失败。

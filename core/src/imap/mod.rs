@@ -369,13 +369,30 @@ fn proof_error(error: ImapError) -> crate::auth::OAuthError {
 
 /// Transport setup shared with the dedicated body connection. Every plaintext
 /// authentication phase is bounded, including unsolicited policy rejections.
+/// A server that shares no TLS parameters with rustls is retried once on the
+/// platform TLS stack along the same route (see `net::with_tls_fallback`).
 async fn connect_client(
     route: &NetRoute,
     login: &ImapLogin,
     guard: &body::ReceiveGuard,
 ) -> Result<(Client<BoxedStream>, body::PlaintextGate), ImapError> {
+    net::with_tls_fallback(
+        &login.host,
+        login.port,
+        crate::providers::imap_tls_stack(&login.host),
+        |stack| connect_client_on(route, login, guard, stack),
+        |error| matches!(error, ImapError::Net(error) if error.is_tls_incompatible()),
+    )
+    .await
+}
+
+async fn connect_client_on(
+    route: &NetRoute,
+    login: &ImapLogin,
+    guard: &body::ReceiveGuard,
+    stack: net::TlsStack,
+) -> Result<(Client<BoxedStream>, body::PlaintextGate), ImapError> {
     let stream = net::connect(route, &login.host, login.port).await?;
-    let stack = crate::providers::imap_tls_stack(&login.host);
     match login.tls {
         TlsMode::Implicit => {
             let stream = net::upgrade_tls_on(stream, &login.host, stack).await?;

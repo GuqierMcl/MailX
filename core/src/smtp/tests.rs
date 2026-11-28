@@ -935,3 +935,84 @@ async fn xoauth2_masks_encoded_credentials_in_all_later_replies() {
     }
     peer.await.unwrap();
 }
+
+// Platform TLS fallback (provider-compatibility.md section 7). Under test the
+// platform stand-in reuses the test rustls configuration.
+
+fn refusing(script: Script, handshakes: usize) -> Script {
+    script
+        .refuse_handshakes
+        .store(handshakes, std::sync::atomic::Ordering::SeqCst);
+    script
+}
+
+#[tokio::test]
+async fn incompatible_tls_retries_once_on_the_platform_stack_along_the_same_route() {
+    for starttls in [false, true] {
+        let tls = TestTls::for_names(&["smtp.example.test"]);
+        let mode = if starttls {
+            Mode::StartTls(tls.server.clone())
+        } else {
+            Mode::Implicit(tls.server.clone())
+        };
+        let (smtp, seen) = fake_server::start(refusing(Script::new(mode), 1)).await;
+        let (proxy, targets) = fake_socks5(smtp).await;
+        let mut run = Run::new(
+            0,
+            if starttls {
+                TlsMode::StartTls
+            } else {
+                TlsMode::Implicit
+            },
+        );
+        run.login.host = "smtp.example.test".into();
+        // A port no other test uses keeps the process-wide learned stack apart.
+        run.login.port = if starttls { 2587 } else { 2465 };
+        run.route = proxy_route(ProxyKind::Socks5, proxy);
+        run.tls = tls_for(&tls);
+        let outcome = run.go(hook(&seen)).await;
+        assert!(accepted(&outcome), "{starttls}: {outcome:?}");
+        let state = seen.lock().unwrap();
+        assert_eq!(state.connections, 2, "{starttls}");
+        assert_eq!(state.tls_handshakes_refused, 1, "{starttls}");
+        drop(state);
+        let targets = targets.lock().unwrap().clone();
+        assert_eq!(targets.len(), 2, "{starttls}: {targets:?}");
+        assert!(
+            targets
+                .iter()
+                .all(|target| target.contains("smtp.example.test")),
+            "{targets:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn certificate_failures_never_fall_back() {
+    let tls = TestTls::for_names(&["localhost"]);
+    let other = TestTls::for_names(&["localhost"]);
+    let (port, seen) = fake_server::start(Script::new(Mode::Implicit(tls.server.clone()))).await;
+    let mut run = Run::new(port, TlsMode::Implicit);
+    // Trusts a different CA: the handshake fails verification, not negotiation.
+    run.tls = tls_for(&other);
+    let outcome = run.go(hook(&seen)).await;
+    assert_eq!(reason_of(&outcome), (false, FailureReason::TlsVerification));
+    assert_eq!(seen.lock().unwrap().connections, 1);
+}
+
+#[tokio::test]
+async fn a_server_that_worked_with_rustls_is_never_downgraded() {
+    let tls = TestTls::for_names(&["localhost"]);
+    let script = Script::new(Mode::Implicit(tls.server.clone()));
+    let refusals = script.refuse_handshakes.clone();
+    let (port, seen) = fake_server::start(script).await;
+    let mut run = Run::new(port, TlsMode::Implicit);
+    run.tls = tls_for(&tls);
+    assert!(accepted(&run.go(hook(&seen)).await));
+    // A forged alert after a rustls success is reported, not retried.
+    refusals.store(1, std::sync::atomic::Ordering::SeqCst);
+    let outcome = run.go(hook(&seen)).await;
+    assert_eq!(reason_of(&outcome), (false, FailureReason::TlsVerification));
+    let state = seen.lock().unwrap();
+    assert_eq!((state.connections, state.tls_handshakes_refused), (2, 1));
+}
