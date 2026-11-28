@@ -22,6 +22,9 @@ import { fixedOrder } from '@/features/now/modules/arrange'
 import { DEFAULT_NOW } from '@/features/now/modules/defaults'
 import { HIDEABLE_MODULES, moduleById } from '@/features/now/modules/registry'
 import type { NowModuleId } from '@/features/now/modules/types'
+import { AMBIENT_SCENES, resolveAmbientScene, useNowAmbientMode, useNowAmbientScene, type NowAmbientMode, type NowAmbientScene, type NowConcreteScene } from '@/features/now/ambient-preference'
+import { AmbientSceneArt } from '@/features/now/ambient-scenes'
+import { daySegment, type DaySegment } from '@/features/now/greeting'
 import { SettingsGroup, SettingsLoadError, SettingsPage, SettingsRow, SettingsSaveError } from './settings-layout'
 import { useSettings, useUpdateNow } from './settings-queries'
 
@@ -40,8 +43,82 @@ export function NowPane({ client }: { client: MailxClient }) {
   if (settings.isError) return <SettingsLoadError error={settings.error} onRetry={() => void settings.refetch()} disabled={settings.isFetching} />
   return (
     <SettingsPage>
+      <AmbientGroup />
       <NowGroup client={client} now={settings.data.settings.now} />
     </SettingsPage>
+  )
+}
+
+const PREVIEW_SEGMENTS: Record<NowConcreteScene, DaySegment> = {
+  peaks: 'earlyMorning',
+  window: 'afternoon',
+  sea: 'evening',
+  orbit: 'night',
+}
+
+function AmbientGroup() {
+  useTranslation()
+  const [mode, setMode] = useNowAmbientMode()
+  const [scene, setScene] = useNowAmbientScene()
+  const sceneLabelId = useId()
+  const currentSegment = daySegment(new Date())
+  const options: { value: NowAmbientMode; label: string }[] = [
+    { value: 'full', label: t('settings:nowAmbientFull') },
+    { value: 'static', label: t('settings:nowAmbientStatic') },
+    { value: 'off', label: t('settings:nowAmbientOff') },
+  ]
+  return (
+    <SettingsGroup title={t('settings:nowAmbientGroup')}>
+      <SettingsRow label={t('settings:nowAmbient')} description={t('settings:nowAmbientDescription')}>
+        <RadioGroup aria-label={t('settings:nowAmbient')} value={mode} onValueChange={(next) => setMode(next as NowAmbientMode)}
+          className="inline-flex rounded-lg bg-muted p-0.5">
+          {options.map((option) => (
+            <Radio.Root key={option.value} value={option.value}
+              className="inline-flex h-7 items-center rounded-md px-2.5 text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 data-checked:bg-background data-checked:text-foreground data-checked:shadow-sm">
+              {option.label}
+            </Radio.Root>
+          ))}
+        </RadioGroup>
+      </SettingsRow>
+      {mode !== 'off' && (
+        <div role="group" aria-labelledby={sceneLabelId} className="flex flex-col gap-2">
+          <div className="flex flex-col gap-0.5">
+            <p id={sceneLabelId} className="text-sm font-medium">{t('settings:nowAmbientScene')}</p>
+            <p className="text-xs text-muted-foreground">{t('settings:nowAmbientSceneDescription')}</p>
+          </div>
+          <RadioGroup
+            aria-label={t('settings:nowAmbientScene')}
+            value={scene}
+            onValueChange={(next) => setScene(next as NowAmbientScene)}
+            className="grid grid-cols-2 gap-2.5 sm:grid-cols-3"
+          >
+            {AMBIENT_SCENES.map((item) => {
+              const concrete = resolveAmbientScene(item, currentSegment)
+              const previewSegment = item === 'auto' ? currentSegment : PREVIEW_SEGMENTS[concrete]
+              return (
+                <Radio.Root
+                  key={item}
+                  value={item}
+                  className="group/scene flex flex-col gap-1.5 rounded-xl bg-muted/40 p-1.5 text-left outline-none transition-colors hover:bg-muted/65 focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-muted/75 data-checked:ring-2 data-checked:ring-primary"
+                >
+                  <div className="relative h-16 w-full overflow-hidden rounded-lg bg-background">
+                    <AmbientSceneArt scene={concrete} segment={previewSegment} animate={false} preview />
+                    {item === 'auto' && (
+                      <span className="absolute top-1.5 left-1.5 rounded-full bg-background/85 px-1.5 py-px text-[10px] font-medium text-foreground">
+                        {t('settings:nowAmbientSceneAutoBadge')}
+                      </span>
+                    )}
+                  </div>
+                  <span className="px-1 text-xs font-medium text-muted-foreground group-data-checked/scene:text-foreground">
+                    {t(`settings:nowAmbientScenes.${item}`)}
+                  </span>
+                </Radio.Root>
+              )
+            })}
+          </RadioGroup>
+        </div>
+      )}
+    </SettingsGroup>
   )
 }
 

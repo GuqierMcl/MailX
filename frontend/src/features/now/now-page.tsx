@@ -2,7 +2,7 @@ import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { Alert02Icon, CheckmarkCircle02Icon, MailUpload01Icon } from '@hugeicons/core-free-icons'
+import { Alert02Icon, CheckmarkCircle02Icon, MailUpload01Icon, SparklesIcon } from '@hugeicons/core-free-icons'
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Account, AccountSyncState, CodeCandidate, Folder, OutboxItem, OverviewCode } from '@/generated/accounts'
 import { ErrorNotice } from '@/components/error-notice'
@@ -20,6 +20,10 @@ import { emailQuery } from '@/features/mail/format'
 import type { Mailbox } from '@/features/mail/mailbox'
 import { readyVerificationCode, type VerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
 import { daySegment, lineContext, lineKey, localDay, type LineContext, type NowKey } from './greeting'
+import { occasionOn } from './calendar'
+import { useNowAmbientMode, useNowAmbientScene } from './ambient-preference'
+import { useNowMailActions } from './use-now-mail-actions'
+import { nowSuggestions } from './now-suggestions'
 import { useDayClock, useFirstVisitToday, useLastVisit, useMinuteClock } from './visit'
 import { entranceMode, motionProps } from './motion'
 import { useFreshCodes } from './use-fresh-codes'
@@ -44,6 +48,8 @@ import { useModuleOrder } from './modules/use-module-order'
 
 /** The unified inbox with the Unread filter, newest first, as the workbench asks for it. */
 const UNREAD_QUERY = emailQuery({ folderRole: 'inbox', archive: 'exclude', unread: true, limit: UNREAD_ROWS })
+/** Compact secondary modules that can pair side-by-side on wide screens when adjacent. */
+const PAIRABLE_MODULES = new Set<NowModuleId>(['drafts', 'attachments'])
 
 export type NowPageProps = {
   client: MailxClient
@@ -148,6 +154,12 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   // Unread in the unified inbox, as the sidebar counts it; unknown counts show nothing.
   const inboxes = folders.filter((folder) => folder.selectable && folder.role === 'inbox')
   const unread = inboxes.every((folder) => folder.countsKnown) ? inboxes.reduce((total, folder) => total + folder.unreadCount, 0) : 0
+  const accountUnread = accounts.length >= 2
+    ? accounts.flatMap((account) => {
+      const folder = inboxes.find((item) => item.accountId === account.id)
+      return folder && folder.countsKnown ? [{ account, folder, unread: folder.unreadCount }] : []
+    })
+    : []
   const unreadRows = (unreadList.data?.pages[0]?.items ?? []).slice(0, UNREAD_ROWS)
   const starredUnread = data?.starredUnread ?? 0
   const newMail = data?.newMail.total ?? 0
@@ -156,7 +168,7 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
     attention,
     draftCount,
     codes,
-    inbox: { newMail, unread, starredUnread, rows: unreadRows },
+    inbox: { newMail, unread, starredUnread, rows: unreadRows, accountUnread },
     attachments,
     activity: data?.activity,
     away: { sinceTime: Date.parse(since), ms: now.getTime() - Date.parse(since), total: newMail, senders: data?.newMail.senders ?? [] },
@@ -165,6 +177,11 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   const sync = syncSummary(accounts, syncStates)
 
   const segment = daySegment(now)
+  const occasion = occasionOn(now, language)
+  const [ambientMode] = useNowAmbientMode()
+  const [ambientScene] = useNowAmbientScene()
+  const [inConversation, setInConversation] = useState(openConversation)
+  const mailActions = useNowMailActions(client)
   const context = lineContext(now, language, { attention: urgent, newMail, unread })
   const nothingPending = data !== undefined && attention.length === 0 && draftCount === 0 && newMail === 0 && unread === 0
     && starredUnread === 0 && codes.length === 0 && attachments.length === 0
@@ -215,6 +232,8 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
     verification,
     contactAccountId: accounts[0]?.id ?? '',
     client,
+    folders,
+    mailActions,
     actions: { onSelectMailbox, onOpenUnread, onOpenContact, onOpenAccount, onOpenEmail },
   }
   // A failed overview is reported once, where its first module would be.
@@ -222,38 +241,76 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
   let overviewReported = false
   let index = 1
   const next = () => index++
-  const blocks: ReactNode[] = []
+  const visibleModules: NowModule[] = []
+  const errorAt = new Set<NowModuleId>()
   for (const id of slots ?? ([] as NowModuleId[])) {
     const module = moduleById(id)
     if (suppressed(module, nowSettings, snoozed, moduleData, today)) continue
     if (overviewFailed && module.fromOverview && !overviewReported) {
       overviewReported = true
+      errorAt.add(module.id)
+    }
+    if (module.hasContent(moduleData)) visibleModules.push(module)
+  }
+  // Adjacent compact modules pair into two columns on wide screens without changing order.
+  const paired = new Set<NowModuleId>()
+  for (let i = 0; i < visibleModules.length - 1; i += 1) {
+    const current = visibleModules[i]
+    const following = visibleModules[i + 1]
+    if (PAIRABLE_MODULES.has(current.id) && PAIRABLE_MODULES.has(following.id)) {
+      paired.add(current.id)
+      paired.add(following.id)
+      i += 1
+    }
+  }
+  const blocks: ReactNode[] = []
+  let errorRendered = false
+  for (const module of visibleModules) {
+    if (errorAt.has(module.id)) {
+      errorRendered = true
       blocks.push(
-        <div key="overview-error" {...motionProps(mode, next(), 'px-3')}>
+        <div key="overview-error" {...motionProps(mode, next(), 'px-3 lg:col-span-2')}>
           <ErrorNotice message={t('now:overviewFailed')} detail={errorDetail(overview.error)} actionLabel={t('now:retry')} onAction={() => void overview.refetch()} actionDisabled={overview.isFetching} />
         </div>,
       )
     }
-    if (!module.hasContent(moduleData)) continue
     blocks.push(
-      <ModuleSection key={module.id} title={module.title()} compact={module.compact} mode={mode} index={next()} menu={module.hideable ? { onHideToday: () => hideToday(module), onHideForever: () => hideForever(module) } : undefined}>
+      <ModuleSection
+        key={module.id}
+        title={module.title()}
+        compact={module.compact}
+        mode={mode}
+        index={next()}
+        className={paired.has(module.id) ? 'lg:col-span-1' : 'lg:col-span-2'}
+        menu={module.hideable ? { onHideToday: () => hideToday(module), onHideForever: () => hideForever(module) } : undefined}
+      >
         {module.render(env)}
       </ModuleSection>,
+    )
+  }
+  if (overviewReported && !errorRendered) {
+    blocks.push(
+      <div key="overview-error" {...motionProps(mode, next(), 'px-3 lg:col-span-2')}>
+        <ErrorNotice message={t('now:overviewFailed')} detail={errorDetail(overview.error)} actionLabel={t('now:retry')} onAction={() => void overview.refetch()} actionDisabled={overview.isFetching} />
+      </div>,
     )
   }
 
   // The conversation view keeps this much of the overview: the greeting and, when known, the unread count.
   const chatSummary = unread > 0 ? `${greeting} · ${t('ai:chat.summaryUnread', { count: unread })}` : greeting
+  const suggestions = nowSuggestions(moduleData)
 
   return (
     <div data-slot="now-page" className="relative min-h-0 flex-1 overflow-hidden bg-background">
-      <NowAmbient segment={segment} />
+      <NowAmbient segment={segment} scene={ambientScene} occasion={occasion} mode={ambientMode} dimmed={inConversation} />
       <NowChatShell
         client={client}
         chat={chat}
         usable={assistant.usable}
         service={assistant.service}
         summary={chatSummary}
+        suggestions={suggestions}
+        onConversationChange={setInConversation}
         onOpenEmail={onOpenEmail}
         onOpenDraft={onOpenDraft ?? noop}
         accounts={accounts}
@@ -268,18 +325,23 @@ export function NowPage({ client, accounts, folders, syncStates, draftCount, out
         <div className="flex min-h-full flex-col px-5 sm:px-10">
           <div aria-hidden className="min-h-10 flex-[2] sm:min-h-14" />
           {shown && (
-            <div data-slot="now-content" className="mx-auto flex w-full max-w-190 shrink-0 flex-col gap-9">
-              <header {...motionProps(mode, 0, 'px-3')}>
+            <div data-slot="now-content" className="mx-auto grid w-full max-w-210 shrink-0 grid-cols-1 gap-x-6 gap-y-8 lg:grid-cols-2">
+              <header {...motionProps(mode, 0, 'px-3 lg:col-span-2')}>
                 <p className="text-sm text-muted-foreground">{date}</p>
                 <h1 className="mt-1 text-3xl font-semibold tracking-tight text-balance"><GreetingIcon segment={segment} mode={mode} />{greeting}</h1>
                 <SummaryLine client={client} preset={data ? summaryLine(now, context) : null} summary={summary} mode={mode} />
-                {nothingPending && context.kind !== 'clear' && <p className="mt-1 text-base text-muted-foreground">{t('now:allClear')}</p>}
+                {nothingPending && (
+                  <div data-slot="now-quiet-badge" className="mt-4 inline-flex items-center gap-2 rounded-full bg-muted/55 px-3.5 py-1.5 text-sm text-muted-foreground">
+                    <HugeiconsIcon aria-hidden icon={SparklesIcon} className="size-3.5 shrink-0 text-primary/70" />
+                    <span>{context.kind !== 'clear' ? t('now:allClear') : t('now:quietMoment')}</span>
+                  </div>
+                )}
               </header>
 
               {blocks}
 
               {sync && (
-                <p data-slot="now-sync" {...motionProps(mode, next(), 'flex items-center gap-1.5 px-3 text-xs text-muted-foreground')}>
+                <p data-slot="now-sync" {...motionProps(mode, next(), 'flex items-center gap-1.5 px-3 text-xs text-muted-foreground lg:col-span-2')}>
                   {sync.kind === 'synced' ? (
                     <>
                       {t('now:syncedAt', { time: relativeTime(sync.at, language, minute) })}

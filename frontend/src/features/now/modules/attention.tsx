@@ -16,7 +16,7 @@ export const attentionModule: NowModule = {
   signature: ({ attention }) => attention.map((item) => item.id).join('|'),
   hasContent: ({ attention }) => attention.length > 0,
   render: ({ data }) => (
-    <ul className="flex flex-col rounded-xl bg-muted/40 p-1">
+    <ul className="flex flex-col rounded-2xl bg-muted/50 p-1.5">
       {data.attention.map((item) => (
         <li key={item.id}>
           <button type="button" onClick={item.onClick} className={rowClass}>

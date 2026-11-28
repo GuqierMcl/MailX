@@ -168,5 +168,18 @@
   "cleanupView": "查看",
   "cleanupViewLabel": "查看{{sender}}的来信",
   "attachmentsLine_other": "最近 7 天有 {{count}} 封邮件带附件",
-  "attachmentsLineAtLeast_other": "最近 7 天至少有 {{count}} 封邮件带附件"
+  "attachmentsLineAtLeast_other": "最近 7 天至少有 {{count}} 封邮件带附件",
+  "quietMoment": "此刻很安静，收件箱已清空",
+  "markedRead": "已标为已读",
+  "accountUnreadLabel_other": "{{account}} 收件箱，{{count}} 封未读",
+  "metricReceived7d": "近 7 天收件",
+  "metricSent7d": "近 7 天发出",
+  "metricToday": "今日收件",
+  "suggestNewMail": "帮我总结刚收到的新邮件",
+  "suggestNeedReply": "哪些未读邮件需要我优先回复？",
+  "suggestStarred": "整理一下标星但还没读的邮件",
+  "suggestCleanup": "帮我梳理未读最多的发件人",
+  "suggestAttachments": "最近收到的附件里有什么重要内容？",
+  "suggestToday": "今天有哪些值得留意的邮件？",
+  "suggestDeadlines": "最近邮件里有没有临近的截止日期？"
 }

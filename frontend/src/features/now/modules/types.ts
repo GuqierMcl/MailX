@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { IconSvgElement } from '@hugeicons/react'
-import type { Account, EmailSummary, OverviewActivity, OverviewCode, OverviewSender, RecentAttachment } from '@/generated/accounts'
+import type { Account, EmailSummary, Folder, OverviewActivity, OverviewCode, OverviewSender, RecentAttachment } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
 import type { VerificationCodes, ReadyVerificationCode } from '@/features/mail/use-verification-codes'
 import type { Mailbox } from '@/features/mail/mailbox'
@@ -20,13 +20,15 @@ export type AttentionItem = { id: string; icon: IconSvgElement; label: string; t
 /** A code the shared recognizer confirmed, whether the overview found it or only suspected it. */
 export type ShownCode = Pick<OverviewCode, 'emailId' | 'accountId' | 'from' | 'receivedAt'> & { ready: ReadyVerificationCode }
 
+export type AccountInboxUnread = { account: Account; folder: Folder; unread: number }
+
 /** What the page knows right now, shaped for the modules. */
 export type NowData = {
   /** Stopped accounts and unfinished sends that went wrong; never drafts. */
   attention: AttentionItem[]
   draftCount: number
   codes: ShownCode[]
-  inbox: { newMail: number; unread: number; starredUnread: number; rows: EmailSummary[] }
+  inbox: { newMail: number; unread: number; starredUnread: number; rows: EmailSummary[]; accountUnread?: AccountInboxUnread[] }
   attachments: RecentAttachment[]
   /** Absent while the overview is missing. */
   activity: OverviewActivity | undefined
@@ -59,6 +61,13 @@ export type NowRenderEnv = {
   /** Any account; avatars are looked up by address. */
   contactAccountId: string
   client: MailxClient
+  folders: Folder[]
+  mailActions?: {
+    markRead: (email: EmailSummary) => void
+    toggleStar: (email: EmailSummary) => void
+    archive: (email: EmailSummary) => void
+    busy: ReadonlySet<string>
+  }
   actions: {
     onSelectMailbox: (mailbox: Mailbox) => void
     onOpenUnread: () => void

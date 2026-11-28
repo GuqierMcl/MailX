@@ -9,9 +9,9 @@ Once your mailboxes are added, MailX syncs your recent mail and brings everythin
 
 **Now**, at the top of the sidebar, gives you a quick overview of your day: anything that needs attention, local drafts, verification codes from the last 15 minutes, new mail and recent activity. Everything on this page is worked out on your computer and never sent anywhere.
 
-- Click any item to jump straight to that email or draft.
+- Click any item to jump straight to that email or draft; hover over an unread row to star, mark read or archive in place, or use the per-account unread pills to jump directly into an account's inbox.
 - Click **···** at the right of a section's title to **Hide for today** (it comes back automatically when there is something new) or **Don't show again**.
-- Under **Settings → Appearance → Now**, turn hidden sections back on, or switch the order from Automatic to Fixed and drag sections into the order you prefer.
+- Under **Settings → Now**, choose or preview the backdrop's ambient scene (automatic by time of day or any of the four fine-line scenes), turn hidden sections back on, or switch the order from Automatic to Fixed and drag sections into the order you prefer.
 - Prefer to open straight into your inbox? Change it under **Settings → General → Open at startup**.
 
 ## Unified inbox and account folders

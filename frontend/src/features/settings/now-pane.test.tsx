@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import { DEFAULT_NOW } from '@/features/now/modules/defaults'
+import { NOW_AMBIENT_KEY, NOW_AMBIENT_SCENE_KEY } from '@/features/now/ambient-preference'
 import type { NowSettings } from '@/generated/accounts'
 import { SettingsDialog } from './settings-dialog'
 
@@ -94,5 +95,23 @@ describe('Now settings', () => {
     await userEvent.click(within(group).getByRole('switch', { name: '近况' }))
     expect(await within(group).findByText('未能保存设置')).toBeInTheDocument()
     expect(within(group).getByRole('switch', { name: '近况' })).toBeChecked()
+  })
+
+  it('lets the user switch the ambient backdrop mode and preview scene card', async () => {
+    localStorage.clear()
+    await renderPane()
+    const dialog = screen.getByRole('dialog', { name: '设置' })
+    const backdrop = within(dialog).getByRole('group', { name: '背景' })
+    expect(within(backdrop).getByRole('radio', { name: '开启' })).toBeChecked()
+    const sceneGroup = within(backdrop).getByRole('radiogroup', { name: '场景风格' })
+    expect(within(sceneGroup).getByRole('radio', { name: /自动切换/ })).toBeChecked()
+    await userEvent.click(within(sceneGroup).getByRole('radio', { name: '海面天光' }))
+    expect(localStorage.getItem(NOW_AMBIENT_SCENE_KEY)).toBe('sea')
+    await userEvent.click(within(backdrop).getByRole('radio', { name: '仅静态' }))
+    expect(localStorage.getItem(NOW_AMBIENT_KEY)).toBe('static')
+    await userEvent.click(within(backdrop).getByRole('radio', { name: '关闭' }))
+    expect(localStorage.getItem(NOW_AMBIENT_KEY)).toBe('off')
+    expect(within(backdrop).queryByRole('radiogroup', { name: '场景风格' })).not.toBeInTheDocument()
+    localStorage.clear()
   })
 })
