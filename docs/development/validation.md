@@ -122,6 +122,8 @@ CI、手动 Linux 打包检查与 Release 共用 `scripts/install-linux-build-de
 
 `.github/workflows/linux-appimage.yml` 通过 `workflow_dispatch` 手动触发，在各自原生的 Ubuntu 24.04 runner 上构建无更新签名的 x64 和 ARM64 AppImage、DEB、RPM。检查安装包架构及主程序和 `mailx-mcp` 的 ELF 架构，并在干净的同架构 Ubuntu 容器中用 APT 安装 DEB。RPM 的安装和启动在目标发行版上验证。
 
+`.github/workflows/provider-tls.yml` 通过 `workflow_dispatch` 手动触发，不进入 PR CI。它在 Ubuntu 24.04（x64、ARM64）、Ubuntu 22.04、Fedora 容器、macOS 与 Windows 上运行被忽略的 `live_provider_tls` 测试，经生产代码的 TLS 选择与握手路径连接[登记为系统 TLS 的端点](../architecture/provider-compatibility.md#7-连接-tls-实现)，读取未登录的服务器问候；不使用账号或凭证。通过标准：每个端点返回 IMAP `* OK` 或 SMTP `220` 问候。输出中 rustls 的参照结果只作提示：若 rustls 也能握手，可评估移除登记。修改 TLS 选择、`native-tls` 版本或登记主机后运行一次。
+
 - AppImage 使用无系统 AppIndicator 的 Ubuntu 24.04 Docker 环境。检查包内 ELF 和 AppImage runtime 的架构及 glibc 需求上限 2.39，以及五个托盘库的 SONAME、依赖解析与动态加载。正常启动和移除 AppIndicator 后的降级启动都须显示主窗口、持续存活并建立隔离的空数据库。容器以非 root 运行，断网、移除全部 capabilities，并放开外层 seccomp / AppArmor 以保留 WebKit 沙箱。证据按架构存入 `linux-appimage-evidence-*`。可在有 Docker 的同架构 Linux 主机上运行 `bash scripts/smoke-linux-appimage.sh <AppImage 路径>` 重现。发布前还应在有桌面的 Linux 上核对相应环境中的托盘交互。
 
 <a id="body-native-validation"></a>
@@ -356,7 +358,7 @@ Windows 额外通过插件的 WebView2 设置关闭浏览器快捷键、触摸�
 
 新浪免费邮、飞书中国版、Lark 国际版的[接入范围与官方来源](../reference/mail-provider-preset-candidates.md)对应以下补充验收：
 
-- 新浪：分别使用 `@sina.com` 和 `@sina.cn` 测试。新建时来回切换后缀，检查高级设置所示主机、登录诊断和保存提交一致；拒绝 VIP 域与形似后缀。用户明确改过的服务器、独立用户名、端口和代理，以及已保存的连接，不应因预设重新初始化。
+- 新浪：分别使用 `@sina.com` 和 `@sina.cn` 测试。新建时来回切换后缀，检查高级设置所示主机、登录诊断和保存提交一致；拒绝 VIP 域与形似后缀。用户明确改过的服务器、独立用户名、端口和代理，以及已保存的连接，不应因预设重新初始化。IMAP 经系统 TLS 握手，需在 macOS、Windows、Linux 各完成一次登录与收信，并经代理连接一次，确认代理失败时不回退直连。
 - 飞书和 Lark：用同一个合成企业地址分别选择两个入口，核对新建时展示、诊断和保存的固定端点，以及各自的官方帮助。中国版只使用 `imap.feishu.cn` / `smtp.feishu.cn`；国际版只使用 `imap.larksuite.com` / `smtp.larksuite.com`。某一服务拒绝登录后，不得向另一服务或公司域发送凭证。真实测试需分别使用对应服务托管的成员账号，验证管理员放行、禁止第三方客户端以及撤销设备密码后的提示和恢复流程。
 - 三者都用独立测试收件箱确认一次往返投递；核对标记、收件箱更新和已发送副本。服务商列表、账号头像和紧凑标识在中英文及浅深主题下应清楚完整；关闭图标后应回到既有的账号首字显示。
 

@@ -1,0 +1,53 @@
+name: Provider TLS
+
+# Run on demand: handshakes with real mail servers through the production TLS
+# path (core/src/providers/, net::upgrade_tls_on). It contacts third-party
+# servers, so it stays out of pull request CI. No account or credential is used.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-tls-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  live:
+    name: Live TLS (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: ubuntu-24.04-x64, os: ubuntu-24.04 }
+          - { name: ubuntu-24.04-arm64, os: ubuntu-24.04-arm }
+          - { name: ubuntu-22.04-x64, os: ubuntu-22.04 }
+          - { name: fedora-x64, os: ubuntu-24.04, container: 'fedora:latest' }
+          - { name: macos, os: macos-26 }
+          - { name: windows, os: windows-2025 }
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 30
+    steps:
+      - name: Install Fedora build dependencies
+        if: matrix.container
+        run: |
+          dnf install -y --setopt=install_weak_deps=False gcc openssl-devel pkgconf-pkg-config perl git curl
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          update-crypto-policies --show
+      - uses: actions/checkout@v7
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux' && !matrix.container
+        timeout-minutes: 20
+        run: bash scripts/install-linux-build-deps.sh
+      # rustup reads rust-toolchain.toml and installs the pinned toolchain.
+      - run: rustup show active-toolchain || rustup toolchain install
+      - name: OpenSSL version
+        if: runner.os == 'Linux'
+        run: openssl version || true
+      - run: cargo test -p mailx-core live_provider_tls -- --ignored --nocapture

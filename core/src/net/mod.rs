@@ -4,6 +4,11 @@
 //! HTTP CONNECT proxy that resolves the target host name itself. A proxy
 //! failure is reported as such and never falls back to a direct connection.
 //! TLS is verified against the operating system trust store.
+//!
+//! rustls is the TLS stack. A few registered mail endpoints only offer cipher
+//! suites rustls deliberately omits (finite-field DHE, static RSA key
+//! exchange); `TlsStack::Platform` runs those handshakes on the operating
+//! system library instead, over the same routed stream.
 
 pub(crate) mod http;
 pub(crate) mod images;
@@ -21,6 +26,7 @@ use rustls_platform_verifier::BuilderVerifierExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
+use tokio_native_tls::native_tls;
 use tokio_rustls::TlsConnector;
 
 use crate::accounts::types::ProxyKind;
@@ -94,6 +100,43 @@ pub(crate) async fn connect(
         .map_err(|_| NetError::Timeout)?
 }
 
+/// Which library performs a mail protocol TLS handshake. Chosen per endpoint by
+/// `crate::providers`, never by the account's brand or address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TlsStack {
+    Rustls,
+    /// Secure Transport on macOS, SChannel on Windows, OpenSSL elsewhere.
+    /// Certificates are verified by the platform; TLS 1.2 is the floor.
+    Platform,
+}
+
+/// Runs a mail protocol TLS handshake for `host` with the requested stack.
+pub(crate) async fn upgrade_tls_on(
+    stream: BoxedStream,
+    host: &str,
+    stack: TlsStack,
+) -> Result<BoxedStream, NetError> {
+    match stack {
+        TlsStack::Rustls => upgrade_tls(stream, host).await,
+        TlsStack::Platform => platform_handshake(stream, host).await,
+    }
+}
+
+async fn platform_handshake(stream: BoxedStream, host: &str) -> Result<BoxedStream, NetError> {
+    let connector = native_tls::TlsConnector::builder()
+        .min_protocol_version(Some(native_tls::Protocol::Tlsv12))
+        .build()
+        .map_err(|_| NetError::Tls("platform TLS unavailable".into()))?;
+    let connector = tokio_native_tls::TlsConnector::from(connector);
+    let handshake = connector.connect(host, stream);
+    let stream = timeout(CONNECT_TIMEOUT, handshake)
+        .await
+        .map_err(|_| NetError::Timeout)?
+        // Platform diagnostics can name peer certificates, like rustls ones.
+        .map_err(|_| tls_handshake_error_message())?;
+    Ok(Box::new(stream))
+}
+
 /// Runs a TLS handshake for `host` over an established stream.
 pub(crate) async fn upgrade_tls(stream: BoxedStream, host: &str) -> Result<BoxedStream, NetError> {
     handshake(stream, host, tls_config()?).await
@@ -153,6 +196,10 @@ async fn tls_handshake(
 
 fn tls_handshake_error(_error: std::io::Error) -> NetError {
     // rustls and platform diagnostics can contain names from peer certificates.
+    tls_handshake_error_message()
+}
+
+fn tls_handshake_error_message() -> NetError {
     NetError::Tls("handshake or certificate verification failed".into())
 }
 

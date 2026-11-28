@@ -15,7 +15,7 @@
 
 发现有证据的服务商行为偏差时，优先在服务商模块中解释，并按需增加中立扩展点。遵循标准行为的账号继续使用默认策略，无需为新增前端预设建立空模块。通用主流程描述“需要什么结果”，服务商实现描述“怎样从该服务商的响应得到结果”。前端的服务商入口、图标与账号显示资料不是证明服务器行为的证据。
 
-新浪免费邮、飞书邮箱（中国版）和 Lark 邮箱（国际版）均沿用标准协议策略。新浪按地址后缀选择预先登记的端点；飞书与 Lark 接受企业自有域名，但分别使用用户所选服务商的固定端点。失败时不向另一个服务提交凭证，已有账号也不因地址后缀被重新归类。不以品牌标识在 core 中改变已发送副本、同步或连接路由。端点、凭证与范围见[接入评估](../reference/mail-provider-preset-candidates.md)。
+新浪免费邮、飞书邮箱（中国版）和 Lark 邮箱（国际版）均沿用标准协议策略；新浪 IMAP 端点另需系统 TLS 完成握手，见[第 7 节](#7-连接-tls-实现)。新浪按地址后缀选择预先登记的端点；飞书与 Lark 接受企业自有域名，但分别使用用户所选服务商的固定端点。失败时不向另一个服务提交凭证，已有账号也不因地址后缀被重新归类。不以品牌标识在 core 中改变已发送副本、同步或连接路由。端点、凭证与范围见[接入评估](../reference/mail-provider-preset-candidates.md)。
 
 空文件夹缺少 SEARCH 响应的容错属于通用 IMAP 同步规则。只读 EXAMINE 明确给出 `0 EXISTS` 且该证据在搜索期间仍有效时，匹配的 tagged OK 可以完成空结果。规则适用于各 IMAP 端点，详见[邮件同步](mail-sync.md)。
 
@@ -108,3 +108,20 @@ EWS 使用共用账号路由、SecretStore、消息缓存和发送队列。协�
 - **思考（推理）按协议处理。** OpenAI 兼容读 `delta.reasoning_content` 或字符串形式的 `delta.reasoning`，Anthropic 读 `thinking` / `redacted_thinking` 块。回传规则是“服务器发来什么就原样发回什么，别的不加”：OpenAI 兼容用收到时的同一字段名放回那条助手消息，从没发过思考的服务器收不到这个字段；Anthropic 的思考块连同签名与 `data` 原样放回原位置。只回传给产生它的同一协议、连接、地址与模型。细节见 [AI Runtime](../ai-runtime/README.md) 第 3 节。
 - **没有服务商专属的思考开关。** 请求不带 `thinking`、`reasoning_effort` 等只有部分服务商认识的参数；「此刻」概述同样不发。需要按服务商调整时，先确认无法在协议层解决，再按本文的模块化约定增加中立扩展点并记录验证。
 - 真实服务商的实测结果写入[验证指引](../development/validation.md)；自动测试只覆盖协议样例。
+
+## 7. 连接 TLS 实现
+
+邮件协议连接默认使用 rustls，证书按操作系统信任库验证（`core/src/net/mod.rs`）。rustls 有意不实现有限域 DHE 和静态 RSA 密钥交换。个别服务器只提供这两类套件，此时 rustls 握手失败，用户看到“无法建立安全连接”。
+
+`core/src/providers/mod.rs` 的 `imap_tls_stack` 按 IMAP 主机名精确匹配（不区分 ASCII 大小写）选择 `TlsStack`。登记的主机改由系统 TLS 握手：macOS 为 Secure Transport，Windows 为 SChannel，Linux 为 OpenSSL。约束如下：
+
+- 握手仍在账号路由已建立的连接上进行，代理规则不变，失败不回退直连，也不回退到另一种 TLS 实现。
+- 证书由系统库按系统信任库验证，最低 TLS 1.2；握手错误与 rustls 一样只返回脱敏的通用原因。
+- 只看实际连接的主机名，不看邮箱后缀、`providerId` 或图标；后缀相似的主机保持 rustls。SMTP、EWS 与 HTTPS 不经过此选择。
+- Linux 安装包因此依赖系统 `libssl3`（DEB `libssl3t64 | libssl3`，RPM `libssl.so.3()(64bit)`）。
+
+| 服务商 | 登记的 IMAP 主机 | 原因 |
+| --- | --- | --- |
+| 新浪（`core/src/providers/sina.rs`） | `imap.sina.com`、`imap.sina.cn`、`imap.vip.sina.com` | 只提供 TLS 1.2 的 `DHE-RSA-*` 与静态 `RSA` 套件；SMTP 端点支持 ECDHE，保持 rustls |
+
+在 Windows 上，SChannel 默认未启用 `TLS_DHE_RSA_*`，与新浪 IMAP 协商的是静态 RSA 套件，没有前向保密；若系统日后默认禁用静态 RSA，而服务器仍未支持 ECDHE，该端点会重新握手失败。真实端点的握手由手动工作流 `Provider TLS` 在各平台检查，见[验证指引](../development/validation.md)。服务器开始支持 ECDHE 后，可从登记中移除对应主机。

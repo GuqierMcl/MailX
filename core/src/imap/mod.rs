@@ -375,9 +375,10 @@ async fn connect_client(
     guard: &body::ReceiveGuard,
 ) -> Result<(Client<BoxedStream>, body::PlaintextGate), ImapError> {
     let stream = net::connect(route, &login.host, login.port).await?;
+    let stack = crate::providers::imap_tls_stack(&login.host);
     match login.tls {
         TlsMode::Implicit => {
-            let stream = net::upgrade_tls(stream, &login.host).await?;
+            let stream = net::upgrade_tls_on(stream, &login.host, stack).await?;
             let (stream, gate) = guard.wrap(stream);
             Ok((greet(stream).await?, gate))
         }
@@ -391,7 +392,7 @@ async fn connect_client(
                     _ => ImapError::Unsupported("STARTTLS".into()),
                 })?;
             plaintext.disable();
-            let stream = net::upgrade_tls(client.into_inner(), &login.host).await?;
+            let stream = net::upgrade_tls_on(client.into_inner(), &login.host, stack).await?;
             let (stream, gate) = guard.wrap(stream);
             // STARTTLS continues inside TLS without another greeting.
             Ok((Client::new(stream), gate))
