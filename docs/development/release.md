@@ -7,7 +7,7 @@
 每次发布前按候选提交和[验证指引](validation.md)确认以下项目。实际结果记录在当次 PR 描述和 CI 运行记录，发版时在 Release 说明中概括已覆盖的平台、服务商与场景。
 
 - **对外说明**：中英文 README、产品范围与路线图应与实现一致，区分已有能力、已知限制和后续计划。尤其核对搜索覆盖范围、本地与服务器动作的区别，以及 MCP 的授权范围。
-- **发布说明与升级**：检查 `[Unreleased]` 是否涵盖面向用户的改动。内部数据库升级及迁移版本只记在[数据库迁移清单](../architecture/database-migrations.md)。用户需要执行的升级步骤或注意的兼容性限制写进[升级指南](../guides/zh-CN/README.md#升级与数据保留)。跨版本升级前备份数据目录，确认账号、缓存、草稿、附件与发送记录保留。版本脚本只归并日志，升级路径需单独验证。
+- **发布说明与升级**：检查 `[Unreleased]` 是否涵盖面向用户的改动，并核对每条日志是否已附上对应 PR 的完整链接（有对应 PR 但遗漏的应在发版前或发版 PR 中补齐）。内部数据库升级及迁移版本只记在[数据库迁移清单](../architecture/database-migrations.md)。用户需要执行的升级步骤或注意的兼容性限制写进[升级指南](../guides/zh-CN/README.md#升级与数据保留)。跨版本升级前备份数据目录，确认账号、缓存、草稿、附件与发送记录保留。版本脚本只归并日志，升级路径需单独验证。
 - **自动检查**：候选提交通过 `bun run check`、Rust 格式 / Clippy / 测试及三平台 CI，并核对 Linux AppImage 启动检查。检查结果应对应实际准备发布的提交。
 - **正文边界专项验证**：修改正文 CSP、sandbox、自定义协议、链接拦截或升级 Tauri / Wry 时，按受影响行为和平台安排[专项原生验证](validation.md#body-native-validation)，记录验证方法、实际结果与未覆盖范围。普通前端和 Rust 检查不等同于真实引擎的隔离验证。
 - **安装包冒烟**：对草稿中的各平台安装包验证安装启动、登录、同步、阅读、搜索、写信发信与附件、删除撤销、本机归档、退出 / 后台运行，以及 MCP、自启动和本次变更。按平台、客户端和服务商记录范围，未覆盖项明确保留为限制；既有手测或容器启动证据不能替代候选安装包的验证。
@@ -63,7 +63,7 @@
 
 ## 5. 每次发版的步骤
 
-1. **确认 main 的 CI 是绿的**（合并发版 PR 时 main 最新提交的 `CI result` 已通过，合并后才能只跑轻量检查），`CHANGELOG.md` 的 `[Unreleased]` 已写全。
+1. **确认 main 的 CI 是绿的**（合并发版 PR 时 main 最新提交的 `CI result` 已通过，合并后才能只跑轻量检查），并确认 `CHANGELOG.md` 的 `[Unreleased]` 已写全、所有有对应 PR 的条目均已附上完整 PR 链接（如有遗漏，可直接在本次发版 PR 的 `CHANGELOG.md` 中补齐，不影响发版 PR 的轻量 CI 判定）。
 2. **新建发版分支**：`git switch main && git pull --ff-only && git switch -c release/vX.Y.Z`。
 3. **改版本**：先 `bun run version:bump … --dry-run` 看结果，再去掉 `--dry-run` 执行。
 4. **检查**：`git diff`（应只有版本文件和 `CHANGELOG.md`）；`bun run version:check --release`、`bun run version:test`。发版 PR 只要保持这种改动，CI 就只跑这两项轻量检查（见下文“发版 PR 的 CI”）。
