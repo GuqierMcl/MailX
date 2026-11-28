@@ -148,6 +148,21 @@ function ico(source, sizes) {
   return Buffer.concat([header, ...images]);
 }
 
+// The MCP bridge (mailx-mcp) gets its own Windows file icon, so Task Manager and
+// Explorer tell it apart from the app: the brand blue plate, a smaller M and a
+// plug for "connector", all derived from the same master glyph and plate.
+const mcpBlue = "#2563EB";
+const mcpPlate = master.match(/<rect\b[^>]*\/>/)?.[0]
+  ?.replace(/fill="[^"]*"/, `fill="${mcpBlue}"`).replace(/stroke="[^"]*"/, `stroke="${mcpBlue}"`);
+if (!mcpPlate) throw new Error("branding/logo.svg must keep its plate <rect> for the MCP icon.");
+const mcpPlug = `<svg x="412" y="700" width="200" height="200" viewBox="0 0 100 100"><g fill="#fff">` +
+  `<rect x="30" y="8" width="12" height="26" rx="5"/><rect x="58" y="8" width="12" height="26" rx="5"/>` +
+  `<path d="M20 32h60v14c0 17-13 30-30 30s-30-13-30-30Z"/><rect x="44" y="74" width="12" height="18" rx="4"/></g></svg>`;
+const mcpIcon = svg(1024, 1024, `${mcpPlate}<g transform="translate(0 -60)">${scaledGlyph(0.78)}</g>${mcpPlug}`);
+put("branding/variants/mcp-app.svg", mcpIcon);
+for (const size of [64, 256, 1024]) put(`branding/png/mcp-app-${size}.png`, png(mcpIcon, size));
+put("desktop/icons/mcp/mailx-mcp.ico", ico(mcpIcon, [16, 20, 24, 32, 40, 48, 64, 256]));
+
 put("frontend/public/logo.svg", master);
 put("frontend/public/favicon.svg", favicon);
 put("frontend/public/favicon.ico", ico(favicon, [16, 32, 48]));

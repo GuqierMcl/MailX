@@ -17,6 +17,11 @@ path = "src/main.rs"
 serde_json = "1"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt", "time"] }
 
+# Windows file icon and version information for mailx-mcp.exe (build.rs); the
+# same resource compiler Tauri uses for the app.
+[target.'cfg(windows)'.build-dependencies]
+tauri-winres = "0.3"
+
 [dev-dependencies]
 mailx-core.workspace = true
 mailx-mcp-server = { path = "../mcp-server" }
