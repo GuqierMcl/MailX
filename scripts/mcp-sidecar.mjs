@@ -6,8 +6,10 @@
 //   bun scripts/mcp-sidecar.mjs [--release | --debug] [--target <triple>]
 //   bun scripts/mcp-sidecar.mjs --placeholder   # empty stand-in for cargo check / clippy / test
 //
-// Defaults follow the Tauri CLI: `TAURI_ENV_TARGET_TRIPLE` and `TAURI_ENV_DEBUG`
-// (set for beforeDevCommand / beforeBuildCommand), else the host triple and debug.
+// The target follows the Tauri CLI's `TAURI_ENV_TARGET_TRIPLE`, else the host
+// triple. The profile comes from `--release` / `--debug`: Tauri CLI 2.12 does not
+// set `TAURI_ENV_DEBUG` for `tauri build`, so tauri.conf.json passes the flag
+// explicitly. Without a flag, `TAURI_ENV_DEBUG=false` means release, else debug.
 // `universal-apple-darwin` builds both macOS architectures and joins them with lipo.
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";

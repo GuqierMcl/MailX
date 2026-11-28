@@ -5,7 +5,7 @@
   "build": {
     "beforeDevCommand": "bun scripts/mcp-sidecar.mjs --debug && bun run --cwd frontend dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "bun scripts/mcp-sidecar.mjs && bun run --cwd frontend build",
+    "beforeBuildCommand": "bun scripts/mcp-sidecar.mjs --release && bun run --cwd frontend build",
     "frontendDist": "../frontend/dist"
   },
   "app": {
