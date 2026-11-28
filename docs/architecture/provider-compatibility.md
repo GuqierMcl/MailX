@@ -122,6 +122,6 @@ EWS 使用共用账号路由、SecretStore、消息缓存和发送队列。协�
 
 | 服务商 | 登记的 IMAP 主机 | 原因 |
 | --- | --- | --- |
-| 新浪（`core/src/providers/sina.rs`） | `imap.sina.com`、`imap.sina.cn`、`imap.vip.sina.com` | 只提供 TLS 1.2 的 `DHE-RSA-*` 与静态 `RSA` 套件；SMTP 端点支持 ECDHE，保持 rustls |
+| 新浪（`core/src/providers/sina.rs`） | `imap.sina.com`、`imap.sina.cn`、`imap.vip.sina.com`、`imap.vip.sina.cn` | 只提供 TLS 1.2 的 `DHE-RSA-*` 与静态 `RSA` 套件；SMTP 端点支持 ECDHE，保持 rustls |
 
 在 Windows 上，SChannel 默认未启用 `TLS_DHE_RSA_*`，与新浪 IMAP 协商的是静态 RSA 套件，没有前向保密；若系统日后默认禁用静态 RSA，而服务器仍未支持 ECDHE，该端点会重新握手失败。真实端点的握手由手动工作流 `Provider TLS` 在各平台检查，见[验证指引](../development/validation.md)。服务器开始支持 ECDHE 后，可从登记中移除对应主机。

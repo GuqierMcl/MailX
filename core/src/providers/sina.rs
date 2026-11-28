@@ -3,8 +3,12 @@
 //! on the platform TLS library. Its SMTP servers offer ECDHE and stay on rustls.
 
 /// Exact IMAP host names; similar-looking hosts keep the default stack.
-pub(super) const PLATFORM_TLS_IMAP_HOSTS: &[&str] =
-    &["imap.sina.com", "imap.sina.cn", "imap.vip.sina.com"];
+pub(super) const PLATFORM_TLS_IMAP_HOSTS: &[&str] = &[
+    "imap.sina.com",
+    "imap.sina.cn",
+    "imap.vip.sina.com",
+    "imap.vip.sina.cn",
+];
 
 /// Real-server checks, run on demand by the "Provider TLS" workflow:
 /// `cargo test -p mailx-core live_provider_tls -- --ignored --nocapture`.
@@ -35,9 +39,11 @@ mod live {
             ("imap.sina.com", 993, "* OK"),
             ("imap.sina.cn", 993, "* OK"),
             ("imap.vip.sina.com", 993, "* OK"),
+            ("imap.vip.sina.cn", 993, "* OK"),
             ("smtp.sina.com", 465, "220"),
             ("smtp.sina.cn", 465, "220"),
             ("smtp.vip.sina.com", 465, "220"),
+            ("smtp.vip.sina.cn", 465, "220"),
         ];
         let mut failures = Vec::new();
         for (host, port, expected) in endpoints {

@@ -40,7 +40,12 @@ mod tests {
 
     #[test]
     fn platform_tls_requires_an_exact_registered_imap_host() {
-        for host in ["imap.sina.com", "IMAP.SINA.CN", "imap.vip.sina.com"] {
+        for host in [
+            "imap.sina.com",
+            "IMAP.SINA.CN",
+            "imap.vip.sina.com",
+            "imap.vip.sina.cn",
+        ] {
             assert_eq!(imap_tls_stack(host), TlsStack::Platform, "{host}");
         }
         for host in [
