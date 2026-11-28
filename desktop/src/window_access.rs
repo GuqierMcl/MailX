@@ -521,6 +521,7 @@ mod tests {
             "assistant_clear_conversations",
             "assistant_email_summary",
             "assistant_clear_email_summaries",
+            "assistant_email_action_items",
         ] {
             assert_eq!(check("main", &app, command, None), Ok(WindowKind::Main));
             // A composer window (or a mail body frame) cannot answer a
@@ -621,6 +622,16 @@ mod tests {
             ("assistant_clear_conversations", true, false),
             ("assistant_email_summary", true, false),
             ("assistant_clear_email_summaries", true, false),
+            ("assistant_email_action_items", true, false),
+            ("mail_get_calendar_items", true, false),
+            ("mail_list_document_actions", true, false),
+            ("mail_set_action_item_status", true, false),
+            ("mail_open_action_item_calendar", true, false),
+            ("mail_save_action_item_ics", true, false),
+            ("mail_copy_action_item_text", true, false),
+            ("mail_action_item_capabilities", true, false),
+            ("mail_add_action_item_native", true, false),
+            ("mail_open_calendar_privacy_settings", true, false),
             ("emails_set_flag", true, false),
             ("emails_delete", true, false),
             ("emails_verification_code_status", true, false),
