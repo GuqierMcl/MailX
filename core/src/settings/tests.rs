@@ -423,7 +423,7 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
             "settings": {
                 "ai": { "connections": [], "defaultModel": null, "translationModel": null, "route": { "kind": "direct" } },
                 "general": { "language": "system", "autoUpdate": true, "closeBehavior": "ask", "releaseUiInBackground": false, "showMenuBarIcon": true, "silentStart": false, "singleKeyShortcuts": true, "startupView": "now" },
-                "mail": { "trashVerificationMailAfterCopy": false, "syncWindow": "days30" },
+                "mail": { "trashVerificationMailAfterCopy": false, "syncWindow": "days30", "detectActionItems": true },
                 "appearance": {
                     "theme": "system",
                     "accentColor": "",
@@ -466,6 +466,10 @@ fn snapshot_serializes_as_camel_case_for_the_frontend() {
                         "style": "brief",
                         "language": { "mode": "interface" },
                         "collapsed": false
+                    },
+                    "actionItems": {
+                        "autoExtract": false,
+                        "promptDismissed": false
                     }
                 },
                 "translation": {
