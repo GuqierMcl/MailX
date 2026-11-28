@@ -3321,6 +3321,7 @@ dependencies = [
  "mailx-core",
  "mailx-mcp-server",
  "serde_json",
+ "tauri-winres",
  "tempfile",
  "tokio",
 ]

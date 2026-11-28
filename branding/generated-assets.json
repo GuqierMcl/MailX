@@ -535,6 +535,27 @@
       "height": 64
     },
     {
+      "path": "branding/png/mcp-app-1024.png",
+      "bytes": 27641,
+      "sha256": "88b1e5b7fe44742df6c4f3b2aa49e2d0970381df51ca2198fd8a7dd23a6d6930",
+      "width": 1024,
+      "height": 1024
+    },
+    {
+      "path": "branding/png/mcp-app-256.png",
+      "bytes": 7449,
+      "sha256": "7737fd69fefd438c91155c254c4d6e908427a9049716a46d771697625ffc92de",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "path": "branding/png/mcp-app-64.png",
+      "bytes": 2017,
+      "sha256": "685889d3e59a2f6c63ae358bb8a9644bcbc685a5f95f68f1f2ca1ffa4cf5d56b",
+      "width": 64,
+      "height": 64
+    },
+    {
       "path": "branding/png/wordmark-black-1024.png",
       "bytes": 21429,
       "sha256": "0da3a6535c491a3dd0fb35623d8e39df0582e0c56669dc378e7006470b9fb35b",
@@ -677,6 +698,11 @@
       "sha256": "4a3e12634b72da1482cf4cec64e4d6d8c537849f69fd9cb73012c059b54e0d18"
     },
     {
+      "path": "branding/variants/mcp-app.svg",
+      "bytes": 864,
+      "sha256": "0755dd141741dc4ec3fc4d02facb54fb309400296b28328be171eb3d824b35b4"
+    },
+    {
       "path": "branding/variants/wordmark-black.svg",
       "bytes": 4684,
       "sha256": "cdd8d0c1d2aaa77118e4696a0a5239c3ea5407455dd680fe4847782a88bc515e"
@@ -735,6 +761,11 @@
       "path": "desktop/icons/icon.svg",
       "bytes": 657,
       "sha256": "e34cbfdd3c6fd68650dfb986de946a76fb225e95b6e942a8e1562ae8471b5dfb"
+    },
+    {
+      "path": "desktop/icons/mcp/mailx-mcp.ico",
+      "bytes": 16170,
+      "sha256": "294ec73a576bfe60b3200b7e5834621c19ee6838bc37513e6a67c17ee3047f02"
     },
     {
       "path": "desktop/icons/Square107x107Logo.png",
