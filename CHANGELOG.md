@@ -23,7 +23,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
-- Give the local MCP bridge its own icon and the name "MailX MCP Bridge" in Windows Task Manager and Explorer. / 本地 MCP 转发程序在 Windows 任务管理器和资源管理器中显示专属图标与“MailX MCP Bridge”名称。
+- Give the local MCP bridge its own icon and the name "MailX MCP Bridge" in Windows Task Manager and Explorer. / 本地 MCP 转发程序在 Windows 任务管理器和资源管理器中显示专属图标与“MailX MCP Bridge”名称。 ([#215](https://github.com/GuqierMcl/MailX/pull/215))
 - Enrich the Now page with four animated fine-line ambient scenes (with automatic time-of-day switching and preview cards in Settings → Now), sharper activity metrics, multi-account unread pills, inline unread quick actions, and floating hover AI prompt suggestions. / 优化「此刻」页面：新增四套精致线条动态氛围场景（支持按时段自动切换并在「设置 → 此刻」中卡片预览）、升级近况指标展示、增加多账号未读入口、未读行就地快捷操作以及悬停浮现的 AI 快捷提问胶囊。
 - Show a sharper Sina Mail icon with rounded corners so it matches the other provider icons. / 新浪邮箱改用更清晰的图标并以圆角显示，与其他服务商图标保持一致。 ([#204](https://github.com/GuqierMcl/MailX/pull/204))
 - Refine the startup screen with a minimalist breathing brand icon over the native translucent canvas on macOS and eliminate the initial blank frame before the logo appears. / 优化启动加载页，改为在画布与 macOS 原生毛玻璃材质上展示极简呼吸图标，并消除启动首帧显示图标前的空白闪烁。
