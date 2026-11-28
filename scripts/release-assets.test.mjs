@@ -9,6 +9,9 @@ describe("renamed", () => {
   test("names macOS, Windows and Linux installers after the platform", () => {
     expect(renamed("MailX_0.1.0-alpha.4_aarch64.dmg", "0.1.0-alpha.4", "macos-arm64")).toBe("MailX_0.1.0-alpha.4_macos-arm64.dmg");
     expect(renamed("MailX.app.tar.gz", "0.1.0-alpha.4", "macos-x64")).toBe("MailX_0.1.0-alpha.4_macos-x64.app.tar.gz");
+    expect(renamed("MailX_0.1.0-alpha.4_arm64-setup.exe", "0.1.0-alpha.4", "windows-arm64")).toBe(
+      "MailX_0.1.0-alpha.4_windows-arm64-setup.exe",
+    );
     expect(renamed("MailX_0.1.0-alpha.4_x64-setup.exe", "0.1.0-alpha.4", "windows-x64")).toBe(
       "MailX_0.1.0-alpha.4_windows-x64-setup.exe",
     );
@@ -77,6 +80,7 @@ describe("renameAssets", () => {
       "macos-arm64": "MailX.app.tar.gz",
       "macos-x64": "MailX.app.tar.gz",
       "windows-x64": "MailX_0.1.0-alpha.4_x64-setup.exe",
+      "windows-arm64": "MailX_0.1.0-alpha.4_arm64-setup.exe",
       "linux-x64": "MailX_0.1.0-alpha.4_amd64.AppImage",
       "linux-arm64": "MailX_0.1.0-alpha.4_aarch64.AppImage",
     };
@@ -96,11 +100,13 @@ describe("renameAssets", () => {
       files,
       readSignature: (name) => `sig: ${name}`,
     });
-    expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "darwin-x86_64", "linux-aarch64", "linux-x86_64", "windows-x86_64"]);
+    expect(Object.keys(manifest.platforms).sort()).toEqual(["darwin-aarch64", "darwin-x86_64", "linux-aarch64", "linux-x86_64", "windows-aarch64", "windows-x86_64"]);
     expect(manifest.platforms["darwin-x86_64"].url).toEndWith("MailX_0.1.0-alpha.4_macos-x64.app.tar.gz");
     expect(manifest.platforms["darwin-aarch64"].url).toEndWith("MailX_0.1.0-alpha.4_macos-arm64.app.tar.gz");
     expect(manifest.platforms["linux-x86_64"].url).toEndWith("MailX_0.1.0-alpha.4_linux-x64.AppImage");
     expect(manifest.platforms["linux-aarch64"].url).toEndWith("MailX_0.1.0-alpha.4_linux-arm64.AppImage");
+    expect(manifest.platforms["windows-x86_64"].url).toEndWith("MailX_0.1.0-alpha.4_windows-x64-setup.exe");
+    expect(manifest.platforms["windows-aarch64"].url).toEndWith("MailX_0.1.0-alpha.4_windows-arm64-setup.exe");
   });
 
   test("an unknown platform is refused before anything moves", () => {

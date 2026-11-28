@@ -15,6 +15,7 @@ Choose the installer for your computer on the [download page](/en/download/), th
 ### Windows
 
 - Built for 64-bit Windows. Run the installer and follow the steps on screen.
+- **x64** (Intel / AMD) and **ARM64** (Snapdragon and others) have separate installers. Not sure which one? Open **Settings** → **System** → **About** and look at “System type”. ARM64 installers are offered from newer releases on.
 - If Windows shows a blue security prompt the first time you open it, click **More info** → **Run anyway**.
 
 ### Linux

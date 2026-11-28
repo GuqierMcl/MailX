@@ -19,6 +19,8 @@ test('pickDownloads finds installers by platform and ignores update packages', (
       asset('MailX_0.5.0_macos-x64.dmg'),
       asset('MailX_0.5.0_windows-x64-setup.exe'),
       asset('MailX_0.5.0_windows-x64-setup.exe.sig'),
+      asset('MailX_0.5.0_windows-arm64-setup.exe'),
+      asset('MailX_0.5.0_windows-arm64-setup.exe.sig'),
       asset('MailX_0.5.0_linux-x64.AppImage'),
       asset('MailX_0.5.0_linux-x64.deb'),
       asset('MailX_0.5.0_linux-x64.rpm'),
@@ -35,11 +37,12 @@ test('pickDownloads finds installers by platform and ignores update packages', (
   expect(Object.keys(latest.downloads).sort()).toEqual([
     'linux-arm64-appimage', 'linux-arm64-deb', 'linux-arm64-rpm',
     'linux-x64-appimage', 'linux-x64-deb', 'linux-x64-rpm',
-    'macos-arm64', 'macos-x64', 'windows-x64',
+    'macos-arm64', 'macos-x64', 'windows-arm64', 'windows-x64',
   ])
   expect(latest.downloads['macos-arm64']).toEqual({ url: 'https://example.com/MailX_0.5.0_macos-arm64.dmg', size: 19302213 })
   expect(latest.downloads['linux-x64-rpm']?.url).toBe('https://example.com/MailX_0.5.0_linux-x64.rpm')
   expect(latest.downloads['linux-arm64-appimage']?.url).toBe('https://example.com/MailX_0.5.0_linux-arm64.AppImage')
+  expect(latest.downloads['windows-arm64']?.url).toBe('https://example.com/MailX_0.5.0_windows-arm64-setup.exe')
   expect(latest.checksums).toBe('https://example.com/SHA256SUMS.txt')
 })
 

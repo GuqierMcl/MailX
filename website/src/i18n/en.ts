@@ -55,7 +55,7 @@ const strings: Strings = {
     recommended: 'For this computer',
     others: 'Other systems',
     macos: { name: 'macOS', note: 'Notarized by Apple, so it opens right away.', arm: 'Apple silicon (M series)', intel: 'Intel', which: 'Not sure which one? Open the Apple menu → About This Mac and look at “Chip” or “Processor”.' },
-    windows: { name: 'Windows', note: 'For 64-bit Windows. If a blue warning appears the first time, choose “More info” → “Run anyway”.', setup: 'Download the installer' },
+    windows: { name: 'Windows', note: 'For 64-bit Windows. If a blue warning appears the first time, choose “More info” → “Run anyway”.', x64: 'x64 (Intel / AMD)', arm64: 'ARM64 (Snapdragon and others)', which: 'Not sure which one? Open Settings → System → About and look at “System type”.' },
     linux: { name: 'Linux', note: 'The AppImage updates itself from inside the app; deb and rpm need each new version installed by hand.', ubuntuMinimum: 'On Ubuntu, use 24.04 or later.', x64: 'x64 (Intel / AMD)', arm64: 'ARM64', appimage: 'AppImage', deb: 'deb (Debian / Ubuntu)', rpm: 'rpm (Fedora / openSUSE)' },
     fallback: 'The latest version could not be read right now. Download it from GitHub instead.',
     allReleases: 'All versions',

@@ -18,6 +18,7 @@ export const PLATFORMS = [
   { key: "darwin-aarch64", platform: "macos-arm64", extension: ".app.tar.gz" },
   { key: "darwin-x86_64", platform: "macos-x64", extension: ".app.tar.gz" },
   { key: "windows-x86_64", platform: "windows-x64", extension: "-setup.exe" },
+  { key: "windows-aarch64", platform: "windows-arm64", extension: "-setup.exe" },
   { key: "linux-x86_64", platform: "linux-x64", extension: ".AppImage" },
   { key: "linux-aarch64", platform: "linux-arm64", extension: ".AppImage" },
 ];

@@ -126,6 +126,8 @@ CI、手动 Linux 打包检查与 Release 共用 `scripts/install-linux-build-de
 
 `.github/workflows/provider-tls.yml` 手动触发，不进入 PR CI，不使用账号或凭证。它运行被忽略的 `live_provider_tls` 测试，经生产代码的 TLS 回退路径连接账号预设和 OAuth 服务商的每个 IMAP / SMTP 端点并读取服务器问候。通过标准：每个端点返回 IMAP `* OK`、SMTP `220` 或 STARTTLS 后的 `250`。系统默认禁用了[回退](../architecture/provider-compatibility.md#7-连接-tls-实现)所需套件的平台（如 Windows Server）不计入结论。修改 TLS 回退规则、`native-tls` 版本或预设端点后运行。检查其他服务器时，在本机设置 `MAILX_TLS_SURVEY="host:port ..."` 运行同一测试。
 
+Windows ARM64 安装包由 Release 工作流在 `windows-11-arm` 上原生构建，构建后检查主程序与 MCP sidecar 为 ARM64（PE `Machine` 为 `0xAA64`）。自动检查只证明能构建且架构正确；安装、启动、托盘、开机自启、通知、收发邮件与应用内更新须在 ARM64 Windows 真机上确认。
+
 <a id="body-native-validation"></a>
 
 ### 正文的原生隔离验证

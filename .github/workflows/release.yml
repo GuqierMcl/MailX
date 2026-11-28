@@ -113,6 +113,8 @@ jobs:
           # Intel runner label: confirm it still exists when the matrix changes.
           - { name: macos-x64, os: macos-26-intel }
           - { name: windows-x64, os: windows-2025 }
+          # A Windows 11 client on ARM64; builds natively for aarch64-pc-windows-msvc.
+          - { name: windows-arm64, os: windows-11-arm }
           # Both Linux runners build natively on the supported Ubuntu baseline.
           - { name: linux-x64, os: ubuntu-24.04 }
           - { name: linux-arm64, os: ubuntu-24.04-arm }
@@ -178,6 +180,15 @@ jobs:
         run: bun run tauri build
       - run: bun run tauri build
         if: runner.os == 'Windows'
+      # The NSIS stub is always x86; the app and the MCP sidecar it installs must
+      # match the platform, so an ARM64 installer never carries x64 programs.
+      - name: Verify Windows executable architectures
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          sidecar=$(find desktop/binaries -maxdepth 1 -name 'mailx-mcp-*windows*.exe' | head -n 1)
+          test -n "$sidecar"
+          bun scripts/check-windows-binaries.mjs --platform "${{ matrix.name }}" target/release/mailx-desktop.exe "$sidecar"
       # A binary built with an older SDK runs in compatibility mode on macOS 26
       # and later: the traffic lights change size and no longer sit where the
       # title bar layout expects them.
