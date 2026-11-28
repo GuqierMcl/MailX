@@ -20,4 +20,4 @@
 - `bun run site:build`：构建到 `website/dist`。
 - `bun run site:preview`：构建后用 Workers 运行时预览，包含语言跳转。
 
-PR 由 `.github/workflows/ci.yml` 的 `Website` 任务检查和构建；合并到 `main` 或发布 Release 后由 `.github/workflows/website.yml` 部署。部署需要仓库 secrets `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID`。
+PR 由 `.github/workflows/ci.yml` 的 `Website` 任务检查和构建。`.github/workflows/website.yml` 只部署 CI result 已通过的 `main` 提交：`main` 上的 CI 通过且该提交仍是 `main` 最新提交时部署；发布 Release 或手动运行时部署 `main` 最新提交，CI 未通过则失败，待通过后重新运行。部署需要仓库 secrets `CLOUDFLARE_API_TOKEN` 与 `CLOUDFLARE_ACCOUNT_ID`。
