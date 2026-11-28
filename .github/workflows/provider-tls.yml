@@ -45,7 +45,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
           { echo "RUSTUP_HOME=$RUSTUP_HOME"; echo "CARGO_HOME=$CARGO_HOME"; } >> "$GITHUB_ENV"
           echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
-          update-crypto-policies --show
+          cat /etc/crypto-policies/state/current || true
       - uses: actions/checkout@v7
       - name: Install Linux build dependencies
         if: runner.os == 'Linux' && !matrix.container
@@ -61,7 +61,7 @@ jobs:
         shell: pwsh
         run: |
           [System.Environment]::OSVersion.VersionString
-          (Get-TlsCipherSuite) | Where-Object { $_.Name -match '^TLS_(DHE_RSA|RSA)_' } | Select-Object -ExpandProperty Name
+          (Get-TlsCipherSuite) | Select-Object -ExpandProperty Name
           foreach ($h in 'imap.sina.com', 'imap.sina.cn') {
             Write-Output "== curl (SChannel) $h"
             curl.exe -sS -v --max-time 15 "imaps://${h}/" 2>&1 | Select-String -Pattern 'schannel|SSL|TLS|OK|error' | Select-Object -First 12
