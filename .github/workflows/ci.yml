@@ -187,7 +187,8 @@ jobs:
       fail-fast: false
       matrix:
         # The macOS runner matches the release build's, so tests use the same SDK.
-        os: [ubuntu-24.04, macos-26, windows-2025]
+        # windows-11-arm is a Windows 11 client on ARM64, ahead of ARM64 installers.
+        os: [ubuntu-24.04, macos-26, windows-2025, windows-11-arm]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
