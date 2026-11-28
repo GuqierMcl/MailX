@@ -5,9 +5,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils'
 import type { EntranceMode } from './motion'
 
-/** Plot height in px (`h-14`); a day with mail is at least as tall as its rounded top. */
-const HEIGHT = 56
-const MIN_BAR = 4
+/** Plot height in px (`h-18`); a day with mail is at least as tall as its rounded top. */
+const HEIGHT = 72
+const MIN_BAR = 5
 const STUB = 2
 const STAGGER_MS = 20
 const RETURN_STAGGER_MS = 8
@@ -43,8 +43,8 @@ export function ActivityChart({ days, language, mode }: { days: DayActivity[]; l
     columns.current[next]?.focus()
   }
   return (
-    <div className="w-full max-w-91">
-      <div role="group" aria-label={t('now:chartLabel')} className="flex h-14 items-end">
+    <div className="w-full">
+      <div role="group" aria-label={t('now:chartLabel')} className="flex h-18 items-end gap-0.5">
         {days.map((day, index) => {
           const today = index === days.length - 1
           const label = dayLabel(day, language)
@@ -61,7 +61,7 @@ export function ActivityChart({ days, language, mode }: { days: DayActivity[]; l
                     tabIndex={index === active ? 0 : -1}
                     onFocus={() => setActive(index)}
                     onKeyDown={(event) => move(event, index)}
-                    className="group flex h-full max-w-6.5 flex-1 items-end rounded-sm px-px outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="group flex h-full flex-1 items-end rounded-sm px-px outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 )}
               >
@@ -69,9 +69,9 @@ export function ActivityChart({ days, language, mode }: { days: DayActivity[]; l
                   aria-hidden
                   data-slot="activity-bar"
                   className={cn(
-                    'block w-full origin-bottom',
-                    day.received > 0 && 'rounded-t-[4px]',
-                    today ? 'bg-primary' : 'bg-muted-foreground/30 group-hover:bg-muted-foreground/45',
+                    'block w-full origin-bottom transition-colors duration-150',
+                    day.received > 0 ? 'rounded-t-[5px]' : 'rounded-full',
+                    today ? 'bg-primary' : 'bg-muted-foreground/28 group-hover:bg-muted-foreground/50',
                     mode === 'first' && 'animate-now-bar-grow',
                     mode === 'return' && 'animate-now-bar-grow-quick',
                   )}
@@ -83,7 +83,7 @@ export function ActivityChart({ days, language, mode }: { days: DayActivity[]; l
           )
         })}
       </div>
-      <div aria-hidden className="mt-1.5 flex justify-between px-px text-xs text-muted-foreground">
+      <div aria-hidden className="mt-2 flex justify-between px-px text-xs text-muted-foreground/85">
         <span>{t('now:chartStart')}</span>
         <span>{t('now:chartToday')}</span>
       </div>

@@ -14,7 +14,7 @@ export const draftsModule: NowModule = {
   signature: ({ draftCount }) => String(draftCount),
   hasContent: ({ draftCount }) => draftCount > 0,
   render: ({ data, actions }) => (
-    <ul className="flex flex-col rounded-xl bg-muted/40 p-1">
+    <ul className="flex flex-col rounded-2xl bg-muted/50 p-1.5">
       <li>
         <button type="button" onClick={() => actions.onSelectMailbox({ kind: 'drafts' })} className={rowClass}>
           <HugeiconsIcon icon={File01Icon} className="size-4 shrink-0 text-muted-foreground" />

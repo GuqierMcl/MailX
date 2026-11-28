@@ -10,6 +10,7 @@ import type { MailxClient } from '@/lib/mailx-client'
 import { useVerificationCodes, type VerificationTarget } from '@/features/mail/use-verification-codes'
 import { daySegment, localDay } from './greeting'
 import { ENTRANCE_KEY, LAST_VISIT_KEY } from './visit'
+import { NOW_AMBIENT_KEY, NOW_AMBIENT_SCENE_KEY } from './ambient-preference'
 import { ATTACHMENTS_OPEN_KEY } from './modules/attachments-view'
 import { dayStarts } from './activity'
 import { NowPage, type NowPageProps } from './now-page'
@@ -800,6 +801,48 @@ describe('Now page', () => {
       await userEvent.click(retry)
       await waitFor(() => expect(client.getMailOverview).toHaveBeenCalledTimes(2))
       await waitFor(() => expect(screen.queryByText('没能读取邮箱概况')).not.toBeInTheDocument())
+    })
+  })
+
+  describe('atmosphere and quick actions', () => {
+    it('shows the quiet badge when nothing is pending and respects the ambient mode and scene', async () => {
+      localStorage.setItem(NOW_AMBIENT_KEY, 'off')
+      setup()
+      await loaded()
+      expect(document.querySelector('[data-slot="now-ambient"]')).toHaveAttribute('data-mode', 'off')
+      expect(document.querySelector('[data-slot="now-ambient-svg"]')).toBeNull()
+      expect(document.querySelector('[data-slot="now-quiet-badge"]')).toBeInTheDocument()
+      cleanup()
+      localStorage.setItem(NOW_AMBIENT_KEY, 'full')
+      localStorage.setItem(NOW_AMBIENT_SCENE_KEY, 'orbit')
+      setup()
+      await loaded()
+      expect(document.querySelector('[data-slot="now-ambient"]')).toHaveAttribute('data-scene', 'orbit')
+      expect(document.querySelector('[data-slot="now-ambient-svg"]')).toHaveAttribute('data-scene', 'orbit')
+    })
+
+    it('runs mark-read, star and archive inline on unread rows without opening the message', async () => {
+      const target = email('q1', { subject: '审批通知' })
+      const { client, onOpenEmail } = setup({ unread: [target], props: { folders: [inbox(1)] } })
+      client.archiveEmails.mockResolvedValue({ processedCount: 1, changedCount: 1, undoToken: 'arc-1', skippedIds: [] })
+      const section = await screen.findByRole('region', { name: '收件箱' })
+      await userEvent.click(within(section).getByRole('button', { name: '加星标' }))
+      await waitFor(() => expect(client.setFlags).toHaveBeenCalledWith(['q1'], 'starred', true))
+      await userEvent.click(within(section).getByRole('button', { name: '标为已读' }))
+      await waitFor(() => expect(client.setFlags).toHaveBeenCalledWith(['q1'], 'read', true))
+      await userEvent.click(within(section).getByRole('button', { name: '归档' }))
+      await waitFor(() => expect(client.archiveEmails).toHaveBeenCalledWith(['q1']))
+      expect(onOpenEmail).not.toHaveBeenCalled()
+    })
+
+    it('shows per-account unread pills when multiple accounts exist and opens that account inbox', async () => {
+      const second = exampleAccount({ id: 'acc-2', displayName: '个人邮箱' })
+      const folder1 = inbox(3)
+      const folder2: Folder = { ...inbox(2), id: 'inbox-2', accountId: second.id }
+      const { onSelectMailbox } = setup({ accounts: [account, second], props: { folders: [folder1, folder2] } })
+      const section = await screen.findByRole('region', { name: '收件箱' })
+      await userEvent.click(within(section).getByRole('button', { name: '个人邮箱 收件箱，2 封未读' }))
+      expect(onSelectMailbox).toHaveBeenCalledWith({ kind: 'folder', folder: folder2 })
     })
   })
 })

@@ -42,19 +42,19 @@ function MoreMenu({ title, menu }: { title: string; menu: ModuleMenu }) {
  * title row (its content leads with its own line); the button then sits at
  * the end of the content's first line and the section is named by `aria-label`.
  */
-export function ModuleSection({ title, mode, index, menu, compact = false, children }: { title: string; mode: EntranceMode; index: number; menu?: ModuleMenu; compact?: boolean; children: ReactNode }) {
+export function ModuleSection({ title, mode, index, menu, compact = false, className, children }: { title: string; mode: EntranceMode; index: number; menu?: ModuleMenu; compact?: boolean; className?: string; children: ReactNode }) {
   useTranslation()
   const id = useId()
   if (compact) {
     return (
-      <section aria-label={title} {...motionProps(mode, index, 'group/module relative flex flex-col gap-2')}>
+      <section aria-label={title} {...motionProps(mode, index, cn('group/module relative flex flex-col gap-2', className))}>
         {children}
         {menu && <div className="absolute top-0 right-1 flex h-6 items-center"><MoreMenu title={title} menu={menu} /></div>}
       </section>
     )
   }
   return (
-    <section aria-labelledby={id} {...motionProps(mode, index, 'group/module flex flex-col gap-2')}>
+    <section aria-labelledby={id} {...motionProps(mode, index, cn('group/module flex flex-col gap-2', className))}>
       <div className="flex items-center justify-between gap-2 pr-1">
         <h2 id={id} className="px-3 text-xs font-medium text-muted-foreground">{title}</h2>
         {menu && <MoreMenu title={title} menu={menu} />}

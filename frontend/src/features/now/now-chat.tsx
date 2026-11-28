@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { ArrowDown01Icon, ArrowLeft01Icon, ChatAdd01Icon } from '@hugeicons/core-free-icons'
@@ -19,11 +19,14 @@ import type { Account, Folder } from '@/generated/accounts'
 import type { Mailbox } from '@/features/mail/mailbox'
 import type { MailxClient } from '@/lib/mailx-client'
 import { cn } from '@/lib/utils'
+import type { NowSuggestion } from './now-suggestions'
 import { useViewSwap } from './use-view-swap'
 
 type View = 'overview' | 'conversation'
 
 const WAITING_CARD = '[data-slot="confirm-card"][data-status="waiting"]'
+const SUGGESTION_CLOSE_MS = 220
+const SUGGESTION_STAGGER_MS = 35
 
 /** What was asked when consent was missing: repeated once the user agrees. */
 type Waiting =
@@ -55,7 +58,7 @@ function Pill({ onClick, children, className }: { onClick: () => void; children:
  * views (`useViewSwap`); reduced motion swaps at once. The input is mounted once outside both, so its
  * text and focus ride through the change.
  */
-export function NowChatShell({ client, chat, usable, service, summary, onOpenEmail, onOpenDraft, accounts, folders, onSelectMailbox, focusToken = 0, openConversation = false, children }: {
+export function NowChatShell({ client, chat, usable, service, summary, suggestions = [], onConversationChange, onOpenEmail, onOpenDraft, accounts, folders, onSelectMailbox, focusToken = 0, openConversation = false, children }: {
   client: MailxClient
   /** Null where no conversation is kept (no provider): the page is then just the overview. */
   chat: AssistantChat | null
@@ -64,6 +67,10 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   service: string
   /** The one-line summary the conversation view keeps at its top (greeting and counts). */
   summary: string
+  /** Local prompt suggestions offered on hover/focus of the input while on the overview. */
+  suggestions?: NowSuggestion[]
+  /** Notifies the host page when the conversation view opens or closes, so the backdrop can recede. */
+  onConversationChange?: (active: boolean) => void
   onOpenEmail: (email: { id: string; accountId: string }) => void
   onOpenDraft: (draftId: string) => void
   /** What the folder cards in replies are drawn from, and how a click on one opens its mailbox. */
@@ -87,6 +94,14 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   const granted = useRef(false)
   const [restore, setRestore] = useState<{ text: string; key: number } | null>(null)
   const [cardShown, setCardShown] = useState(false)
+  const [typing, setTyping] = useState(false)
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inputArea = useRef<HTMLDivElement | null>(null)
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null }
+  }, [])
+  useEffect(() => clearCloseTimer, [clearCloseTimer])
 
   const messages = chat?.messages ?? []
   const hasMessages = messages.length > 0
@@ -94,6 +109,9 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   // With the assistant gone, a conversation that exists stays readable; there is just no input.
   const conversation = view === 'conversation' && chat !== null && (chatOn || hasMessages)
   const busy = chat?.busy ?? false
+  useEffect(() => {
+    onConversationChange?.(conversation)
+  }, [conversation, onConversationChange])
 
   const phase = useViewSwap(conversation, reduced)
   // The conversation stays on screen while it leaves. The overview behind it is out of reach (inert, hidden from
@@ -203,6 +221,34 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
   }, [accounts, chat, client, continueReply, editMessage, focusInput, folders, onOpenDraft, onOpenEmail, onSelectMailbox, regenerate])
 
   const showConfirmPill = chat?.pending && (!conversation || !cardShown)
+  const canSuggest = !conversation && !hasMessages && !showConfirmPill && !typing && suggestions.length > 0
+  const showSuggestions = canSuggest && suggestionsOpen
+
+  const openSuggestions = () => {
+    clearCloseTimer()
+    if (canSuggest) setSuggestionsOpen(true)
+  }
+  const foldSuggestions = () => {
+    clearCloseTimer()
+    closeTimer.current = setTimeout(() => { closeTimer.current = null; setSuggestionsOpen(false) }, SUGGESTION_CLOSE_MS)
+  }
+  const onInputAreaKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!showSuggestions) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      clearCloseTimer()
+      setSuggestionsOpen(false)
+      focusInput()
+      return
+    }
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+    const items = Array.from(inputArea.current?.querySelectorAll<HTMLButtonElement>('[data-slot="now-suggestion"]') ?? [])
+    const index = items.indexOf(document.activeElement as HTMLButtonElement)
+    if (index < 0) return
+    event.preventDefault()
+    items[Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowUp' ? -1 : 1)))]?.focus()
+  }
 
   return (
     <div ref={shell} data-slot="now-chat" className="absolute inset-0">
@@ -234,7 +280,7 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
           data-phase={phase ?? undefined}
           inert={phase === 'to-overview'}
           aria-hidden={phase === 'to-overview' || undefined}
-          className={cn('absolute inset-0 flex flex-col', phase && 'pointer-events-none will-change-[transform,opacity]', phase === 'to-conversation' && 'animate-view-in-up', phase === 'to-overview' && 'animate-view-out-down')}
+          className={cn('absolute inset-0 flex flex-col bg-background/82', phase && 'pointer-events-none will-change-[transform,opacity]', phase === 'to-conversation' && 'animate-view-in-up', phase === 'to-overview' && 'animate-view-out-down')}
         >
           <div className="mx-auto flex w-full max-w-190 shrink-0 items-center gap-1 px-2 pt-3 sm:px-8">
             <Button type="button" variant="ghost" size="lg" onClick={leave}>
@@ -268,7 +314,7 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
           className={cn('pointer-events-none absolute inset-x-0 bottom-0 z-10 px-5 pt-8 pb-4 sm:px-10', !reduced && 'animate-chat-input-in')}
         >
           <div aria-hidden className="absolute inset-0 bg-linear-to-t from-background from-45% via-background/85 to-transparent" />
-          <div className="relative mx-auto flex max-w-190 flex-col">
+          <div className="relative mx-auto flex max-w-210 flex-col">
             <div className="mb-2 flex flex-wrap items-end justify-center gap-2 empty:hidden">
               {showConfirmPill && (
                 <Pill onClick={() => { if (conversation) scrollToCard(); else { go('conversation'); scrollToCard() } }}>
@@ -289,8 +335,54 @@ export function NowChatShell({ client, chat, usable, service, summary, onOpenEma
                 </Pill>
               )}
             </div>
-            <div className="pointer-events-auto">
-              <ChatInput working={busy} onSend={send} onStop={chat.stop} onEscape={leave} inputRef={setInput} restore={restore} />
+            <div
+              ref={inputArea}
+              onPointerEnter={openSuggestions}
+              onPointerLeave={foldSuggestions}
+              onFocus={openSuggestions}
+              onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) foldSuggestions() }}
+              onKeyDown={onInputAreaKeyDown}
+              className="pointer-events-auto relative flex flex-col"
+            >
+              {showSuggestions && (
+                <div className="pointer-events-none absolute right-0 bottom-full left-0 flex flex-col items-start">
+                  <div
+                    role="group"
+                    aria-label={t('ai:suggest.label')}
+                    data-slot="now-chat-suggestions"
+                    className="pointer-events-auto flex max-w-full flex-col items-start gap-1.5 pb-2"
+                  >
+                    {suggestions.map((item, index) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        data-slot="now-suggestion"
+                        onClick={() => { clearCloseTimer(); setSuggestionsOpen(false); send(item.text) }}
+                        style={{ animationDelay: `${(suggestions.length - 1 - index) * SUGGESTION_STAGGER_MS}ms` }}
+                        className={cn(
+                          'max-w-full truncate rounded-full bg-background/95 px-3 py-1.5 text-left text-xs text-foreground shadow-sm ring-1 ring-(--ai-2)/30 outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring dark:bg-card/95',
+                          'animate-in fade-in-0 fill-mode-both duration-200 ease-(--ease-out-soft)',
+                          !reduced && 'slide-in-from-bottom-2',
+                        )}
+                      >
+                        {item.text}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div
+                onInput={(event) => {
+                  const target = event.target
+                  if (target instanceof HTMLTextAreaElement) {
+                    const nextTyping = target.value.trim().length > 0
+                    setTyping(nextTyping)
+                    if (nextTyping) setSuggestionsOpen(false)
+                  }
+                }}
+              >
+                <ChatInput working={busy} onSend={(message) => { setTyping(false); setSuggestionsOpen(false); send(message) }} onStop={chat.stop} onEscape={leave} inputRef={setInput} restore={restore} />
+              </div>
             </div>
             {!chat.toolsAvailable && <p className="pointer-events-auto px-4 pt-2 text-xs text-muted-foreground">{t('ai:chat.noTools')}</p>}
           </div>

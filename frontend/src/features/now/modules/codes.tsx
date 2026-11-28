@@ -16,7 +16,7 @@ export const codesModule: NowModule = {
   signature: ({ codes }) => codes.map((code) => code.emailId).join('|'),
   hasContent: ({ codes }) => codes.length > 0,
   render: ({ data, language, minute, verification, actions }) => (
-    <ul className="flex flex-col rounded-xl bg-muted/40 p-1">
+    <ul className="flex flex-col rounded-2xl bg-muted/50 p-1.5">
       {data.codes.map((code) => (
         <CodeRow key={code.emailId} code={code} language={language} now={minute} verification={verification} onOpenEmail={actions.onOpenEmail} />
       ))}

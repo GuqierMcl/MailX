@@ -194,5 +194,19 @@
   "attachmentsLine_one": "{{count}} message with attachments in the last 7 days",
   "attachmentsLine_other": "{{count}} messages with attachments in the last 7 days",
   "attachmentsLineAtLeast_one": "At least {{count}} message with attachments in the last 7 days",
-  "attachmentsLineAtLeast_other": "At least {{count}} messages with attachments in the last 7 days"
+  "attachmentsLineAtLeast_other": "At least {{count}} messages with attachments in the last 7 days",
+  "quietMoment": "All quiet — your inbox is clear",
+  "markedRead": "Marked as read",
+  "accountUnreadLabel_one": "{{account}} inbox, {{count}} unread",
+  "accountUnreadLabel_other": "{{account}} inbox, {{count}} unread",
+  "metricReceived7d": "Received (7d)",
+  "metricSent7d": "Sent (7d)",
+  "metricToday": "Today",
+  "suggestNewMail": "Summarize my new messages",
+  "suggestNeedReply": "Which unread messages need a reply first?",
+  "suggestStarred": "Review my unread starred messages",
+  "suggestCleanup": "Summarize the senders with the most unread mail",
+  "suggestAttachments": "What important files came in recently?",
+  "suggestToday": "What stands out in today's mail?",
+  "suggestDeadlines": "Are there any upcoming deadlines in my mail?"
 }

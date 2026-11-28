@@ -504,3 +504,120 @@ html[data-translucent].dark .app-canvas {
     opacity: 0.92;}
   .startup-logo-glow {
     opacity: 0.5;}}
+
+/* The Now page's celestial backdrop: calm, clearly visible transform/opacity motion, paused when hidden or static. */
+.now-ambient-enter {
+  animation: now-ambient-enter 480ms var(--ease-decel) both;}
+.now-ambient-breathe {
+  animation: now-ambient-breathe 9s ease-in-out infinite alternate;}
+.now-ambient-drift {
+  animation: now-ambient-drift 14s ease-in-out infinite alternate;}
+.now-ambient-drift-slow {
+  animation: now-ambient-drift-slow 19s ease-in-out infinite alternate;}
+.now-ambient-shimmer {
+  animation: now-ambient-shimmer 7s ease-in-out infinite alternate;}
+.now-ambient-ripple {
+  animation: now-ambient-ripple 8.5s ease-in-out infinite alternate;}
+.now-ambient-sway {
+  animation: now-ambient-sway 9.5s ease-in-out infinite alternate;}
+.now-ambient-float {
+  animation: now-ambient-float 8s ease-in-out infinite alternate;}
+.now-ambient-orbit-rock {
+  animation: now-ambient-orbit-rock 18s ease-in-out infinite alternate;}
+.now-ambient-twinkle {
+  animation: now-ambient-twinkle 3.4s ease-in-out infinite alternate;}
+.now-ambient-fall {
+  animation: now-ambient-fall 13s linear infinite;}
+[data-slot="now-ambient"][data-paused="true"] .now-ambient-breathe,
+[data-slot="now-ambient"][data-paused="true"] .now-ambient-drift,
+[data-slot="now-ambient"][data-paused="true"] .now-ambient-drift-slow,
+[data-slot="now-ambient"][data-paused="true"] .now-ambient-shimmer,
+[data-slot="now-ambient"][data-paused="true"] .now-ambient-ripple,
+[data-slot="now-ambient"][data-paused="true"] .now-ambient-sway,
+[data-slot="now-ambient"][data-paused="true"] .now-ambient-float,
+[data-slot="now-ambient"][data-paused="true"] .now-ambient-orbit-rock,
+[data-slot="now-ambient"][data-paused="true"] .now-ambient-twinkle,
+[data-slot="now-ambient"][data-paused="true"] .now-ambient-fall {
+  animation-play-state: paused;}
+@keyframes now-ambient-enter {
+  from {
+    opacity: 0;
+    transform: scale(1.015);}
+  to {
+    opacity: 1;
+    transform: scale(1);}}
+@keyframes now-ambient-breathe {
+  from {
+    opacity: 0.72;
+    transform: scale(0.95) translate3d(0, 0, 0);}
+  to {
+    opacity: 1;
+    transform: scale(1.06) translate3d(0, 10px, 0);}}
+@keyframes now-ambient-drift {
+  from {
+    transform: translate3d(-3.2%, 0, 0);}
+  to {
+    transform: translate3d(3.2%, 8px, 0);}}
+@keyframes now-ambient-drift-slow {
+  from {
+    transform: translate3d(3.2%, 0, 0);}
+  to {
+    transform: translate3d(-3.2%, -8px, 0);}}
+@keyframes now-ambient-shimmer {
+  from {
+    opacity: 0.42;
+    transform: translate3d(-2.6%, 0, 0);}
+  to {
+    opacity: 0.96;
+    transform: translate3d(2.6%, 0, 0);}}
+@keyframes now-ambient-ripple {
+  from {
+    opacity: 0.36;
+    transform: scaleX(0.965) translate3d(2.2%, 0, 0);}
+  to {
+    opacity: 0.94;
+    transform: scaleX(1.035) translate3d(-2.2%, 0, 0);}}
+@keyframes now-ambient-sway {
+  from {
+    transform: rotate(-3.6deg) translate3d(0, 0, 0);}
+  to {
+    transform: rotate(4deg) translate3d(-5px, 4px, 0);}}
+@keyframes now-ambient-float {
+  from {
+    opacity: 0.25;
+    transform: translate3d(-11px, 12px, 0);}
+  to {
+    opacity: 0.92;
+    transform: translate3d(12px, -14px, 0);}}
+@keyframes now-ambient-orbit-rock {
+  from {
+    transform: rotate(-9deg);}
+  to {
+    transform: rotate(9deg);}}
+@keyframes now-ambient-twinkle {
+  from {
+    opacity: 0.18;}
+  to {
+    opacity: 0.95;}}
+@keyframes now-ambient-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -8%, 0);}
+  15%, 85% {
+    opacity: 0.7;}
+  100% {
+    opacity: 0;
+    transform: translate3d(-3%, 18%, 0);}}
+@media (prefers-reduced-motion: reduce) {
+  .now-ambient-enter,
+  .now-ambient-breathe,
+  .now-ambient-drift,
+  .now-ambient-drift-slow,
+  .now-ambient-shimmer,
+  .now-ambient-ripple,
+  .now-ambient-sway,
+  .now-ambient-float,
+  .now-ambient-orbit-rock,
+  .now-ambient-twinkle,
+  .now-ambient-fall {
+    animation: none;}}
