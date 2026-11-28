@@ -64,6 +64,6 @@ bun run icons:check
 - 分享图保存在 `social/`，可在需要时上传 GitHub 的仓库社交预览设置；本轮没有修改任何远程仓库设置。
 - Open Graph 图可以供未来站点使用；正式部署地址确定后再添加对应页面元数据，不预填不存在的公开 URL。
 
-字体来源与生成记录见 [fonts/README.md](fonts/README.md)，许可证见 [fonts/OFL.txt](fonts/OFL.txt)。其余品牌资源随仓库的 [Apache-2.0 许可证](../LICENSE) 管理。
+字体来源与生成记录见 [fonts/README.md](fonts/README.md)，许可证见 [fonts/OFL.txt](fonts/OFL.txt)。其余 MailX 自有品牌图形与标识（含本目录源稿及生成到桌面端、前端与官网的副本）保留所有权利（All Rights Reserved），不适用仓库的 [Apache-2.0 许可证](../LICENSE)；使用边界与二次分发更名要求见 [TRADEMARKS.md](../TRADEMARKS.md)。
 
 平台参考：[Tauri 图标工具](https://v2.tauri.app/develop/icons/)、[MDN 应用图标说明](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/How_to/Define_app_icons)。
