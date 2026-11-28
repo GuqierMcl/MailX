@@ -134,4 +134,4 @@ IMAP 与 SMTP 建连时按以下顺序选择（`net::with_tls_fallback`）：
 | 新浪（`core/src/providers/sina.rs`） | `imap.sina.com`、`imap.sina.cn`、`imap.vip.sina.com`、`imap.vip.sina.cn` | 只提供 TLS 1.2 的 `DHE-RSA-*` 与静态 `RSA` 套件；SMTP 端点支持 ECDHE，保持 rustls |
 | 139 邮箱（`core/src/providers/mail139.rs`） | `imap.139.com` | 只提供 TLS 1.2 的静态 `RSA` 套件；SMTP 端点支持 ECDHE，保持 rustls |
 
-Windows 上能否握手取决于系统启用的套件。Windows 11 默认启用静态 RSA（`TLS_RSA_*`），未启用 `TLS_DHE_RSA_*`，因此与上述端点协商的是静态 RSA，没有前向保密。Windows Server 2022 起默认只启用 TLS 1.3 与 ECDHE 套件，这些端点在其上无法握手，系统自带的 curl 同样失败；手动禁用静态 RSA 的客户端也是如此。若 Windows 11 日后默认禁用静态 RSA 而服务器仍未支持 ECDHE，需要改用其他 TLS 实现。这对回退到系统 TLS 的端点同样成立，例如只支持静态 RSA 的中国联通沃邮箱 SMTP（`smtp.wo.cn`）。真实端点的握手由手动工作流 `Provider TLS` 在各平台检查，见[验证指引](../development/validation.md)。服务器开始支持 ECDHE 后，可从登记中移除对应主机。
+Windows 上能否握手取决于系统启用的套件。Windows 11 默认启用静态 RSA（`TLS_RSA_*`），未启用 `TLS_DHE_RSA_*`，因此与上述端点协商的是静态 RSA，没有前向保密。Windows Server 2022 起默认只启用 TLS 1.3 与 ECDHE 套件，这些端点在其上无法握手；手动禁用静态 RSA 的客户端也是如此。若 Windows 11 日后默认禁用静态 RSA 而服务器仍未支持 ECDHE，需要改用其他 TLS 实现。回退到系统 TLS 的端点同样受此限制。真实端点的检查方式见[验证指引](../development/validation.md)。服务器开始支持 ECDHE 后，可从登记中移除对应主机。
