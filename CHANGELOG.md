@@ -21,6 +21,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### ✨ Optimization
 
+- Show a sharper Sina Mail icon with rounded corners so it matches the other provider icons. / 新浪邮箱改用更清晰的图标并以圆角显示，与其他服务商图标保持一致。 ([#204](https://github.com/GuqierMcl/MailX/pull/204))
 - Refine the startup screen with a minimalist breathing brand icon over the native translucent canvas on macOS and eliminate the initial blank frame before the logo appears. / 优化启动加载页，改为在画布与 macOS 原生毛玻璃材质上展示极简呼吸图标，并消除启动首帧显示图标前的空白闪烁。
 
 ### 🩹 Fixed

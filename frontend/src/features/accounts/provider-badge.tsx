@@ -1,10 +1,10 @@
 import { HugeiconsIcon } from '@hugeicons/react'
 import { cn } from '@/lib/utils'
-import { providerOf, type MailProvider } from './providers'
+import { logoShapeClass, providerOf, type MailProvider } from './providers'
 
 function ProviderMark({ provider, className }: { provider: MailProvider; className: string }) {
   return provider.logo
-    ? <img src={provider.logo} alt="" aria-hidden className={cn('object-contain', className)} />
+    ? <img src={provider.logo} alt="" aria-hidden className={cn('object-contain', logoShapeClass(provider), className)} />
     : <HugeiconsIcon icon={provider.icon} aria-hidden className={className} />
 }
 

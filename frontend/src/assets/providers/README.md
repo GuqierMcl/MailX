@@ -23,6 +23,7 @@
 | 格式转换 | 仅在工程需要时做忠实的栅格解码或无损编码，例如 JPEG / ICO 转 PNG；保留原尺寸、全部像素、透明度与已有色彩配置，核对解码后内容一致，记录原文件和结果的哈希。格式转换不能用于重设计。 |
 | 界面适配 | 使用 `object-contain` 等比显示整张图片，留白和账号颜色放在容器上。保留图片自带背景；深浅主题可选择官方提供的对应版本并分别记录来源。 |
 | 禁止改绘 | 不使用 VTracer、手工路径、系统字体或生成式图像重画标识；不删文字、截掉品牌组成部分、去背景、改色、反色、变形、补画或重新拼装。也不通过 CSS 滤镜、遮罩、`object-cover` 或裁切容器达到同样效果。 |
+| 启动图标圆角 | 唯一的显示例外：官方以全出血方形发布、由各平台统一加圆角显示的应用启动图标（例如 Android APK 的 `application` 图标），可在服务商登记中设 `logoShape: 'launcher'`，显示时加与平台相近的圆角（`rounded-[22.5%]`）。文件仍保持官方像素不变，不去背景、不改色、不裁内容；其他图标保持自身形状。 |
 | SVG | 只使用官方原生静态 SVG，不把 PNG 嵌入 SVG 充当矢量原件。检查没有脚本、外部资源或运行时字体依赖；原文件不适合静态打包时，选用其他官方静态格式或通用图标。 |
 
 ### 落盘与验证
@@ -95,9 +96,11 @@
 
 ## 新浪免费邮箱
 
-- 文件：`sina-mail.jpg`，84 × 84 RGB JPEG，5,268 字节。完整保留黄底、白色信封和新浪眼睛图形，用于 `sina.com` 与 `sina.cn` 免费邮箱；不用于新浪 VIP 邮箱或企业邮箱。
-- 来源链：[新浪帮助中心](https://help.sina.com.cn/)的新浪产品列表在“新浪邮箱”条目中引用[原图](https://n.sinaimg.cn/default/transform/168/w84h84/20190417/_Ur2-hvvuiym8988844.png)，并链接到 [新浪邮箱官方客户端下载页](https://mail.sina.com.cn/client/mobile/index.php?suda-key=mail_app&suda-value=login)；同一列表的“新浪企邮”有独立图标。原图 URL 虽以 `.png` 结尾，响应为 `image/jpeg`，文件亦解码为 JPEG。仅按实际格式命名，本地与原件字节一致。
-- 未采用 [免费邮箱登录页](https://mail.sina.com.cn/)的 [favicon](https://mail.sina.com.cn/favicon.ico)：与[新浪门户 favicon](https://www.sina.com.cn/favicon.ico)字节相同；也未拆取登录页或下载页的横向字标。核验日期：2026-11-19。
+- 文件：`sina-mail.png`，192 × 192 RGB PNG，13,108 字节。完整保留黄底、白色信封和新浪眼睛图形，用于 `sina.com` 与 `sina.cn` 免费邮箱；不用于新浪 VIP 邮箱或企业邮箱。
+- 来源链：[新浪邮箱官方客户端下载页](https://mail.sina.com.cn/client/mobile/index.php?suda-key=mail_app&suda-value=login)的 Android 下载入口指向官方 APK `SinaMail-freeOfficial-2.1.33-2375.apk`（`edge.sinastorage.com/ft0.storage.mail.sina.com.cn/client/mobile/`，包名 `com.sina.mail.free`，版本 2.1.33，APK SHA-256 `4bc9c53e2aca5888bef9cc2f6f2ac86fa4196685a64259c7c3a0f10f319378a8`）。`AndroidManifest.xml` 的 `application` 图标为资源 `0x7F0E0015`，经 `resources.arsc` 解析为 hdpi `res/dm2.png`（192 × 192）、xhdpi `res/fk.png`（256）、xxhdpi `res/e8.png`（384）、xxxhdpi `res/eg.png`（512），四者为同一设计。核验日期：2026-11-28。
+- 采用官方 hdpi 版本 `res/dm2.png`，界面最大 40 px 显示时足够清晰，无需自行缩放。原件 14,675 字节，SHA-256 `224c7106d5c54ff58d453bc8e838c7704fb3d98dc6cffdf96c16113084685877`；仅用 oxipng 无损重新编码以减小体积，尺寸、模式与全部像素经逐像素比对与原件一致。
+- 该图是全出血方形启动图标，按上文「启动图标圆角」规则在显示时加圆角，文件本身不处理。
+- 此前使用[新浪帮助中心](https://help.sina.com.cn/)引用的 84 × 84 JPEG（同一设计），清晰度不足，已替换。未采用[免费邮箱登录页](https://mail.sina.com.cn/)的 [favicon](https://mail.sina.com.cn/favicon.ico)（与新浪门户 favicon 字节相同）和登录页的 `apple-touch-icon`（旧版设计）；APK 内没有官方的透明圆角版本。
 
 ## Fastmail
 
@@ -131,7 +134,7 @@ QQ 邮箱与网易邮箱的核验日期：2026-10-30；中国移动 139 邮箱�
 | `outlook.svg` | `81bfb24bb128298a9ed0ea6fe8d9ba8cff703b26d6a7cbd18cc4314cecba8f1f` |
 | `microsoft.svg` | `929f48f88c8ca7f3f5d294be47ec4caf51acc28ac25340c19a903125d7ecd84a` |
 | `exchange.png` | `c5b2dbc1cc27483d5513ed183a5dedac5d59ad101a57593909b24e1048281ebd` |
-| `sina-mail.jpg` | `bfbce800e745826ba115147d9f30764a00f903ffc8be95abe25a84adc4811b0e` |
+| `sina-mail.png` | `dfcbe0e693a306ae1ed64c20bc55c3d5b811155f8462b50729dc5a91a9038ab7` |
 | `feishu.png` | `cfd2b879c472a2674520492c84a0304c537a19964b8a2dcd3562c57de773268b` |
 | `lark.png` | `a99925e6db13b5a72c64dde7ec4d9b63b8af6d84ec2e5fd2e7c975d00a519c3c` |
 

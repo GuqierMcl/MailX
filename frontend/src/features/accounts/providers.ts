@@ -6,7 +6,7 @@ import netease163Logo from '@/assets/providers/netease-163.png'
 import netease126Logo from '@/assets/providers/netease-126.png'
 import neteaseYeahLogo from '@/assets/providers/netease-yeah.png'
 import mail139Logo from '@/assets/providers/mail-139.png'
-import sinaMailLogo from '@/assets/providers/sina-mail.jpg'
+import sinaMailLogo from '@/assets/providers/sina-mail.png'
 import feishuLogo from '@/assets/providers/feishu.png'
 import larkLogo from '@/assets/providers/lark.png'
 import icloudMailLogo from '@/assets/providers/icloud-mail.png'
@@ -72,6 +72,12 @@ export type MailProvider = {
   searchAliases?: readonly string[]
   /** A bundled logo URL, e.g. an imported local PNG; `icon` is the fallback. */
   logo?: string
+  /**
+   * `launcher`: the logo is an official app launcher icon, published as a
+   * full-bleed square that platforms always show with rounded corners. The
+   * file stays unmodified; only its display gets the same rounding.
+   */
+  logoShape?: 'launcher'
   /** The provider's mark; the generic mail icon stands in until it has one. */
   icon: IconSvgElement
   /** Defaults for a new account only; saved connections always keep their values. */
@@ -269,6 +275,12 @@ const SINA_SERVERS_BY_DOMAIN = {
 } satisfies Record<string, PresetServers>
 const SINA_DOMAINS = Object.keys(SINA_SERVERS_BY_DOMAIN)
 
+/** Display-only rounding for official launcher icons; other logos keep their own shape. */
+export function logoShapeClass(provider: Pick<MailProvider, 'logoShape'>): string | undefined {
+  // Close to the corner radius iOS and Android apply to launcher icons.
+  return provider.logoShape === 'launcher' ? 'rounded-[22.5%]' : undefined
+}
+
 export const SINA_PROVIDER: MailProvider = {
   id: 'sina',
   get name() { return t('accounts:sinaProviderName') },
@@ -276,6 +288,7 @@ export const SINA_PROVIDER: MailProvider = {
   get description() { return t('accounts:sinaProviderDescription') },
   searchAliases: ['Sina', '新浪', '新浪邮箱', '新浪免费邮'],
   logo: sinaMailLogo,
+  logoShape: 'launcher',
   icon: Mail01Icon,
   preset: { domains: SINA_DOMAINS, ...SINA_COM_SERVERS, serversByDomain: SINA_SERVERS_BY_DOMAIN },
   get setup(): ProviderSetup {
