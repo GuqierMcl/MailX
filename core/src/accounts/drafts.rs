@@ -109,7 +109,7 @@ impl AccountService {
         origin: DraftOrigin,
     ) -> Result<Draft, AppError> {
         validate_uuid(&request.client_mutation_id, "clientMutationId")?;
-        let content = validate::normalize(DraftContent {
+        let base_content = validate::normalize(DraftContent {
             to: request.to,
             cc: request.cc,
             bcc: request.bcc,
@@ -118,32 +118,61 @@ impl AccountService {
             body_text: String::new(),
         })?;
         let canonical = canonical(serde_json::json!({
-            "op": "create", "accountId": request.account_id, "content": content_json(&content),
+            "op": "create", "accountId": request.account_id, "content": content_json(&base_content),
+            "signature": request.signature,
         }))?;
         if let Some(draft) = self.replay(&request.client_mutation_id, &canonical)? {
             return Ok(draft);
         }
         let account_id = self.resolve_account(request.account_id.as_deref(), default_account_id)?;
+        let (content, sig_images) =
+            match self.prepare_signature_for_draft(&account_id, request.signature.as_ref())? {
+                Some((block, images)) if !block.is_empty() => {
+                    let mut content = base_content;
+                    content.body_html = crate::drafts::body::apply_signature_to_html(
+                        &content.body_html,
+                        Some(&block),
+                        DraftKind::New,
+                    );
+                    (validate::normalize(content)?, images)
+                }
+                _ => (base_content, Vec::new()),
+            };
         let id = new_id();
         let now = now();
-        self.storage.insert_draft(&NewDraft {
-            id: &id,
-            account_id: &account_id,
-            kind: DraftKind::New,
-            origin,
-            source_email_id: None,
-            content: &content,
-            in_reply_to: None,
-            references: None,
-            now: &now,
-            client_mutation_id: &request.client_mutation_id,
-            canonical: &canonical,
-        })
+        let attachments: Vec<NewAttachment<'_>> = sig_images
+            .iter()
+            .map(|img| NewAttachment {
+                id: &img.id,
+                content_id: Some(&img.content_id),
+                file_name: &img.file_name,
+                media_type: &img.media_type,
+                blob: &img.blob,
+                origin: AttachmentOrigin::User,
+            })
+            .collect();
+        self.storage.insert_draft_with(
+            &NewDraft {
+                id: &id,
+                account_id: &account_id,
+                kind: DraftKind::New,
+                origin,
+                source_email_id: None,
+                content: &content,
+                in_reply_to: None,
+                references: None,
+                now: &now,
+                client_mutation_id: &request.client_mutation_id,
+                canonical: &canonical,
+            },
+            &attachments,
+        )
     }
 
     fn from_canonical(request: &CreateDraftFromRequest) -> Result<String, AppError> {
         canonical(serde_json::json!({
             "op": "createFrom", "emailId": request.email_id, "kind": request.kind.as_str(),
+            "signature": request.signature,
         }))
     }
 
@@ -260,6 +289,19 @@ impl AccountService {
         if let Some(intro) = intro_html {
             content.body_html = format!("{intro}{}", content.body_html);
         }
+        let sig_images = match self
+            .prepare_signature_for_draft(&detail.summary.account_id, request.signature.as_ref())?
+        {
+            Some((block, images)) if !block.is_empty() => {
+                content.body_html = crate::drafts::body::apply_signature_to_html(
+                    &content.body_html,
+                    Some(&block),
+                    request.kind,
+                );
+                images
+            }
+            _ => Vec::new(),
+        };
         let content = validate::normalize(content)?;
         let canonical = Self::from_canonical(request)?;
         // The lock was released while the raw MIME was read: an identical
@@ -272,7 +314,7 @@ impl AccountService {
         let id = new_id();
         let now = now();
         let ids: Vec<String> = forwarded.iter().map(|_| new_id()).collect();
-        let attachments: Vec<NewAttachment<'_>> = forwarded
+        let mut attachments: Vec<NewAttachment<'_>> = forwarded
             .iter()
             .zip(&ids)
             .map(|(file, id)| NewAttachment {
@@ -284,6 +326,14 @@ impl AccountService {
                 origin: AttachmentOrigin::Forwarded,
             })
             .collect();
+        attachments.extend(sig_images.iter().map(|img| NewAttachment {
+            id: &img.id,
+            content_id: Some(&img.content_id),
+            file_name: &img.file_name,
+            media_type: &img.media_type,
+            blob: &img.blob,
+            origin: AttachmentOrigin::User,
+        }));
         let draft = self.storage.insert_draft_with(
             &NewDraft {
                 id: &id,

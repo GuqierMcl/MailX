@@ -260,6 +260,7 @@
     "missing": "Image missing"
   },
   "attachment": {
+    "button": "Attach",
     "add": "Attach files",
     "adding": "Adding attachments…",
     "list": "Attachments",
@@ -271,6 +272,13 @@
     "overCount_one": "Only {{count}} attachment is allowed. Remove some before sending.",
     "overCount_other": "Up to {{count}} attachments are allowed. Remove some before sending.",
     "serverHint": "The sending server may reject messages over about {{limit}} MB."
+  },
+  "signature": {
+    "button": "Signature",
+    "none": "No signature",
+    "manage": "Manage signatures…",
+    "choose": "Choose signature",
+    "current": "Signature: {{name}}"
   },
   "ai": {
     "button": "AI writing",

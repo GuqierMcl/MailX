@@ -15,6 +15,10 @@ import type {
   InlineImage,
   DraftChanged,
   DraftSummary,
+  AccountSignatureMode,
+  Signature,
+  SignaturesState,
+  StagedSignatureImage,
   OutboxChanged,
   OutboxItem,
   OutboxState,
@@ -135,6 +139,26 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const sendStepMs = options.sendStepMs ?? 600
   const outbox = createMockOutbox(sendStepMs)
   const drafts = new Map<string, Draft>()
+  const signatures = new Map<string, Signature>()
+  const accountSignatures = new Map<string, AccountSignatureMode>()
+  const signatureImageBytes = new Map<string, Uint8Array>()
+  const signatureListeners = new Set<(state: SignaturesState) => void>()
+  const currentSignaturesState = (): SignaturesState => ({
+    signatures: [...signatures.values()].map(clone),
+    accountDefaults: [...accountSignatures.entries()].map(([accountId, selection]) => ({ accountId, selection: clone(selection) })),
+  })
+  const emitSignatures = () => {
+    const snap = currentSignaturesState()
+    signatureListeners.forEach((listener) => listener(clone(snap)))
+  }
+  const replaceSignatureBlock = (bodyHtml: string, sig: Signature | null): string => {
+    const stripped = bodyHtml.replace(/<div data-mailx-signature="[^"]*">[\s\S]*?<\/div>/g, '')
+    if (!sig || !sig.bodyHtml.trim()) return stripped
+    const block = `<div data-mailx-signature="${sig.id}">${sig.bodyHtml}</div>`
+    const trimmed = stripped.trim()
+    if (!trimmed || trimmed === '<p></p>') return `<p></p><p></p>${block}`
+    return `${stripped}<p></p>${block}`
+  }
   const draftsByMutation = new Map<string, string>()
   const previewListeners = new Set<(previews: EmailPreviews) => void>()
   let previewRequest = 0
@@ -1231,6 +1255,98 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
       const bytes = inlineBytes.get(attachmentId)
       if (!bytes) throw notFound()
       return bytes.slice().buffer
+    },
+    async listSignatures() { return currentSignaturesState() },
+    async saveSignature(request) {
+      const name = request.name.trim()
+      if (!name) throw new MailxClientError({ code: 'validation', message: '请输入签名名称。', field: 'signature.name' })
+      const nowIso = new Date().toISOString()
+      const id = request.id ?? crypto.randomUUID()
+      const existing = request.id ? signatures.get(request.id) : undefined
+      if (request.id && !existing) throw notFound()
+      const body = mockDraftBody(request.bodyHtml)
+      const images = [
+        ...(existing?.images ?? []),
+        ...(request.stagedImages ?? []).map((img) => ({
+          id: img.id,
+          fileName: img.fileName,
+          mediaType: img.mediaType,
+          size: img.size,
+          contentId: img.contentId,
+        })),
+      ].filter((img) => body.bodyHtml.includes(`cid:${img.contentId}`))
+      signatures.set(id, {
+        id,
+        name,
+        bodyHtml: body.bodyHtml,
+        bodyText: body.bodyText,
+        images,
+        isDefault: existing?.isDefault ?? false,
+        createdAt: existing?.createdAt ?? nowIso,
+        updatedAt: nowIso,
+      })
+      emitSignatures()
+      return currentSignaturesState()
+    },
+    async deleteSignature(id) {
+      if (!signatures.delete(id)) throw notFound()
+      for (const [accId, mode] of accountSignatures.entries()) {
+        if (mode.mode === 'specific' && mode.signatureId === id) accountSignatures.delete(accId)
+      }
+      emitSignatures()
+      return currentSignaturesState()
+    },
+    async setDefaultSignature({ signatureId }) {
+      if (signatureId && !signatures.has(signatureId)) throw notFound()
+      for (const sig of signatures.values()) {
+        sig.isDefault = sig.id === signatureId
+      }
+      emitSignatures()
+      return currentSignaturesState()
+    },
+    async setAccountDefaultSignature({ accountId, selection }) {
+      if (!accounts.some((a) => a.id === accountId)) throw notFound()
+      if (selection.mode === 'followDefault') {
+        accountSignatures.delete(accountId)
+      } else if (selection.mode === 'none') {
+        accountSignatures.set(accountId, { mode: 'none' })
+      } else {
+        if (!signatures.has(selection.signatureId)) throw notFound()
+        accountSignatures.set(accountId, { mode: 'specific', signatureId: selection.signatureId })
+      }
+      emitSignatures()
+      return currentSignaturesState()
+    },
+    async addSignatureImages() {
+      const id = crypto.randomUUID()
+      const contentId = `${id.replaceAll('-', '')}@signature.mailx.local`
+      signatureImageBytes.set(id, MOCK_PIXEL)
+      const staged: StagedSignatureImage = { id, fileName: 'signature.png', mediaType: 'image/png', size: MOCK_PIXEL.byteLength, contentId, blobHash: id }
+      return [staged]
+    },
+    async addSignatureImageBytes(fileName, bytes) {
+      const id = crypto.randomUUID()
+      const contentId = `${id.replaceAll('-', '')}@signature.mailx.local`
+      signatureImageBytes.set(id, bytes)
+      return { id, fileName: fileName || 'image.png', mediaType: 'image/png', size: bytes.byteLength, contentId, blobHash: id }
+    },
+    async signatureImagePreview(_signatureId, imageId) {
+      const bytes = signatureImageBytes.get(imageId)
+      if (!bytes) throw notFound()
+      return bytes.slice().buffer
+    },
+    onSignaturesChanged(listener) {
+      signatureListeners.add(listener)
+      return () => { signatureListeners.delete(listener) }
+    },
+    async applyDraftSignature({ draftId, expectedRevision, signatureId }) {
+      const draft = mutableDraft(draftId, expectedRevision)
+      const sig = signatureId ? signatures.get(signatureId) ?? null : null
+      if (signatureId && !sig) throw notFound()
+      const next = mockDraftBody(replaceSignatureBlock(draft.bodyHtml, sig))
+      draft.bodyHtml = next.bodyHtml
+      draft.bodyText = next.bodyText
+      return touchDraft(draft)
     },
     async removeAttachment({ draftId, attachmentId, expectedRevision }) {
       const draft = mutableDraft(draftId, expectedRevision)

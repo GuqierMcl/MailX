@@ -30,6 +30,7 @@ pub(crate) mod outbox;
 pub(crate) mod previews;
 mod removal;
 pub(crate) mod search_index;
+pub(crate) mod signatures;
 pub(crate) mod summaries;
 pub(crate) mod translations;
 

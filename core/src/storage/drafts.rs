@@ -130,10 +130,6 @@ impl Storage {
             .ok_or_else(|| AppError::new(ErrorCode::NotFound))
     }
 
-    pub(crate) fn insert_draft(&mut self, draft: &NewDraft<'_>) -> Result<Draft, AppError> {
-        self.insert_draft_with(draft, &[])
-    }
-
     /// The draft row and its carried-over attachments in one transaction: a
     /// failure leaves neither. Attachments do not bump the revision; the draft
     /// is still the one the create request produced.
@@ -271,53 +267,65 @@ impl Storage {
         after: Option<(&str, &str)>,
         limit: u32,
     ) -> Result<Vec<DraftSummary>, AppError> {
-        // Match Rust's Unicode whitespace handling used by Draft::is_blank.
-        let whitespace = " \t\r\n\u{b}\u{c}\u{85}\u{a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}";
+        let mut collected = Vec::new();
+        let target = limit as usize;
+        let batch_size = limit.max(20);
+        let mut cursor = after.map(|(u, i)| (u.to_owned(), i.to_owned()));
         let sql = format!(
             "SELECT {COLUMNS} FROM drafts d
             WHERE account_id IN (SELECT value FROM json_each(?1))
               AND (?2 IS NULL OR origin = ?2)
               AND (?3 IS NULL OR instr(lower(subject), lower(?3)) > 0)
-              AND (length(trim(subject, ?7)) > 0 OR length(trim(body_text, ?7)) > 0
-                   OR json_array_length(to_addresses) > 0 OR json_array_length(cc_addresses) > 0
-                   OR json_array_length(bcc_addresses) > 0
-                   OR EXISTS(SELECT 1 FROM draft_attachments a WHERE a.draft_id = d.id))
               AND (?4 IS NULL OR updated_at < ?4 OR (updated_at = ?4 AND id < ?5))
             ORDER BY updated_at DESC, id DESC LIMIT ?6"
         );
-        let rows = self
-            .db
-            .prepare(&sql)?
-            .query_map(
-                params![
-                    encode(&account_ids)?,
-                    origin,
-                    query,
-                    after.map(|p| p.0),
-                    after.map(|p| p.1),
-                    limit,
-                    whitespace
-                ],
-                parse,
-            )?
-            .collect::<Result<Vec<_>, _>>()?;
-        rows.into_iter()
-            .map(|draft| {
-                let draft = draft?;
-                Ok(DraftSummary {
-                    preview: preview(&draft.body_text),
-                    id: draft.id,
-                    account_id: draft.account_id,
-                    kind: draft.kind,
-                    source_email_id: draft.source_email_id,
-                    to: draft.to,
-                    subject: draft.subject,
-                    updated_at: draft.updated_at,
-                    revision: draft.revision,
-                    origin: draft.origin,
-                })
-            })
-            .collect()
+        let accounts_json = encode(&account_ids)?;
+        while collected.len() < target {
+            let rows = self
+                .db
+                .prepare(&sql)?
+                .query_map(
+                    params![
+                        &accounts_json,
+                        origin,
+                        query,
+                        cursor.as_ref().map(|p| p.0.as_str()),
+                        cursor.as_ref().map(|p| p.1.as_str()),
+                        batch_size,
+                    ],
+                    parse,
+                )?
+                .collect::<Result<Vec<_>, _>>()?;
+            let fetched = rows.len();
+            if fetched == 0 {
+                break;
+            }
+            for row in rows {
+                let draft = self.with_attachments(row?)?;
+                cursor = Some((draft.updated_at.clone(), draft.id.clone()));
+                if !draft.is_blank() {
+                    collected.push(DraftSummary {
+                        preview: preview(&draft.body_text),
+                        id: draft.id,
+                        account_id: draft.account_id,
+                        kind: draft.kind,
+                        source_email_id: draft.source_email_id,
+                        to: draft.to,
+                        subject: draft.subject,
+                        updated_at: draft.updated_at,
+                        revision: draft.revision,
+                        origin: draft.origin,
+                    });
+                    if collected.len() >= target {
+                        break;
+                    }
+                }
+            }
+            if fetched < batch_size as usize {
+                break;
+            }
+        }
+        Ok(collected)
     }
 
     /// Removes blank drafts that no live outbox item holds.
@@ -376,6 +384,98 @@ impl Storage {
                 content.body_html,
             ],
         )?;
+        tx.commit()?;
+        self.get_draft(id)
+    }
+
+    /// Replaces the draft body and updates inline attachments for a signature
+    /// switch in a single compare-and-swap transaction.
+    pub(crate) fn apply_draft_signature(
+        &mut self,
+        id: &str,
+        expected_revision: u32,
+        content: &DraftContent,
+        added_images: &[NewAttachment<'_>],
+        policy: crate::AttachmentPolicy,
+        now: &str,
+    ) -> Result<Draft, AppError> {
+        let tx = self.db.transaction()?;
+        let current: Option<u32> = tx
+            .query_row("SELECT revision FROM drafts WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let current = current.ok_or_else(|| AppError::new(ErrorCode::NotFound))?;
+        if current != expected_revision {
+            return Err(AppError::new(ErrorCode::Conflict));
+        }
+        let next = current
+            .checked_add(1)
+            .ok_or_else(|| AppError::new(ErrorCode::StorageIncompatible))?;
+        tx.execute(
+            "UPDATE drafts SET body_html = ?2, body_text = ?3, updated_at = ?4, revision = ?5
+             WHERE id = ?1",
+            params![id, content.body_html, content.body_text, now, next],
+        )?;
+        // Drop inline images no longer referenced in the updated HTML.
+        let referenced = crate::drafts::body::referenced_cids(&content.body_html);
+        let stale: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT id, content_id FROM draft_attachments WHERE draft_id = ?1 AND inline = 1",
+            )?;
+            stmt.query_map([id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter(|(_, cid)| cid.as_ref().is_none_or(|cid| !referenced.contains(cid)))
+            .map(|(img_id, _)| img_id)
+            .collect()
+        };
+        for img_id in stale {
+            tx.execute(
+                "DELETE FROM draft_attachments WHERE draft_id = ?1 AND id = ?2",
+                params![id, img_id],
+            )?;
+        }
+        if !added_images.is_empty() {
+            let (count, total): (i64, i64) = tx.query_row(
+                "SELECT COUNT(*), COALESCE(SUM(size), 0) FROM draft_attachments WHERE draft_id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let added = i64::try_from(added_images.len()).unwrap_or(i64::MAX);
+            if count.saturating_add(added) > i64::from(policy.max_count) {
+                return Err(AppError::new(ErrorCode::TooManyAttachments));
+            }
+            let mut sum = total;
+            for attachment in added_images {
+                let size = i64::try_from(attachment.blob.size)
+                    .map_err(|_| AppError::new(ErrorCode::AttachmentTooLarge))?;
+                sum = sum.saturating_add(size);
+                if sum > i64::try_from(policy.max_total_bytes).unwrap_or(i64::MAX) {
+                    return Err(AppError::new(ErrorCode::AttachmentTooLarge));
+                }
+                tx.execute(
+                    "INSERT INTO draft_attachments
+                        (draft_id, id, file_name, media_type, size, blob_hash, inline, content_id,
+                         origin, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        id,
+                        attachment.id,
+                        attachment.file_name,
+                        attachment.media_type,
+                        size,
+                        attachment.blob.sha256,
+                        attachment.content_id.is_some(),
+                        attachment.content_id,
+                        attachment.origin.as_str(),
+                        now,
+                    ],
+                )?;
+            }
+        }
         tx.commit()?;
         self.get_draft(id)
     }

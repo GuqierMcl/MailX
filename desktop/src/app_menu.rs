@@ -14,6 +14,7 @@ fn main_action(id: &str) -> bool {
         "about"
             | "update"
             | "settings"
+            | "signatures"
             | "accounts"
             | "shortcuts"
             | "guide"

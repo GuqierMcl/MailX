@@ -94,6 +94,17 @@ body { margin: 0; min-width: 320px; }
   --sidebar-accent: oklch(0.22 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
 }
+/* Settings dialog navigation: match the main canvas sidebar's calm contrast and crisp active tint. */
+.settings-sidebar {
+  --sidebar: oklch(0.955 0 0);
+  --sidebar-accent: oklch(0.905 0 0);
+  --sidebar-border: oklch(0.88 0 0);
+}
+.dark .settings-sidebar {
+  --sidebar: oklch(0.165 0 0);
+  --sidebar-accent: oklch(0.25 0 0);
+  --sidebar-border: oklch(1 0 0 / 8%);
+}
 /* With a window material behind the webview the canvas lets it show through; islands stay opaque. */
 html[data-translucent],
 html[data-translucent] body {

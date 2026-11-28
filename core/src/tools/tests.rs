@@ -174,6 +174,7 @@ async fn both_audiences_list_their_tools_with_schemas_and_limits() {
             "draft_read",
             "draft_update",
             "draft_delete",
+            "signatures_list",
             "mail_flags",
             "mail_archive",
             "accounts_refresh_sync",
@@ -258,6 +259,7 @@ async fn list_for_hides_tools_the_grant_cannot_use() {
             "mail_folders",
             "draft_list",
             "draft_read",
+            "signatures_list",
             "show_in_app",
             "mail_conversation",
             "mail_contacts",
@@ -1541,6 +1543,7 @@ async fn reply_draft_origin_follows_the_principal_and_the_text_goes_above_the_qu
                 email_id: f.emails[0].clone(),
                 kind: crate::DraftKind::Reply,
                 client_mutation_id: Uuid::new_v4().to_string(),
+                signature: None,
             },
             crate::SupportedLocale::default(),
         )
@@ -1787,6 +1790,7 @@ fn user_draft(f: &Fx, account: &str, subject: &str) -> Draft {
                 subject: subject.into(),
                 body_html: "<p>mine</p>".into(),
                 client_mutation_id: Uuid::new_v4().to_string(),
+                signature: None,
             },
             account,
         )

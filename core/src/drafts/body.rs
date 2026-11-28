@@ -11,13 +11,17 @@ use scraper::{ElementRef, Html, Node};
 use url::Url;
 
 use crate::SupportedLocale;
+use crate::drafts::signatures::MAX_SIGNATURE_HTML_BYTES;
+use crate::drafts::types::DraftKind;
 use crate::error::AppError;
+use uuid::Uuid;
 
 const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TEXT_BYTES: usize = super::validate::MAX_BODY_BYTES;
 const MAX_QUOTE_BYTES: usize = 512 * 1024;
 
 const TAGS: &[&str] = &[
+    "div",
     "p",
     "br",
     "strong",
@@ -77,6 +81,18 @@ fn alignment(value: &str) -> Option<&str> {
     matches!(value, "center" | "right").then_some(value)
 }
 
+/// Validates the `data-mailx-signature` attribute on a signature block `<div>`.
+/// Accepts either an empty string (anonymous/custom signature block) or a valid UUID.
+fn signature_id_attr(value: &str) -> Option<Cow<'_, str>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Some(Cow::Borrowed(""));
+    }
+    Uuid::parse_str(trimmed)
+        .ok()
+        .map(|id| Cow::Owned(id.to_string()))
+}
+
 /// Returns the Content-ID (without angle brackets) when `src` is a `cid:`
 /// reference in the exact format core generates: 32 lowercase hex digits, `@`,
 /// then a domain. Anything else, including other `cid:` shapes, is rejected.
@@ -118,6 +134,32 @@ fn image_edge(value: &str) -> Option<u32> {
 /// Content-IDs referenced by `<img src="cid:…">` in already normalized
 /// draft HTML, in order of first appearance and without duplicates.
 pub(crate) fn referenced_cids(html: &str) -> Vec<String> {
+    referenced_cids_filtered(html, false)
+}
+
+/// Content-IDs referenced outside `<div data-mailx-signature>` blocks.
+pub(crate) fn referenced_cids_outside_signature(html: &str) -> Vec<String> {
+    referenced_cids_filtered(html, true)
+}
+
+fn is_signature_div(element: ElementRef<'_>) -> bool {
+    element.value().name() == "div" && element.value().attr("data-mailx-signature").is_some()
+}
+
+fn inside_signature(element: ElementRef<'_>) -> bool {
+    let mut current = element.parent();
+    while let Some(node) = current {
+        if let Some(el) = ElementRef::wrap(node)
+            && is_signature_div(el)
+        {
+            return true;
+        }
+        current = node.parent();
+    }
+    false
+}
+
+fn referenced_cids_filtered(html: &str, exclude_signature: bool) -> Vec<String> {
     let document = Html::parse_fragment(html);
     let mut seen = HashSet::new();
     let mut found = Vec::new();
@@ -128,6 +170,9 @@ pub(crate) fn referenced_cids(html: &str) -> Vec<String> {
         if element.value().name() != "img" {
             continue;
         }
+        if exclude_signature && inside_signature(element) {
+            continue;
+        }
         if let Some(cid) = element.value().attr("src").and_then(cid_of)
             && seen.insert(cid)
         {
@@ -135,6 +180,201 @@ pub(crate) fn referenced_cids(html: &str) -> Vec<String> {
         }
     }
     found
+}
+
+/// Plain text of the draft excluding `<div data-mailx-signature>` blocks,
+/// used to decide whether a draft is still blank.
+pub(crate) fn body_text_without_signature(html: &str) -> String {
+    let stripped = strip_signature_blocks(html);
+    let document = Html::parse_fragment(&stripped);
+    plain_text(&document, &|_| None).unwrap_or_default()
+}
+
+fn strip_signature_blocks(html: &str) -> String {
+    let document = Html::parse_fragment(html);
+    let mut out = String::new();
+    for child in top_level_nodes(&document) {
+        if let Some(el) = ElementRef::wrap(child)
+            && is_signature_div(el)
+        {
+            continue;
+        }
+        out.push_str(&serialize_subtree(child));
+    }
+    out
+}
+
+fn top_level_nodes(document: &Html) -> Vec<ego_tree::NodeRef<'_, Node>> {
+    let root = document.tree.root();
+    // Html::parse_fragment wraps content in an implicit <html> element.
+    for child in root.children() {
+        if let Some(el) = ElementRef::wrap(child)
+            && el.value().name() == "html"
+        {
+            return child.children().collect();
+        }
+    }
+    root.children().collect()
+}
+
+fn serialize_subtree(node: ego_tree::NodeRef<'_, Node>) -> String {
+    if let Some(el) = ElementRef::wrap(node) {
+        el.html()
+    } else if let Node::Text(text) = node.value() {
+        let mut escaped = String::new();
+        escape_into(&text.text, &mut escaped, usize::MAX);
+        escaped
+    } else {
+        String::new()
+    }
+}
+
+/// Rewrites `<img src="cid:OLD">` to `<img src="cid:NEW">` according to `mapping`.
+pub(crate) fn rewrite_cids(html: &str, mapping: &HashMap<String, String>) -> String {
+    if mapping.is_empty() {
+        return html.to_owned();
+    }
+    let mut result = html.to_owned();
+    for (old_cid, new_cid) in mapping {
+        let from = format!("src=\"cid:{old_cid}\"");
+        let to = format!("src=\"cid:{new_cid}\"");
+        result = result.replace(&from, &to);
+    }
+    result
+}
+
+/// Wraps normalized signature HTML in a controlled signature block container.
+pub(crate) fn signature_block_html(signature_id: &str, sig_body_html: &str) -> String {
+    let trimmed = sig_body_html.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    format!("<div data-mailx-signature=\"{signature_id}\">{trimmed}</div>")
+}
+
+fn is_empty_paragraph(node: ego_tree::NodeRef<'_, Node>) -> bool {
+    let Some(el) = ElementRef::wrap(node) else {
+        return false;
+    };
+    if el.value().name() != "p" {
+        return false;
+    }
+    let has_img = el
+        .descendants()
+        .any(|d| ElementRef::wrap(d).is_some_and(|e| e.value().name() == "img"));
+    !has_img && el.text().all(|s| s.trim().is_empty())
+}
+
+fn is_forward_divider(node: ego_tree::NodeRef<'_, Node>) -> bool {
+    let Some(el) = ElementRef::wrap(node) else {
+        return false;
+    };
+    if el.value().name() != "p" {
+        return false;
+    }
+    let text = el.text().collect::<String>();
+    let trimmed = text.trim();
+    trimmed == "---------- 转发的邮件 ----------"
+        || trimmed == "---------- Forwarded message ----------"
+}
+
+/// Replaces or removes any existing signature block in `body_html`, or inserts
+/// `signature_block` at the default location for `kind` (end of new mail;
+/// above the quoted original / forward header for replies and forwards).
+pub(crate) fn apply_signature_to_html(
+    body_html: &str,
+    signature_block: Option<&str>,
+    kind: DraftKind,
+) -> String {
+    let document = Html::parse_fragment(body_html);
+    let nodes = top_level_nodes(&document);
+    let mut sig_indices = Vec::new();
+    for (index, node) in nodes.iter().enumerate() {
+        if ElementRef::wrap(*node).is_some_and(is_signature_div) {
+            sig_indices.push(index);
+        }
+    }
+
+    if !sig_indices.is_empty() {
+        let first_sig = sig_indices[0];
+        let mut parts: Vec<String> = Vec::with_capacity(nodes.len());
+        for (index, node) in nodes.iter().enumerate() {
+            if index == first_sig {
+                if let Some(block) = signature_block.filter(|b| !b.is_empty()) {
+                    parts.push(block.to_owned());
+                } else if parts
+                    .last()
+                    .is_some_and(|prev| prev == "<p></p>" || prev == "<p><br></p>")
+                    && parts.len() > 1
+                {
+                    // Drop the extra spacer paragraph we inserted above the signature.
+                    parts.pop();
+                }
+            } else if sig_indices.contains(&index) {
+                continue;
+            } else {
+                parts.push(serialize_subtree(*node));
+            }
+        }
+        return parts.concat();
+    }
+
+    let Some(block) = signature_block.filter(|b| !b.is_empty()) else {
+        return body_html.to_owned();
+    };
+
+    // No existing signature block: find the insertion index based on draft kind.
+    let insert_at = match kind {
+        DraftKind::New => nodes.len(),
+        DraftKind::Reply | DraftKind::ReplyAll => {
+            // Find the last top-level <blockquote> and the non-empty intro paragraph before it.
+            let last_quote = nodes.iter().rposition(|n| {
+                ElementRef::wrap(*n).is_some_and(|el| el.value().name() == "blockquote")
+            });
+            match last_quote {
+                Some(q_idx) => {
+                    if q_idx > 0
+                        && ElementRef::wrap(nodes[q_idx - 1])
+                            .is_some_and(|el| el.value().name() == "p")
+                        && !is_empty_paragraph(nodes[q_idx - 1])
+                    {
+                        q_idx - 1
+                    } else {
+                        q_idx
+                    }
+                }
+                None => nodes.len(),
+            }
+        }
+        DraftKind::Forward => nodes
+            .iter()
+            .position(|n| is_forward_divider(*n))
+            .unwrap_or(nodes.len()),
+    };
+
+    let before_all_empty = nodes[..insert_at].iter().all(|n| is_empty_paragraph(*n));
+    let mut out = String::new();
+    if before_all_empty {
+        // Leave a clean typing paragraph + one blank spacer line above the signature.
+        out.push_str("<p></p><p></p>");
+    } else {
+        for node in &nodes[..insert_at] {
+            out.push_str(&serialize_subtree(*node));
+        }
+        if insert_at > 0 && !is_empty_paragraph(nodes[insert_at - 1]) {
+            out.push_str("<p></p>");
+        }
+    }
+    out.push_str(block);
+    if insert_at < nodes.len() {
+        if !is_empty_paragraph(nodes[insert_at]) {
+            out.push_str("<p></p>");
+        }
+        for node in &nodes[insert_at..] {
+            out.push_str(&serialize_subtree(*node));
+        }
+    }
+    out
 }
 
 /// Final HTML and text for sending: `<img>` elements whose Content-ID has no
@@ -179,29 +419,36 @@ pub(crate) fn normalize(html: &str) -> Result<NormalizedBody, AppError> {
 }
 
 fn sanitize(html: &str) -> String {
+    sanitize_with_signature(html, true)
+}
+
+fn sanitize_with_signature(html: &str, allow_signature_block: bool) -> String {
+    let mut tag_attrs = [
+        ("a", HashSet::from(["href"])),
+        ("ol", HashSet::from(["start"])),
+        ("p", HashSet::from(["data-align"])),
+        ("h1", HashSet::from(["data-align"])),
+        ("h2", HashSet::from(["data-align"])),
+        ("h3", HashSet::from(["data-align"])),
+        ("span", HashSet::from(["data-color"])),
+        ("mark", HashSet::from(["data-highlight"])),
+        ("img", HashSet::from(["src", "alt", "width", "height"])),
+    ]
+    .into_iter()
+    .collect::<HashMap<_, _>>();
+    if allow_signature_block {
+        tag_attrs.insert("div", HashSet::from(["data-mailx-signature"]));
+    }
     Builder::new()
         .tags(TAGS.iter().copied().collect())
         .generic_attributes(HashSet::new())
-        .tag_attributes(
-            [
-                ("a", HashSet::from(["href"])),
-                ("ol", HashSet::from(["start"])),
-                ("p", HashSet::from(["data-align"])),
-                ("h1", HashSet::from(["data-align"])),
-                ("h2", HashSet::from(["data-align"])),
-                ("h3", HashSet::from(["data-align"])),
-                ("span", HashSet::from(["data-color"])),
-                ("mark", HashSet::from(["data-highlight"])),
-                ("img", HashSet::from(["src", "alt", "width", "height"])),
-            ]
-            .into_iter()
-            .collect(),
-        )
+        .tag_attributes(tag_attrs)
         .clean_content_tags(DROP_CONTENT.iter().copied().collect())
         .url_schemes(HashSet::from(["http", "https", "mailto", "cid"]))
         .url_relative(UrlRelative::Deny)
         .link_rel(None)
-        .attribute_filter(|tag, attribute, value| match (tag, attribute) {
+        .attribute_filter(move |tag, attribute, value| match (tag, attribute) {
+            ("div", "data-mailx-signature") if allow_signature_block => signature_id_attr(value),
             ("a", "href") => allowed_href(value).map(Cow::Borrowed),
             ("ol", "start") => value
                 .trim()
@@ -222,6 +469,21 @@ fn sanitize(html: &str) -> String {
         })
         .clean(html)
         .to_string()
+}
+
+/// Normalizes a standalone signature's HTML body (no nested signature blocks).
+pub(crate) fn normalize_signature(html: &str) -> Result<NormalizedBody, AppError> {
+    if html.len() > MAX_SIGNATURE_HTML_BYTES || html.contains('\0') {
+        return Err(AppError::validation("signature.bodyHtml"));
+    }
+    let clean = sanitize_with_signature(html, false);
+    let document = Html::parse_fragment(&clean);
+    let html = serialize(&document, Mode::Draft, None, usize::MAX, None, None);
+    if html.len() > MAX_SIGNATURE_HTML_BYTES {
+        return Err(AppError::validation("signature.bodyHtml"));
+    }
+    let text = plain_text(&document, &|_| None)?;
+    Ok(NormalizedBody { html, text })
 }
 
 fn allowed_href(value: &str) -> Option<&str> {
@@ -555,16 +817,29 @@ fn serialize(
                 .then(|| element.value().attr("data-highlight"))
                 .flatten()
                 .filter(|name| palette_color(HIGHLIGHT_COLORS, name).is_some());
+            let signature_attr = (!quoting && tag == "div")
+                .then(|| element.value().attr("data-mailx-signature"))
+                .flatten()
+                .and_then(|value| signature_id_attr(value).map(Cow::into_owned));
             if quoting && matches!(tag, "div" | "td" | "th" | "pre") && !has_block_children(element)
             {
                 open.push_str("<p>");
                 close.push_str("</p>");
             } else if TAGS.contains(&tag)
+                && (tag != "div" || signature_attr.is_some())
                 && (tag != "span" || color.is_some())
                 && (tag != "mark" || highlight.is_some())
             {
                 open.push('<');
                 open.push_str(tag);
+                if mode == Mode::Draft
+                    && tag == "div"
+                    && let Some(sig_id) = signature_attr.as_deref()
+                {
+                    open.push_str(" data-mailx-signature=\"");
+                    escape_into(sig_id, &mut open, usize::MAX);
+                    open.push('"');
+                }
                 let href = if tag == "a" {
                     let cached = links.and_then(|links| {
                         element

@@ -4,6 +4,7 @@
 pub mod attachments;
 pub(crate) mod body;
 pub(crate) mod compose;
+pub mod signatures;
 pub mod types;
 pub(crate) mod validate;
 

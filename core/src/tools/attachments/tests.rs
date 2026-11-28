@@ -49,6 +49,7 @@ fn fixture() -> Fixture {
                 subject: "Synthetic".into(),
                 body_html: "<p>Test</p>".into(),
                 client_mutation_id: uuid::Uuid::new_v4().to_string(),
+                signature: None,
             },
             "",
         )

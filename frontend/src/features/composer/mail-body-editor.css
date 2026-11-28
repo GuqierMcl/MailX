@@ -78,6 +78,31 @@
 }
 .mail-body-content s { text-decoration: line-through; }
 .mail-body-content u { text-decoration: underline; }
+/* Signature block: quiet 2px left hairline inside the block so `.mail-body-surface`'s overflow never clips it. */
+.mail-body-content [data-mailx-signature] {
+  position: relative;
+  margin-top: 10px;
+  padding: 2px 0 2px 12px;
+}
+.mail-body-content [data-mailx-signature]::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 2px;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--foreground) 18%, transparent);
+  pointer-events: none;
+  transition: background-color 150ms ease-out;
+}
+.mail-body-content [data-mailx-signature]:hover::before,
+.mail-body-content [data-mailx-signature]:focus-within::before {
+  background: color-mix(in oklab, var(--foreground) 38%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mail-body-content [data-mailx-signature]::before { transition: none; }
+}
 .mail-body-content .ProseMirror-hideselection *::selection { background: transparent; }
 .mail-body-content.ProseMirror-hideselection { caret-color: transparent; }
 .mail-body-content[aria-readonly="true"] { color: var(--muted-foreground); }

@@ -193,6 +193,7 @@ async fn drafts_never_carry_a_variant() {
                 subject: "s".into(),
                 body_html: "<p>typed text</p>".into(),
                 client_mutation_id: Uuid::new_v4().to_string(),
+                signature: None,
             },
             "",
         )

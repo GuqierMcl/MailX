@@ -1,5 +1,5 @@
 import { t } from '@/i18n'
-import { generateHTML, type EditorOptions } from '@tiptap/core'
+import { generateHTML, mergeAttributes, Node, type EditorOptions } from '@tiptap/core'
 import HardBreak from '@tiptap/extension-hard-break'
 import Link from '@tiptap/extension-link'
 import { Markdown } from '@tiptap/markdown'
@@ -25,6 +25,30 @@ export function allowedMailLink(value: string): boolean {
 const MailHardBreak = HardBreak.extend({
   addKeyboardShortcuts() {
     return { 'Shift-Enter': () => this.editor.commands.setHardBreak() }
+  },
+})
+
+/** Controlled editable container for an email signature block (`<div data-mailx-signature="...">`). */
+export const SignatureBlock = Node.create({
+  name: 'signatureBlock',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+  isolating: false,
+  addAttributes() {
+    return {
+      signatureId: {
+        default: '',
+        parseHTML: (element) => element.getAttribute('data-mailx-signature') ?? '',
+        renderHTML: (attributes) => ({ 'data-mailx-signature': String(attributes.signatureId ?? '') }),
+      },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'div[data-mailx-signature]' }]
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['div', mergeAttributes(HTMLAttributes), 0]
   },
 })
 
@@ -122,6 +146,7 @@ export function mailEditorOptions(images: InlineImageController | null = null): 
       }),
       MailHardBreak,
       MailLink,
+      SignatureBlock,
       InlineImageNode.configure({ controller: images }),
       MailMarkdown,
       MailTextAlignment,

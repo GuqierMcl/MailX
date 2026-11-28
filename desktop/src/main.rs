@@ -22,6 +22,7 @@ mod notifications;
 mod secret_split;
 mod secret_store;
 mod secret_vault;
+mod signatures;
 mod state;
 mod storage_location;
 mod tray;
@@ -72,6 +73,7 @@ fn main() {
     let builder = tauri::Builder::default()
         .manage(verification_codes::VerificationCodes::default())
         .manage(compose::InlineComposerDraft::default())
+        .manage(signatures::StagedSignaturePreviews::default())
         .manage(autostart::StartupIntent::default())
         .manage(autostart::foreground_environment(tauri::Env::default()));
     // AppKit otherwise activates the app even when its initial window is
@@ -459,6 +461,15 @@ fn main() {
             compose_files::inline_images_add,
             compose_files::inline_images_add_bytes,
             compose_files::inline_image_preview,
+            signatures::signatures_list,
+            signatures::signatures_save,
+            signatures::signatures_delete,
+            signatures::signatures_set_default,
+            signatures::signatures_set_account_default,
+            signatures::signatures_add_image,
+            signatures::signatures_add_image_bytes,
+            signatures::signatures_image_preview,
+            signatures::drafts_apply_signature,
             compose::drafts_delete,
             compose::outbox_queue_send,
             compose::outbox_list,

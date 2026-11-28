@@ -6,8 +6,8 @@ use super::error::{ToolError, ToolErrorCode};
 use super::mail::Address;
 use super::spec::{Annotations, AudiencePolicy, ToolCall, ToolSpec, Tools};
 use crate::{
-    CreateDraftFromRequest, CreateDraftRequest, Draft, DraftKind, DraftOrigin, ErrorCode,
-    MailAddress, UpdateDraftRequest,
+    CreateDraftFromRequest, CreateDraftRequest, Draft, DraftKind, DraftOrigin,
+    DraftSignatureSelection, ErrorCode, MailAddress, UpdateDraftRequest,
 };
 
 pub const MAX_RECIPIENTS_PER_LIST: usize = 50;
@@ -41,6 +41,10 @@ pub struct CreateDraftInput {
     pub body_html: String,
     /// UUID that makes retries return the same draft. Generated when omitted.
     pub client_mutation_id: Option<String>,
+    /// Whether to append a signature (default true). Set to false to omit any signature.
+    pub include_signature: Option<bool>,
+    /// Explicit signature id from signatures_list. Omit to use the account's default signature.
+    pub signature_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -84,6 +88,10 @@ pub struct CreateReplyDraftInput {
     pub body_html: Option<String>,
     /// UUID that makes retries return the same draft. Generated when omitted.
     pub client_mutation_id: Option<String>,
+    /// Whether to append a signature (default true). Set to false to omit any signature.
+    pub include_signature: Option<bool>,
+    /// Explicit signature id from signatures_list. Omit to use the account's default signature.
+    pub signature_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -98,6 +106,35 @@ pub struct CreateReplyDraftOutput {
     /// The original was longer than a quote may be, so its end is not in the
     /// draft. Tell the user instead of leaving it to be discovered.
     pub quote_truncated: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ListSignaturesInput {}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SignatureListItem {
+    pub id: String,
+    pub name: String,
+    /// Single-line plain-text preview of the signature.
+    pub preview: String,
+    /// Whether this signature is the global default.
+    pub is_default: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDefaultSignatureItem {
+    pub account_id: String,
+    pub signature_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSignaturesOutput {
+    pub signatures: Vec<SignatureListItem>,
+    pub account_defaults: Vec<AccountDefaultSignatureItem>,
 }
 
 pub(super) fn register(tools: &mut Tools) {
@@ -187,6 +224,18 @@ pub(super) fn register(tools: &mut Tools) {
     .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
     .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
     tools.register(delete, draft_delete);
+
+    let list_sigs = ToolSpec::new::<ListSignaturesInput, ListSignaturesOutput>(
+        "signatures_list",
+        "List email signatures",
+        "List the user's saved email signatures and which signature each permitted account uses by default. \
+         Pass a signatureId or includeSignature: false to draft_create / draft_reply to override the default.",
+        Annotations::READ_ONLY,
+    )
+    .requires(&[Action::MailRead])
+    .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
+    .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
+    tools.register(list_sigs, signatures_list);
 }
 
 fn origin_of(principal: &Principal) -> DraftOrigin {
@@ -246,6 +295,89 @@ fn resolve_account(
     })
 }
 
+fn signature_selection(
+    include_signature: Option<bool>,
+    signature_id: Option<String>,
+) -> Result<Option<DraftSignatureSelection>, ToolError> {
+    if include_signature == Some(false) {
+        if signature_id.is_some() {
+            return Err(ToolError::invalid(
+                "signatureId",
+                "cannot set signatureId when includeSignature is false",
+            ));
+        }
+        return Ok(Some(DraftSignatureSelection::None));
+    }
+    if let Some(id) = signature_id {
+        if id.is_empty() || id.chars().count() > 64 {
+            return Err(ToolError::invalid("signatureId", "invalid"));
+        }
+        return Ok(Some(DraftSignatureSelection::Specific { signature_id: id }));
+    }
+    Ok(None)
+}
+
+fn signatures_list(
+    call: &ToolCall<'_>,
+    _input: ListSignaturesInput,
+) -> Result<ListSignaturesOutput, ToolError> {
+    let state = call.core.signatures_state()?;
+    let global_default_id = state
+        .signatures
+        .iter()
+        .find(|s| s.is_default)
+        .map(|s| s.id.clone());
+    let signatures = state
+        .signatures
+        .into_iter()
+        .map(|sig| {
+            let preview: String = sig
+                .body_text
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(120)
+                .collect();
+            SignatureListItem {
+                id: sig.id,
+                name: sig.name,
+                preview,
+                is_default: sig.is_default,
+            }
+        })
+        .collect();
+    let overrides: std::collections::HashMap<_, _> = state
+        .account_defaults
+        .into_iter()
+        .map(|item| (item.account_id, item.selection))
+        .collect();
+    let accounts = call.core.accounts()?.list()?;
+    let mut account_defaults = Vec::new();
+    for account in accounts {
+        if call.require_account(&account.id).is_err() {
+            continue;
+        }
+        let resolved = match overrides.get(&account.id) {
+            Some(crate::AccountSignatureMode::None) => None,
+            Some(crate::AccountSignatureMode::Specific { signature_id }) => {
+                Some(signature_id.clone())
+            }
+            _ => global_default_id.clone(),
+        };
+        if let Some(signature_id) = resolved {
+            account_defaults.push(AccountDefaultSignatureItem {
+                account_id: account.id,
+                signature_id,
+            });
+        }
+    }
+    Ok(ListSignaturesOutput {
+        signatures,
+        account_defaults,
+    })
+}
+
 fn draft_create(
     call: &ToolCall<'_>,
     input: CreateDraftInput,
@@ -263,6 +395,7 @@ fn draft_create(
     {
         return Err(ToolError::invalid("clientMutationId", "invalid"));
     }
+    let signature = signature_selection(input.include_signature, input.signature_id)?;
     let to = addresses("to", Some(input.to))?;
     let cc = addresses("cc", input.cc)?;
     let bcc = addresses("bcc", input.bcc)?;
@@ -282,6 +415,7 @@ fn draft_create(
             client_mutation_id: input
                 .client_mutation_id
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            signature,
         },
         &default,
         origin_of(&call.ctx.principal),
@@ -319,6 +453,7 @@ fn draft_reply(
     {
         return Err(ToolError::invalid("clientMutationId", "invalid"));
     }
+    let signature = signature_selection(input.include_signature, input.signature_id)?;
     // Scope first: a missing and an out-of-scope message answer identically,
     // and nothing is written before the check. The reply is sent from the
     // original's own account, which this check has just put in scope.
@@ -332,6 +467,7 @@ fn draft_reply(
             client_mutation_id: input
                 .client_mutation_id
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            signature,
         },
         call.locale(),
         origin_of(&call.ctx.principal),
