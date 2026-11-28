@@ -40,8 +40,11 @@ jobs:
         if: matrix.container
         run: |
           dnf install -y --setopt=install_weak_deps=False gcc openssl-devel pkgconf-pkg-config perl git curl
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          # The container's $HOME (/github/home) differs from root's; pin both homes.
+          export RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
+          { echo "RUSTUP_HOME=$RUSTUP_HOME"; echo "CARGO_HOME=$CARGO_HOME"; } >> "$GITHUB_ENV"
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
           update-crypto-policies --show
       - uses: actions/checkout@v7
       - name: Install Linux build dependencies
@@ -53,4 +56,14 @@ jobs:
       - name: OpenSSL version
         if: runner.os == 'Linux'
         run: openssl version || true
+      - name: Windows TLS cipher suites and SChannel reference
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          [System.Environment]::OSVersion.VersionString
+          (Get-TlsCipherSuite) | Where-Object { $_.Name -match '^TLS_(DHE_RSA|RSA)_' } | Select-Object -ExpandProperty Name
+          foreach ($h in 'imap.sina.com', 'imap.sina.cn') {
+            Write-Output "== curl (SChannel) $h"
+            curl.exe -sS -v --max-time 15 "imaps://${h}/" 2>&1 | Select-String -Pattern 'schannel|SSL|TLS|OK|error' | Select-Object -First 12
+          }
       - run: cargo test -p mailx-core live_provider_tls -- --ignored --nocapture
