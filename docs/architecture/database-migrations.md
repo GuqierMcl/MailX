@@ -127,6 +127,10 @@ frontend/src/features/startup/
 
 `0038_action_items.sql` 新建 `message_action_extractions` 与 `message_action_states`，均外键引用 `messages(id)` 并随邮件级联删除，不改已有表与数据。前者按 `message_id` 缓存内置 AI 提取的日程与待办 JSON 及 `source_sha256`、`prompt_version`（随清除摘要缓存一并清理）；后者按 `(message_id, item_key)` 记录本机 `added` / `dismissed` 操作状态（设计见[日程与待办识别](action-items.md)）。
 
+### 删除队列接受 UIDVALIDITY 代际 0
+
+`0039_zero_uid_validity.sql` 重建 `message_deletions`，把 `uid_validity` 的约束从 `> 0` 放宽为 `>= 0`，使返回 UIDVALIDITY `0` 的目录中的邮件也能排队删除。其余列、约束、默认值与两个索引不变，已有待删除记录原样保留。
+
 ## 4. 版本与执行规则
 
 ### 4.1 沿用 v1 记录格式

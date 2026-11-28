@@ -259,6 +259,12 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["message_action_extractions", "message_action_states"],
         sql: include_str!("migrations/0038_action_items.sql"),
     },
+    Migration {
+        version: 39,
+        description: "pending deletions accept a zero UIDVALIDITY generation",
+        required_tables: &["message_deletions"],
+        sql: include_str!("migrations/0039_zero_uid_validity.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {
@@ -576,6 +582,49 @@ mod tests {
     }
 
     #[test]
+    fn zero_uid_validity_migration_keeps_pending_deletions() {
+        let (_directory, mut db) = open_db();
+        let before = MIGRATIONS
+            .iter()
+            .position(|migration| migration.version == 39)
+            .unwrap();
+        apply(&mut db, &MIGRATIONS[..before]).unwrap();
+        // Parents are irrelevant here; only the deletion row's own checks matter.
+        db.pragma_update(None, "foreign_keys", false).unwrap();
+        let insert = |db: &Connection, id: &str, validity: i64| {
+            db.execute(
+                "INSERT INTO message_deletions (message_id, batch_id, account_id, mailbox_source_id,
+                     folder_id, uid_validity, uid, permanent, due_at, created_at)
+                 VALUES (?1, 'b', 'a', 's', 'f', ?2, 7, 0, 'due', 'now')",
+                rusqlite::params![id, validity],
+            )
+        };
+        insert(&db, "kept", 9).unwrap();
+        assert!(insert(&db, "zero-before", 0).is_err());
+
+        apply(&mut db, MIGRATIONS).unwrap();
+        let kept: (i64, i64) = db
+            .query_row(
+                "SELECT uid_validity, uid FROM message_deletions WHERE message_id = 'kept'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(kept, (9, 7));
+        insert(&db, "zero", 0).unwrap();
+        assert!(insert(&db, "negative", -1).is_err());
+        let indexes: i64 = db
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index'
+                 AND name IN ('message_deletions_account_due', 'message_deletions_batch')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(indexes, 2);
+    }
+
+    #[test]
     fn original_v1_schema_bytes_remain_compatible() {
         let (_directory, mut db) = open_db();
         let original = include_str!("schema.sql");
@@ -663,7 +712,7 @@ mod tests {
     fn drafts_migration_applies_to_a_fresh_database() {
         let (_directory, mut db) = open_db();
         apply(&mut db, MIGRATIONS).unwrap();
-        assert_eq!(MIGRATIONS.last().unwrap().version, 38);
+        assert_eq!(MIGRATIONS.last().unwrap().version, 39);
         let columns: Vec<String> = db
             .prepare("SELECT name FROM pragma_table_info('drafts')")
             .unwrap()
@@ -1579,7 +1628,7 @@ mod tests {
         assert_eq!(
             db.pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
                 .unwrap(),
-            38
+            39
         );
     }
 

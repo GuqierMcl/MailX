@@ -349,6 +349,57 @@ async fn initial_incremental_flags_deletion_and_generation_replacement() {
     assert!(service.get_email(&kept_id).is_err());
 }
 
+#[tokio::test]
+async fn zero_uid_validity_syncs_as_an_ordinary_generation() {
+    // Some servers (Sina's category folders) report UIDVALIDITY 0.
+    let fixture = fixture();
+    let mut first = commands(0, &[2, 3]);
+    add_headers(&mut first, &[(2, "First"), (3, "Kept")]);
+    run(&fixture, first, true).await.unwrap();
+    let list = || {
+        fixture
+            .service
+            .lock()
+            .unwrap()
+            .list_emails(&EmailListQuery::default())
+            .unwrap()
+    };
+    let page = list();
+    assert_eq!(page.items.len(), 2);
+    let kept_id = page
+        .items
+        .iter()
+        .find(|mail| mail.subject == "Kept")
+        .unwrap()
+        .id
+        .clone();
+
+    // Still 0: an incremental round keeps the cached messages.
+    let mut second = commands(0, &[3, 4]);
+    add_headers(&mut second, &[(4, "New")]);
+    second.push((
+        "UID FETCH 3 (UID FLAGS)".into(),
+        "* 1 FETCH (UID 3 FLAGS (\\Seen))\r\n{tag} OK flags\r\n".into(),
+    ));
+    run(&fixture, second, true).await.unwrap();
+    let page = list();
+    assert_eq!(page.items.len(), 2);
+    assert!(
+        page.items
+            .iter()
+            .any(|mail| mail.id == kept_id && mail.is_read)
+    );
+
+    // Leaving 0 is a generation change like any other.
+    let mut third = commands(5, &[3]);
+    add_headers(&mut third, &[(3, "Renumbered")]);
+    run(&fixture, third, true).await.unwrap();
+    let page = list();
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].subject, "Renumbered");
+    assert_ne!(page.items[0].id, kept_id);
+}
+
 fn fetched(headers: &[String]) -> (String, String) {
     (
         "UID FETCH ".into(),
