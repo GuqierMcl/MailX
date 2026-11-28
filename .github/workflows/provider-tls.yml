@@ -61,6 +61,8 @@ jobs:
         run: openssl version || true
       - name: Windows TLS cipher suites and SChannel reference
         if: runner.os == 'Windows'
+        # Informational only; the live test below is the verdict.
+        continue-on-error: true
         shell: pwsh
         run: |
           [System.Environment]::OSVersion.VersionString
