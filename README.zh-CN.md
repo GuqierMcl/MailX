@@ -83,7 +83,7 @@
   <img src="frontend/src/assets/providers/netease-126.png" alt="网易 126 邮箱" height="28">
   <img src="frontend/src/assets/providers/netease-yeah.png" alt="网易 Yeah 邮箱" height="28">
   <img src="frontend/src/assets/providers/mail-139.png" alt="139 邮箱" height="28">
-  <img src="frontend/src/assets/providers/sina-mail.jpg" alt="新浪免费邮箱" height="28">
+  <img src="frontend/src/assets/providers/sina-mail.png" alt="新浪免费邮箱" height="28">
   <img src="frontend/src/assets/providers/feishu.png" alt="飞书邮箱" height="28">
   <img src="frontend/src/assets/providers/lark.png" alt="Lark 邮箱" height="28">
 </p>

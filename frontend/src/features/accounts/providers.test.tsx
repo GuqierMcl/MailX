@@ -40,7 +40,7 @@ describe('mail providers', () => {
   })
 
   it.each([
-    [SINA_PROVIDER, /sina-mail\.jpg$/],
+    [SINA_PROVIDER, /sina-mail\.png$/],
     [FEISHU_PROVIDER, /\/feishu\.png$/],
     [LARK_PROVIDER, /\/lark\.png$/],
   ] as const)('uses the local $0.id mark without cropping in the picker and badge', (provider, filename) => {
@@ -140,6 +140,14 @@ describe('mail providers', () => {
   it.each(['139', '139.COM', '中国移动', '移动邮箱', 'China Mobile', 'CMCC'])('finds the personal 139 entry for %s', (query) => {
     expect(filterProviders(PROVIDERS, query)).toEqual([MAIL_139_PROVIDER])
     expect(providerOf('139')).toBe(MAIL_139_PROVIDER)
+  })
+
+  it('shows the Sina launcher icon with rounded corners in the picker and badge only', () => {
+    const { container } = render(<><ProviderIcon provider={SINA_PROVIDER} /><ProviderBadge providerId="sina" /><ProviderIcon provider={MAIL_139_PROVIDER} /></>)
+    const [icon, badge, other] = [...container.querySelectorAll('img')]
+    expect(icon).toHaveClass('rounded-[22.5%]')
+    expect(badge).toHaveClass('rounded-[22.5%]')
+    expect(other).not.toHaveClass('rounded-[22.5%]')
   })
 
   it('uses reviewed TLS endpoints and a bundled 139 mark', () => {

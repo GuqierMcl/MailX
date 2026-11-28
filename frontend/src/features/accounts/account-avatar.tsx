@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { accountInitial, accountTextColor } from './account-color'
-import { providerOf } from './providers'
+import { logoShapeClass, providerOf } from './providers'
 
 /**
  * A bundled provider mark when enabled, otherwise the account's initial.
@@ -27,7 +27,7 @@ export function AccountAvatar({ displayName, color, providerId, useProviderIcon 
         className,
       )}
     >
-      {logo ? <img src={logo} alt="" aria-hidden className="size-full object-contain" /> : accountInitial(displayName)}
+      {logo ? <img src={logo} alt="" aria-hidden className={cn('size-full object-contain', logoShapeClass(provider))} /> : accountInitial(displayName)}
     </span>
   )
 }

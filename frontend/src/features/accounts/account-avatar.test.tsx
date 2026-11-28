@@ -2,7 +2,7 @@ import { render } from '@/test/render'
 import { describe, expect, it } from 'vitest'
 import { AccountAvatar } from './account-avatar'
 import { ACCOUNT_COLORS, accountTextColor } from './account-color'
-import { FEISHU_PROVIDER, ICLOUD_PROVIDER, LARK_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
+import { FEISHU_PROVIDER, ICLOUD_PROVIDER, SINA_PROVIDER, LARK_PROVIDER, MAIL_139_PROVIDER, NETEASE_126_PROVIDER, NETEASE_163_PROVIDER, NETEASE_YEAH_PROVIDER, QQ_PROVIDER } from './providers'
 
 describe('account avatar', () => {
   it('defaults a known provider to its bundled logo with the account color as a thin border and requested size', () => {
@@ -18,6 +18,17 @@ describe('account avatar', () => {
     expect(avatar).not.toHaveClass('bg-background')
     expect(avatar).toHaveClass('size-[18px]')
     expect(avatar).not.toHaveTextContent('工')
+  })
+
+  it('rounds only official launcher icons, which are published as full-bleed squares', () => {
+    const { container } = render(<>
+      <AccountAvatar displayName="新浪" color={null} providerId="sina" />
+      <AccountAvatar displayName="QQ" color={null} providerId="qq" />
+    </>)
+    const [sina, qq] = [...container.querySelectorAll('[data-slot="account-avatar"] img')]
+    expect(sina).toHaveAttribute('src', SINA_PROVIDER.logo)
+    expect(sina).toHaveClass('rounded-[22.5%]')
+    expect(qq).not.toHaveClass('rounded-[22.5%]')
   })
 
   it('uses the original colored initial when the account disables its provider icon', () => {

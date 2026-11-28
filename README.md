@@ -83,7 +83,7 @@ These services have been tested for compatibility and for sending and receiving,
   <img src="frontend/src/assets/providers/netease-126.png" alt="NetEase 126 Mail" height="28">
   <img src="frontend/src/assets/providers/netease-yeah.png" alt="NetEase Yeah Mail" height="28">
   <img src="frontend/src/assets/providers/mail-139.png" alt="139 Mail" height="28">
-  <img src="frontend/src/assets/providers/sina-mail.jpg" alt="Sina Free Mail" height="28">
+  <img src="frontend/src/assets/providers/sina-mail.png" alt="Sina Free Mail" height="28">
   <img src="frontend/src/assets/providers/feishu.png" alt="Feishu Mail" height="28">
   <img src="frontend/src/assets/providers/lark.png" alt="Lark Mail" height="28">
 </p>
