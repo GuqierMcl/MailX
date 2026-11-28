@@ -47,6 +47,7 @@ const READ_TOOLS: &[&str] = &[
     "mail_contacts",
     "draft_list",
     "draft_read",
+    "signatures_list",
     "outbox_read",
     "mail_help",
 ];

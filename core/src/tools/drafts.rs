@@ -152,18 +152,6 @@ pub(super) fn register(tools: &mut Tools) {
     .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
     tools.register(spec, draft_create);
 
-    let list_sigs = ToolSpec::new::<ListSignaturesInput, ListSignaturesOutput>(
-        "signatures_list",
-        "List email signatures",
-        "List the user's saved email signatures and which signature each permitted account uses by default. \
-         Pass a signatureId or includeSignature: false to draft_create / draft_reply to override the default.",
-        Annotations::READ_ONLY,
-    )
-    .requires(&[Action::MailRead])
-    .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
-    .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
-    tools.register(list_sigs, signatures_list);
-
     let reply = ToolSpec::new::<CreateReplyDraftInput, CreateReplyDraftOutput>(
         "draft_reply",
         "Create a reply, reply-all or forward draft",
@@ -236,6 +224,18 @@ pub(super) fn register(tools: &mut Tools) {
     .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
     .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
     tools.register(delete, draft_delete);
+
+    let list_sigs = ToolSpec::new::<ListSignaturesInput, ListSignaturesOutput>(
+        "signatures_list",
+        "List email signatures",
+        "List the user's saved email signatures and which signature each permitted account uses by default. \
+         Pass a signatureId or includeSignature: false to draft_create / draft_reply to override the default.",
+        Annotations::READ_ONLY,
+    )
+    .requires(&[Action::MailRead])
+    .visible_to(Audience::BuiltinAgent, AudiencePolicy::DEFAULT)
+    .visible_to(Audience::Mcp, AudiencePolicy::DEFAULT);
+    tools.register(list_sigs, signatures_list);
 }
 
 fn origin_of(principal: &Principal) -> DraftOrigin {
