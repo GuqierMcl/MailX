@@ -1021,6 +1021,73 @@ async fn email_summary_turn(inner: &Arc<Inner>, run_id: &str, job: EmailSummaryJ
     Outcome::Finished(FinishedReason::Stop)
 }
 
+pub(crate) struct ActionItemsJob {
+    pub source: super::action_items::Source,
+    pub fresh: bool,
+}
+
+const ACTION_ITEMS_OUTPUT_CAP: u32 = 4096;
+
+pub(crate) async fn extract_action_items(inner: Arc<Inner>, run_id: String, job: ActionItemsJob) {
+    let _end = EndGuard {
+        inner: inner.clone(),
+        run_id: run_id.clone(),
+    };
+    let outcome = extract_action_items_turn(&inner, &run_id, job).await;
+    report(&inner, &run_id, outcome);
+}
+
+async fn extract_action_items_turn(
+    inner: &Arc<Inner>,
+    run_id: &str,
+    job: ActionItemsJob,
+) -> Outcome {
+    let ready = match inner.gate().await {
+        Ok(Gate::Ready(ready)) => ready,
+        Ok(Gate::NeedsConsent) => return Outcome::NeedsConsent,
+        Err(error) => return Outcome::Failed(error.code),
+    };
+    let system = prompt::action_items_system(ready.locale, &job.source.time_zone);
+    let messages = [ChatMessage::User(job.source.input.clone())];
+    let max_output = ready
+        .target
+        .output_length
+        .map_or(ACTION_ITEMS_OUTPUT_CAP, |n| n.min(ACTION_ITEMS_OUTPUT_CAP));
+    let turn = match model_turn(
+        inner,
+        run_id,
+        &ready,
+        &system,
+        &messages,
+        &[],
+        Some(max_output),
+    )
+    .await
+    {
+        Ok(turn) => turn,
+        Err(code) => return Outcome::Failed(code),
+    };
+    if turn.reason == Some(FinishReason::Length) {
+        return Outcome::Finished(FinishedReason::Length);
+    }
+    let items = match super::action_items::parse_model_output(&turn.text, &job.source.allowed_links)
+    {
+        Ok(items) => items,
+        Err(error) => return Outcome::Failed(error.code),
+    };
+    let ActionItemsJob { source, fresh } = job;
+    let _ = inner
+        .with_store(move |service| {
+            if fresh {
+                let _ = service.action_state_clear_ai_dismissed(&source.message_id);
+            }
+            service.action_extraction_put(&source.key(), &items)?;
+            Ok(())
+        })
+        .await;
+    Outcome::Finished(FinishedReason::Stop)
+}
+
 /// Output cap of writing help; covers a thinking model's reasoning too.
 const COMPOSE_OUTPUT_CAP: u32 = 8192;
 

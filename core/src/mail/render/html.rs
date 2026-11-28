@@ -8,6 +8,7 @@ use super::{css, images};
 
 const CID_SLOT: &str = "data-mailx-cid";
 const LINK_SLOT: &str = "data-mailx-link";
+const ACTION_SLOT: &str = "data-mailx-action";
 const REMOTE_SLOT: &str = "data-mailx-remote";
 const DATA_SLOT: &str = "data-mailx-data";
 const BODY_MARK: &str = "data-mailx-body";
@@ -25,6 +26,7 @@ pub(crate) struct Sanitized {
 pub enum ResourceBinding<'a> {
     Part { content_id: &'a str },
     Link { index: usize },
+    Action { index: usize },
     Remote { index: usize },
 }
 
@@ -83,11 +85,17 @@ fn bind(
             "img" => element
                 .attr(CID_SLOT)
                 .map(str::to_owned)
-                .map(|cid| (cid, true)),
+                .map(|cid| (cid, SlotKind::Part)),
             "a" => element
                 .attr(LINK_SLOT)
                 .map(str::to_owned)
-                .map(|index| (index, false)),
+                .map(|index| (index, SlotKind::Link))
+                .or_else(|| {
+                    element
+                        .attr(ACTION_SLOT)
+                        .map(str::to_owned)
+                        .map(|index| (index, SlotKind::Action))
+                }),
             _ => None,
         };
         element
@@ -98,8 +106,11 @@ fn bind(
                 .attrs
                 .retain(|(name, _)| name.local.as_ref() != "href");
         }
-        let Some((value, part)) = slot else { continue };
-        if numbered_links && !part {
+        let Some((value, kind)) = slot else { continue };
+        if numbered_links && kind == SlotKind::Action {
+            continue;
+        }
+        if numbered_links && kind == SlotKind::Link {
             if let Some(number) = value
                 .parse::<usize>()
                 .ok()
@@ -111,19 +122,30 @@ fn bind(
             }
             continue;
         }
-        let resolved = if part {
-            resolve(ResourceBinding::Part { content_id: &value })
-        } else {
-            value
+        let resolved = match kind {
+            SlotKind::Part => resolve(ResourceBinding::Part { content_id: &value }),
+            SlotKind::Link => value
                 .parse::<usize>()
                 .ok()
-                .and_then(|index| resolve(ResourceBinding::Link { index }))
+                .and_then(|index| resolve(ResourceBinding::Link { index })),
+            SlotKind::Action => value
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| resolve(ResourceBinding::Action { index })),
         };
-        if let Some(url) = resolved.filter(|url| valid_resource_url(url, part)) {
-            set_attr(element, if part { "src" } else { "href" }, &url);
+        let is_part = kind == SlotKind::Part;
+        if let Some(url) = resolved.filter(|url| valid_resource_url(url, is_part)) {
+            set_attr(element, if is_part { "src" } else { "href" }, &url);
         }
     }
     document.root_element().inner_html()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SlotKind {
+    Part,
+    Link,
+    Action,
 }
 
 fn valid_resource_url(value: &str, part: bool) -> bool {
@@ -136,15 +158,11 @@ fn valid_resource_url(value: &str, part: bool) -> bool {
         && url.username().is_empty()
         && url.password().is_none()
         && url.port().is_none()
-        && url
-            .path()
-            .starts_with(if part && url.path().starts_with("/remote/") {
-                "/remote/"
-            } else if part {
-                "/part/"
-            } else {
-                "/link/"
-            })
+        && if part {
+            url.path().starts_with("/remote/") || url.path().starts_with("/part/")
+        } else {
+            url.path().starts_with("/link/") || url.path().starts_with("/action/")
+        }
 }
 
 pub fn is_allowed_link(value: &str) -> bool {

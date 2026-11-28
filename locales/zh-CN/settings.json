@@ -514,5 +514,8 @@
     "days90": "最近 90 天",
     "year1": "最近 1 年",
     "all": "全部邮件"
-  }
+  },
+  "actionItemsDetection": "日程与待办",
+  "detectActionItems": "在邮件正文中高亮日期和待办",
+  "detectActionItemsHint": "在本机识别邮件正文中的日期时间与明确待办短语，点击后可编辑并添加到系统日历或复制为待办。"
 }

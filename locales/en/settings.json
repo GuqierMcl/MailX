@@ -519,5 +519,8 @@
     "days90": "Last 90 days",
     "year1": "Last 1 year",
     "all": "All mail"
-  }
+  },
+  "actionItemsDetection": "Events & tasks",
+  "detectActionItems": "Highlight dates and tasks in message bodies",
+  "detectActionItemsHint": "Locally detects dates, times, and clear action phrases in emails so you can click to edit and add them to your calendar or copy as tasks."
 }

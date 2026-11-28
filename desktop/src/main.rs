@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod action_items;
 mod app_menu;
 mod assistant;
 mod attachment_save;
@@ -11,6 +12,7 @@ mod compose;
 mod compose_assist;
 mod compose_files;
 mod diagnostics;
+mod eventkit;
 mod lifecycle;
 mod locale;
 mod mcp;
@@ -116,6 +118,7 @@ fn main() {
                 app.handle().exit(0);
                 return Ok(());
             }
+            action_items::cleanup_stale_ics_temp_files(app.handle());
             let storage = app
                 .path()
                 .app_data_dir()
@@ -417,6 +420,16 @@ fn main() {
             assistant::assistant_clear_conversations,
             assistant::assistant_email_summary,
             assistant::assistant_clear_email_summaries,
+            action_items::assistant_email_action_items,
+            action_items::mail_get_calendar_items,
+            action_items::mail_list_document_actions,
+            action_items::mail_set_action_item_status,
+            action_items::mail_open_action_item_calendar,
+            action_items::mail_save_action_item_ics,
+            action_items::mail_copy_action_item_text,
+            action_items::mail_action_item_capabilities,
+            action_items::mail_add_action_item_native,
+            action_items::mail_open_calendar_privacy_settings,
             compose_assist::compose_assist_state,
             compose_assist::compose_assist_grant_consent,
             compose_assist::compose_assist_start,

@@ -228,7 +228,7 @@ describe('settings dialog', () => {
 
   it('explains a settings file that had to be moved aside', async () => {
     const client = testClient()
-    vi.mocked(client.getSettings).mockResolvedValue({ effectiveLocale: 'zh-CN', revision: 0, settings: { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false, syncWindow: 'days30' }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false } }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: false, recovered: true })
+    vi.mocked(client.getSettings).mockResolvedValue({ effectiveLocale: 'zh-CN', revision: 0, settings: { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: false, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false, syncWindow: 'days30', detectActionItems: true }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false }, actionItems: { autoExtract: false, promptDismissed: false } }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: false, recovered: true })
     renderDialog(client, { section: 'appearance' })
     expect(await screen.findByText(/settings\.json\.bak/)).toBeInTheDocument()
   })
@@ -241,7 +241,7 @@ describe('settings dialog', () => {
     await userEvent.click(select)
     await userEvent.click(await screen.findByRole('option', { name: '最近 90 天' }))
     await waitFor(() => expect(client.updateSettings).toHaveBeenLastCalledWith({
-      mail: { trashVerificationMailAfterCopy: false, syncWindow: 'days90' },
+      mail: { trashVerificationMailAfterCopy: false, syncWindow: 'days90', detectActionItems: true },
     }))
   })
 })

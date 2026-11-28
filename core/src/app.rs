@@ -40,6 +40,7 @@ use crate::sync::bodies::BodyManager;
 use crate::sync::manager::{AccountSyncState, SyncManager};
 use crate::sync::previews::PreviewManager;
 
+mod action_items;
 mod ai;
 mod attachments;
 mod avatars;

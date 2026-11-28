@@ -494,6 +494,10 @@ fn binding_handles_both_platforms_without_rewriting_attacker_text_or_slots() {
                 calls.push("part");
                 Some(format!("{origin}/part/owner/{content_id}?binding=opaque"))
             }
+            ResourceBinding::Action { index } => {
+                calls.push("action");
+                Some(format!("{origin}/action/owner/{index}?binding=opaque"))
+            }
         });
         assert_eq!(calls, ["link", "part"]);
         assert!(bound.contains(&format!("href=\"{origin}/link/owner/0?binding=opaque\"")));
@@ -522,7 +526,7 @@ fn numbered_binding_keeps_order_and_cids_without_creating_navigable_anchors() {
             ResourceBinding::Part { content_id } => Some(format!(
                 "mailx-body://localhost/part/owner/{content_id}?token=opaque"
             )),
-            ResourceBinding::Link { .. } => {
+            ResourceBinding::Link { .. } | ResourceBinding::Action { .. } => {
                 panic!("numbered links must never resolve navigable URLs")
             }
         });

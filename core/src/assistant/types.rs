@@ -105,6 +105,17 @@ pub enum RunKind {
     /// user's own words. The answer is Markdown for the editor to preview;
     /// nothing is written to the draft.
     ComposeAssist { draft_id: String, task: ComposeTask },
+    /// Extract calendar events and tasks from one email
+    /// (`docs/architecture/action-items.md` §2.3).
+    ExtractActionItems {
+        email_id: String,
+        #[serde(default)]
+        #[ts(optional)]
+        time_zone: Option<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        fresh: Option<bool>,
+    },
 }
 
 /// Longest text a compose task takes, in characters.
@@ -190,6 +201,14 @@ pub struct CachedEmailSummary {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedEmailActionItems {
+    pub items: Vec<crate::mail::action_items::DetectedActionItem>,
+    /// RFC 3339 UTC with milliseconds.
+    pub updated_at: String,
+}
+
 /// What a chat message is about: the mail or draft on screen. Only ids travel;
 /// the core reads the content through the tool layer, so the account scope
 /// applies and the interface cannot put text into the prompt.
@@ -253,6 +272,7 @@ pub enum RunKindTag {
     Chat,
     EmailSummary,
     ComposeAssist,
+    ExtractActionItems,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]

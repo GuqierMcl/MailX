@@ -4,6 +4,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+pub mod action_detect;
+pub mod action_items;
+pub mod calendar;
 pub(crate) mod compatibility;
 pub mod filename;
 pub mod preview;

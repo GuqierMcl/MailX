@@ -13,6 +13,7 @@
 | [数据库迁移与启动](database-migrations.md) | Implemented：版本化迁移、v1 兼容和业务启动准入 |
 | [同步与发信](mail-sync.md) | 账号生命周期、增量同步、断网恢复与防重复发送 |
 | [验证码识别](verification-codes.md) | core 本地规则识别、歧义结果、MIME 预算、开发探测与原生通知复制；平台交互待验 |
+| [日程与待办识别](action-items.md) | Proposed：L0 .ics / L1 本地正文高亮 / L2 内置 AI 提取、统一编辑确认、本机状态持久化与分阶段系统日历/待办写入 |
 | [邮箱服务商兼容层](provider-compatibility.md) | 主干接口与服务商模块边界、服务商识别、已发送副本身份与对账 |
 | [写信与发送](sending.md) | 富文本草稿、写信窗口、附件与内嵌图片、SMTP 队列与已发送副本 |
 | [存储与搜索](storage-search.md) | 数据身份、表结构、缓存、全文索引和一致性备份 |

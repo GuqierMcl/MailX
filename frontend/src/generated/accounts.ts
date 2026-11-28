@@ -833,7 +833,11 @@ trashVerificationMailAfterCopy: boolean,
 /**
  * Global default synchronization history depth; individual accounts may override.
  */
-syncWindow: SyncWindow, };
+syncWindow: SyncWindow,
+/**
+ * Highlight detected dates and high-signal action phrases in the reader body.
+ */
+detectActionItems: boolean, };
 
 export type AppSettings = { general: GeneralSettings, mail: MailSettings, appearance: AppearanceSettings, security: SecuritySettings, layout: LayoutSettings, notifications: NotificationSettings, badge: BadgeSettings, compose: ComposeSettings, mcp: McpSettings, translation: TranslationSettings, assistant: AssistantSettings, now: NowSettings, };
 
@@ -1339,6 +1343,16 @@ language: SummaryLanguage,
  */
 collapsed: boolean, };
 
+export type ActionItemSettings = {
+/**
+ * Automatically extract events and tasks when L1 local rules hit. Off by default.
+ */
+autoExtract: boolean,
+/**
+ * User chose "Do not ask again" on the first-hit guidance banner.
+ */
+promptDismissed: boolean, };
+
 export type AssistantSettings = {
 /**
  * Off: no run starts, whatever asks for it.
@@ -1383,7 +1397,55 @@ readHtml: boolean,
 /**
  * Email summaries in the reader.
  */
-summary: EmailSummarySettings, };
+summary: EmailSummarySettings,
+/**
+ * Calendar event and task extraction in the reader.
+ */
+actionItems: ActionItemSettings, };
+
+export type ActionItemKind = "event" | "task";
+
+export type ActionItemSource = "ics" | "rule" | "ai";
+
+export type ActionItemStatus = "pending" | "added" | "dismissed";
+
+export type DetectedActionItem = {
+/**
+ * Stable key used for persistence (`added`/`dismissed`) and deterministic ICS UIDs.
+ */
+id: string, kind: ActionItemKind, source: ActionItemSource, status: ActionItemStatus, title: string,
+/**
+ * RFC 3339 timestamp with offset, or `YYYY-MM-DD` when `all_day` is true.
+ */
+startAt: string | null,
+/**
+ * RFC 3339 timestamp with offset, or `YYYY-MM-DD` when `all_day` is true.
+ */
+endAt: string | null, allDay: boolean,
+/**
+ * Validated RFC 5545 RRULE value (L0 only).
+ */
+rrule: string | null,
+/**
+ * True when an L0 invitation carries `METHOD:CANCEL`.
+ */
+cancelled: boolean, location: string | null,
+/**
+ * Validated `http` or `https` URL.
+ */
+url: string | null, notes: string | null,
+/**
+ * Short excerpt from the email body for user verification.
+ */
+matchedText: string | null, };
+
+export type ActionItemExportInput = { emailId: string, itemId: string, kind: ActionItemKind, title: string, startAt: string | null, endAt: string | null, allDay: boolean, rrule: string | null, location: string | null, url: string | null, notes: string | null, };
+
+export type CachedEmailActionItems = { items: Array<DetectedActionItem>,
+/**
+ * RFC 3339 UTC with milliseconds.
+ */
+updatedAt: string, };
 
 export type StartRun = { kind: RunKind, };
 
@@ -1428,7 +1490,7 @@ edit?: number, } | { "type": "emailSummary", emailId: string, style?: SummarySty
  * Skip the cached summary and ask the model again; the new one
  * replaces it.
  */
-fresh?: boolean, } | { "type": "composeAssist", draftId: string, task: ComposeTask, };
+fresh?: boolean, } | { "type": "composeAssist", draftId: string, task: ComposeTask, } | { "type": "extractActionItems", emailId: string, timeZone?: string, fresh?: boolean, };
 
 export type ChatContext = { "type": "email", emailId: string, } | { "type": "emails", emailIds: Array<string>, } | { "type": "draft", draftId: string, };
 
@@ -1452,7 +1514,7 @@ service: string, };
 
 export type Occasion = "newYear" | "springFestival" | "lantern" | "dragonBoat" | "qixi" | "midAutumn" | "xiaohan" | "dahan" | "lichun" | "yushui" | "jingzhe" | "chunfen" | "qingming" | "guyu" | "lixia" | "xiaoman" | "mangzhong" | "xiazhi" | "xiaoshu" | "dashu" | "liqiu" | "chushu" | "bailu" | "qiufen" | "hanlu" | "shuangjiang" | "lidong" | "xiaoxue" | "daxue" | "dongzhi";
 
-export type RunKindTag = "nowSummary" | "chat" | "emailSummary" | "composeAssist";
+export type RunKindTag = "nowSummary" | "chat" | "emailSummary" | "composeAssist" | "extractActionItems";
 
 export type CachedEmailSummary = { style: SummaryStyle,
 /**

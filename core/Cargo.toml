@@ -14,6 +14,7 @@ async-imap = { version = "0.12", default-features = false, features = ["runtime-
 base64 = "0.22"
 oauth2 = { version = "5", default-features = false, features = ["timing-resistant-secret-traits"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
 cssparser = "0.37"
 ego-tree = "0.11"
 fs2 = "0.4"

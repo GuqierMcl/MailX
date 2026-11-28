@@ -1,3 +1,4 @@
+mod action_items;
 mod archives;
 mod assistant_chats;
 mod attachments;

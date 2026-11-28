@@ -21,7 +21,7 @@
 - 自建 Exchange：阅读[Exchange EWS 接入](architecture/exchange-ews.md)，了解独立账号入口、自动发现的目标授权、凭据信任与共享收发边界。
 - 实现邮箱：阅读[同步与发信](architecture/mail-sync.md)、[写信与发送设计](architecture/sending.md)、[存储与搜索](architecture/storage-search.md)、[网络与安全](architecture/network-security.md)。
 - 适配服务商差异：阅读[邮箱服务商兼容层](architecture/provider-compatibility.md)，主干提供中立接口，具体服务商规则在独立模块中实现。
-- 实现 AI / Agent：阅读[工具层与调用入口](architecture/agent-tools.md)、[AI Runtime](ai-runtime/README.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。
+- 实现 AI / Agent：阅读[工具层与调用入口](architecture/agent-tools.md)、[AI Runtime](ai-runtime/README.md)、[日程与待办识别](architecture/action-items.md)、[MCP 契约](contracts/mcp.md)及[应用契约](contracts/app-api.md)。
 - 查阅调研与参考资料：阅读 [reference/](reference/README.md)，具体文档和状态由该目录入口维护。
 - 审查选型：阅读 [ADR](adr/README.md)。
 

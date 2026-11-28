@@ -34,6 +34,13 @@ export function MailEnhancementsPane({ client }: { client: MailxClient }) {
         </Select>
       </SettingsRow>
     </SettingsGroup>
+    <SettingsGroup title={t('actionItemsDetection')}>
+      <SettingsRow label={t('detectActionItems')} description={t('detectActionItemsHint')} htmlFor="mail.detectActionItems">
+        <Switch id="mail.detectActionItems" checked={settings.data?.settings.mail.detectActionItems ?? true}
+          disabled={!settings.data || update.isPending}
+          onCheckedChange={(detectActionItems) => update.mutate({ detectActionItems })} />
+      </SettingsRow>
+    </SettingsGroup>
     <SettingsGroup title={t('verificationCodes')}>
       <SettingsRow label={t('trashVerificationMailAfterCopy')} description={t('trashVerificationMailAfterCopyHint')} htmlFor="mail.trashVerificationMailAfterCopy">
         <Switch id="mail.trashVerificationMailAfterCopy" checked={settings.data?.settings.mail.trashVerificationMailAfterCopy ?? false}

@@ -60,13 +60,15 @@ export const DEFAULT_TRANSLATION: TranslationSettings = {
 }
 export const useUpdateTranslation = (client: MailxClient) => useSettingsSection(client, 'translation', DEFAULT_TRANSLATION)
 export const DEFAULT_EMAIL_SUMMARY: EmailSummarySettings = { auto: false, senders: [], style: 'brief', language: { mode: 'interface' }, collapsed: false }
+export const DEFAULT_ACTION_ITEMS = { autoExtract: false, promptDismissed: false }
 export const DEFAULT_ASSISTANT: AssistantSettings = {
   enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct', aiDrafts: 'direct', send: 'confirm', instructions: '', saveHistory: true, readHtml: false,
   summary: DEFAULT_EMAIL_SUMMARY,
+  actionItems: DEFAULT_ACTION_ITEMS,
 }
 /** The core ignores `consented` in a write; consent changes only through the assistant's own commands. */
 export const useUpdateAssistant = (client: MailxClient) => useSettingsSection(client, 'assistant', DEFAULT_ASSISTANT)
-export const useUpdateMailSettings = (client: MailxClient) => useSettingsSection(client, 'mail', { trashVerificationMailAfterCopy: false, syncWindow: 'days30' }, false)
+export const useUpdateMailSettings = (client: MailxClient) => useSettingsSection(client, 'mail', { trashVerificationMailAfterCopy: false, syncWindow: 'days30', detectActionItems: true }, false)
 export const useUpdateGeneral = (client: MailxClient) => useSettingsSection(client, 'general', { language: 'system', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'now' }, false)
 
 /** How long layout changes wait for a quieter moment before being written. */

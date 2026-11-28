@@ -14,6 +14,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
+- Detect calendar events and action items from `.ics` invitations, inline body dates/action phrases, and optional built-in AI extraction, with a unified edit-and-confirm dialog supporting native Apple Calendar & Reminders direct write on macOS and `.ics` / clipboard fallback across platforms. / 新增邮件日程与待办识别（覆盖 `.ics` 邀请、正文日期与强待办短语高亮及可选内置 AI 提取），提供统一编辑确认弹层，支持 macOS 原生直写 Apple 日历与提醒事项，并在其他平台或权限拒绝时平滑回退 `.ics` 唤起与复制待办文本。
 - Add configurable history sync ranges (global default and per-account override across 30 days, 90 days, 1 year, or all mail), on-demand "Load older" folder backfill, and a quiet title-bar Sync tasks control across IMAP and Exchange (EWS). / 新增可配置的邮件历史同步范围（支持全局默认与单账号覆盖 30 天、90 天、1 年或全部邮件）、文件夹底部「加载更早」按需回填以及标题栏「同步任务」控制入口，覆盖 IMAP 与 Exchange（EWS）。
 - Add an optional "Release UI memory in background" setting (off by default) that releases the main window interface when closing to the background or starting silently, keeping only the mail core running. / 新增可选的「后台运行时释放界面内存」设置（默认关闭），关闭主窗口进入后台或静默启动时释放界面资源，仅保留收信与同步内核。
 - Add native ARM64 Linux downloads in AppImage, DEB and RPM formats. / 新增 ARM64 Linux 原生安装包，提供 AppImage、DEB 和 RPM 格式。 ([#198](https://github.com/GuqierMcl/MailX/pull/198))

@@ -161,7 +161,7 @@ async fn draft_images_and_links_are_bound_to_one_source_and_current_revision() {
     let (_, event) = protocol
         .serve(&core, request(Method::GET, &link), APP_ORIGIN)
         .await;
-    let event = event.unwrap();
+    let event = event.and_then(ProtocolEvent::into_link).unwrap();
     assert_eq!(event.url, "https://example.invalid/draft");
     let edited = update(
         &core,
@@ -197,7 +197,7 @@ async fn draft_link_confirmations_are_one_shot_and_release_is_per_reading() {
     let (_, event) = protocol
         .serve(&core, request(Method::GET, &link), APP_ORIGIN)
         .await;
-    let event = event.unwrap();
+    let event = event.and_then(ProtocolEvent::into_link).unwrap();
     assert_eq!(
         protocol
             .confirm_link(

@@ -48,6 +48,9 @@ import { TranslationToolbarGroup } from './translation/translation-toolbar'
 import type { EmailTranslation } from './translation/use-email-translation'
 import { SummaryCard, SummaryToolbarButton } from './summary/summary-panel'
 import type { EmailSummaryState } from './summary/use-email-summary'
+import { ActionItemDialog } from './action-items/action-item-dialog'
+import { ActionItemsBar, ActionItemsPromptBanner } from './action-items/action-items-bar'
+import { useEmailActionItems, type EmailActionItemsState } from './action-items/use-email-action-items'
 import { VerificationCodeBar } from './verification-code-bar'
 import type { VerificationCodes } from './use-verification-codes'
 import { openIntent, type OpenIntent } from '@/features/outbox/use-compose'
@@ -111,6 +114,7 @@ type EmailViewProps = {
 export function EmailView({ email, providerId, loading, error, client, downloading, onDownload, onFlag, onClose, backButton, onRespond, onRemoveLocal, onDelete, onArchive, hidden = false, frame, translation, verification, aiSummary, onAskAi, onOpenAiSettings }: EmailViewProps) {
   useTranslation()
   const showSkeleton = useDelayedFlag(loading)
+  const actionItems = useEmailActionItems(client, email, aiSummary?.phase === 'working')
   // A message is open while it is loading, shown, or failed to open. Only with
   // nothing open does the reader have no actions to offer.
   const open = Boolean(email) || loading || Boolean(error)
@@ -131,7 +135,7 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
       </EmptyHeader>
     </Empty>
   ) : email ? (
-    <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} translation={translation} verification={verification} aiSummary={aiSummary} onAskAi={onAskAi} onOpenAiSettings={onOpenAiSettings} />
+    <EmailContent email={email} providerId={providerId} client={client} downloading={downloading} onDownload={onDownload} translation={translation} verification={verification} aiSummary={aiSummary} actionItems={actionItems} onAskAi={onAskAi} onOpenAiSettings={onOpenAiSettings} />
   ) : (
     <Empty>
       <EmptyHeader>
@@ -145,8 +149,17 @@ export function EmailView({ email, providerId, loading, error, client, downloadi
   )
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} backButton={backButton} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} onArchive={onArchive} translation={translation} aiSummary={aiSummary} />}
+      {open && <Toolbar summary={email?.summary ?? null} onFlag={onFlag} onClose={onClose} backButton={backButton} onRespond={onRespond} onRemoveLocal={onRemoveLocal} onDelete={onDelete} onArchive={onArchive} translation={translation} aiSummary={aiSummary} actionItems={actionItems} />}
       {frame ? frame(content) : content}
+      {email && (
+        <ActionItemDialog
+          client={client}
+          emailSummary={email.summary}
+          item={actionItems.editingItem}
+          onClose={actionItems.closeDialog}
+          onAdded={(itemId) => { void actionItems.markStatus(itemId, 'added') }}
+        />
+      )}
     </div>
   )
 }
@@ -158,7 +171,7 @@ const RESPOND_ACTIONS = [
   ['forward', 'mail:forward', Forward01Icon],
 ] as const satisfies readonly (readonly ['reply' | 'replyAll' | 'forward', string, IconSvgElement])[]
 
-function Toolbar({ summary, onFlag, onClose, backButton, onRespond, onRemoveLocal, onDelete, onArchive, translation, aiSummary }: { translation?: EmailTranslation; aiSummary?: EmailSummaryState; summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; backButton?: EmailViewProps['backButton']; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete']; onArchive?: EmailViewProps['onArchive'] }) {
+function Toolbar({ summary, onFlag, onClose, backButton, onRespond, onRemoveLocal, onDelete, onArchive, translation, aiSummary, actionItems }: { translation?: EmailTranslation; aiSummary?: EmailSummaryState; actionItems?: EmailActionItemsState; summary: EmailSummary | null; onFlag: EmailViewProps['onFlag']; onClose: () => void; backButton?: EmailViewProps['backButton']; onRespond: EmailViewProps['onRespond']; onRemoveLocal?: EmailViewProps['onRemoveLocal']; onDelete?: EmailViewProps['onDelete']; onArchive?: EmailViewProps['onArchive'] }) {
   useTranslation()
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   // A local sent copy has no server message: it cannot be read-flagged, starred, archived or deleted remotely.
@@ -224,7 +237,7 @@ function Toolbar({ summary, onFlag, onClose, backButton, onRespond, onRemoveLoca
           <HugeiconsIcon icon={StarIcon} fill={summary?.isStarred ? 'currentColor' : 'none'} />
         </IconButton>
       </div>}
-      {aiSummary?.available && summary && <SummaryToolbarButton summary={aiSummary} senderName={displayName(summary.from)} />}
+      {aiSummary?.available && summary && <SummaryToolbarButton summary={aiSummary} actionItems={actionItems} senderName={displayName(summary.from)} />}
       {translation?.available && !localOnly && <TranslationToolbarGroup translation={translation} />}
       {!backButton && <IconButton className="ml-auto" label={t('mail:closeMessage')} tip={t('mail:closeMessageShortcut')} onClick={onClose}>
         <HugeiconsIcon icon={Cancel01Icon} />
@@ -244,9 +257,9 @@ function addressList(addresses: MailAddress[]) {
   return addresses.map((address) => (address.name ? `${address.name} <${address.address}>` : address.address)).join('，')
 }
 
-type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload' | 'providerId' | 'translation' | 'verification' | 'aiSummary' | 'onAskAi' | 'onOpenAiSettings'> & { email: EmailDetail }
+type ContentProps = Pick<EmailViewProps, 'client' | 'downloading' | 'onDownload' | 'providerId' | 'translation' | 'verification' | 'aiSummary' | 'onAskAi' | 'onOpenAiSettings'> & { email: EmailDetail; actionItems: EmailActionItemsState }
 
-function EmailContent({ email, aiSummary, onAskAi, onOpenAiSettings, ...props }: ContentProps) {
+function EmailContent({ email, aiSummary, actionItems, onAskAi, onOpenAiSettings, ...props }: ContentProps) {
   useTranslation()
   const [imageDetailsSlot, setImageDetailsSlot] = useState<HTMLSpanElement | null>(null)
   const { summary, attachments } = email
@@ -275,8 +288,10 @@ function EmailContent({ email, aiSummary, onAskAi, onOpenAiSettings, ...props }:
       </ScrollArea>
         <div className="flex min-h-0 flex-1 flex-col gap-2 p-4 text-sm">
           {aiSummary && <SummaryCard summary={aiSummary} client={props.client} onAsk={onAskAi} onOpenSettings={onOpenAiSettings ?? (() => undefined)} />}
+          <ActionItemsPromptBanner state={actionItems} />
+          <ActionItemsBar state={actionItems} client={props.client} suppressGlow={aiSummary?.phase === 'working'} onOpenSettings={onOpenAiSettings ?? (() => undefined)} />
           <VerificationCodeBar emailId={summary.id} verification={summary.localOnly ? undefined : props.verification} />
-          <ImageDetailsSlot.Provider value={imageDetailsSlot}><Body email={email} {...props} /></ImageDetailsSlot.Provider>
+          <ImageDetailsSlot.Provider value={imageDetailsSlot}><Body email={email} actionItems={actionItems} {...props} /></ImageDetailsSlot.Provider>
         </div>
         {attachments.some((attachment) => !attachment.isInline) && <AttachmentList client={props.client} emailId={summary.id} attachments={attachments} />}
     </article>
@@ -293,7 +308,7 @@ const BODY_FAILURE: Record<BodyFailureCode, string> = {
   get storage() { return t('mail:bodyStorageFailed') },
 }
 
-function Body({ email, providerId, client, downloading, onDownload, translation }: ContentProps) {
+function Body({ email, providerId, client, downloading, onDownload, translation, actionItems }: ContentProps) {
   useTranslation()
   const { body, summary, bodyFailure } = email
   if (downloading || (!body && (summary.bodyState === 'missing' || summary.bodyState === 'fetching'))) return <BodySkeleton />
@@ -307,6 +322,7 @@ function Body({ email, providerId, client, downloading, onDownload, translation 
     {body.truncated && <Alert><AlertDescription>{t('mail:bodyTruncated')}</AlertDescription></Alert>}
     {body.hasHtml
       ? <BodyDocument client={client} emailId={summary.id} hasRemoteImages={body.remoteImagesBlocked > 0}
+        onDocumentActions={actionItems.setL1Items} onActionItemClick={actionItems.openItem}
         banner={translation?.available ? <TranslationBar translation={translation} /> : undefined}
         translated={translation?.available && translation.status?.translation ? {
           target: translation.status.targetLanguage, version: translation.generation, showing: translation.translationVisible, onFailed: translation.failBody,

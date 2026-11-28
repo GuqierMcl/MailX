@@ -2,7 +2,6 @@ import { act, render, screen } from '@/test/render'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import type { MailxClient } from '@/lib/mailx-client'
 import type { EmailDetail } from '@/generated/accounts'
 import { exampleAccount, testClient } from '@/features/accounts/test-fixtures'
 import { EmailView } from './email-view'
@@ -12,7 +11,7 @@ function setup() {
   render(
     <TooltipProvider>
       <EmailView
-        client={{} as MailxClient} email={null} loading error={null} downloading={false}
+        client={testClient()} email={null} loading error={null} downloading={false}
         onDownload={vi.fn()} onFlag={vi.fn()} onClose={vi.fn()} onRespond={vi.fn()}
       />
     </TooltipProvider>,

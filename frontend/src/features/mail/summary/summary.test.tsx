@@ -71,7 +71,7 @@ async function setup({ summary = {}, excluded = [], kept = null, start = [snapsh
   return { client, emit, onAsk, show }
 }
 
-const button = () => screen.findByRole('button', { name: 'AI 摘要' })
+const button = () => screen.findByRole('button', { name: 'AI' })
 const card = () => screen.queryByRole('region', { name: 'AI 摘要' })
 
 afterEach(() => { vi.restoreAllMocks() })
@@ -81,7 +81,7 @@ describe('email summary', () => {
     const user = userEvent.setup()
     const { client, emit } = await setup()
     await user.click(await button())
-    const panel = await screen.findByRole('dialog', { name: '总结这封邮件' })
+    const panel = await screen.findByRole('dialog', { name: 'AI' })
     // "Summarize" has the focus, so Enter makes it.
     await waitFor(() => expect(within(panel).getByRole('button', { name: '生成摘要' })).toHaveFocus())
     await user.click(within(panel).getByRole('radio', { name: '要点' }))

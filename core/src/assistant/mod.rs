@@ -17,6 +17,7 @@
 //! again. Changing the connection or its address makes the comparison fail
 //! with no extra bookkeeping, and the loop re-checks before every model
 //! request, so a revocation also stops runs that are already going.
+mod action_items;
 mod agent;
 mod compose;
 mod confirm;
@@ -53,15 +54,16 @@ use conversations::Conversations;
 use runs::Runs;
 use summary::SummaryCache;
 pub use types::{
-    AssistantEvent, AssistantEventKind, CachedEmailSummary, ChatContext, ChatTurn,
-    ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ComposeAssistState, ComposeTask,
-    ConfirmAction, ConfirmAttachment, ConfirmDraftChange, ConfirmOutcome, ConfirmWarning,
-    ConfirmationDetails, ConfirmationRequest, ConversationChange, ConversationDetail,
-    ConversationList, ConversationSummary, ConversationsChanged, DEFAULT_CONVERSATION_PAGE,
-    FinishedReason, FlagRestore, MAX_COMPOSE_INSTRUCTION_CHARS, MAX_COMPOSE_TEXT_CHARS,
-    MAX_CONTEXT_EMAILS, MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, Occasion, OrganizeChange,
-    PendingConfirmation, RewriteStyle, RunKind, RunKindTag, RunReasoning, RunSnapshot, RunState,
-    StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
+    AssistantEvent, AssistantEventKind, CachedEmailActionItems, CachedEmailSummary, ChatContext,
+    ChatTurn, ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ComposeAssistState,
+    ComposeTask, ConfirmAction, ConfirmAttachment, ConfirmDraftChange, ConfirmOutcome,
+    ConfirmWarning, ConfirmationDetails, ConfirmationRequest, ConversationChange,
+    ConversationDetail, ConversationList, ConversationSummary, ConversationsChanged,
+    DEFAULT_CONVERSATION_PAGE, FinishedReason, FlagRestore, MAX_COMPOSE_INSTRUCTION_CHARS,
+    MAX_COMPOSE_TEXT_CHARS, MAX_CONTEXT_EMAILS, MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, Occasion,
+    OrganizeChange, PendingConfirmation, RewriteStyle, RunKind, RunKindTag, RunReasoning,
+    RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
+    TurnState,
 };
 
 /// The built-in assistant. Cheap to clone; clones share their runs.
@@ -230,6 +232,12 @@ impl Assistant {
                 compose::valid(draft_id, task)?;
                 None
             }
+            RunKind::ExtractActionItems { email_id, .. } => {
+                if !action_items::valid_id(email_id) {
+                    return Err(AppError::validation("emailId"));
+                }
+                None
+            }
             RunKind::NowSummary { .. } => None,
         };
         let tag = match request.kind {
@@ -237,6 +245,7 @@ impl Assistant {
             RunKind::Chat { .. } => RunKindTag::Chat,
             RunKind::EmailSummary { .. } => RunKindTag::EmailSummary,
             RunKind::ComposeAssist { .. } => RunKindTag::ComposeAssist,
+            RunKind::ExtractActionItems { .. } => RunKindTag::ExtractActionItems,
         };
         let draft_scope = match &request.kind {
             RunKind::ComposeAssist { draft_id, .. } => Some(draft_id.clone()),
@@ -251,7 +260,8 @@ impl Assistant {
                     } => conversation_id.clone(),
                     RunKind::NowSummary { .. }
                     | RunKind::EmailSummary { .. }
-                    | RunKind::ComposeAssist { .. } => None,
+                    | RunKind::ComposeAssist { .. }
+                    | RunKind::ExtractActionItems { .. } => None,
                 };
                 let id = inner.runs.create_for_draft(
                     tag,
@@ -283,6 +293,19 @@ impl Assistant {
             }
             RunKind::ComposeAssist { draft_id, task } => {
                 self.start_compose(*ready, &draft_id, &task).await
+            }
+            RunKind::ExtractActionItems {
+                email_id,
+                time_zone,
+                fresh,
+            } => {
+                self.start_extract_action_items(
+                    *ready,
+                    &email_id,
+                    time_zone.as_deref(),
+                    fresh.unwrap_or(false),
+                )
+                .await
             }
             RunKind::Chat {
                 conversation_id,
@@ -581,6 +604,49 @@ impl Assistant {
         inner.runs.snapshot(&run_id)
     }
 
+    async fn start_extract_action_items(
+        &self,
+        ready: Ready,
+        email_id: &str,
+        time_zone: Option<&str>,
+        fresh: bool,
+    ) -> Result<RunSnapshot, AppError> {
+        let inner = &self.inner;
+        let tz = action_items::normalize_time_zone(time_zone);
+        let source = action_items::read(inner, &ready.settings, email_id, &tz).await?;
+        if !fresh {
+            let (key_id, sha) = (source.message_id.clone(), source.sha256.clone());
+            let cached = inner
+                .with_store(move |service| {
+                    service.action_extraction_get(
+                        &crate::storage::action_items::ActionExtractionKey {
+                            message_id: &key_id,
+                            source_sha256: &sha,
+                            prompt_version: prompt::ACTION_ITEMS_PROMPT_VERSION,
+                        },
+                    )
+                })
+                .await?;
+            if let Some(found) = cached {
+                return Ok(inner.runs.create_completed(
+                    RunKindTag::ExtractActionItems,
+                    String::new(),
+                    found.updated_at,
+                ));
+            }
+        }
+        let run_id = inner
+            .runs
+            .create(RunKindTag::ExtractActionItems, None, RunState::Running)?;
+        let task = tokio::spawn(agent::extract_action_items(
+            inner.clone(),
+            run_id.clone(),
+            agent::ActionItemsJob { source, fresh },
+        ));
+        inner.runs.set_abort(&run_id, task.abort_handle());
+        inner.runs.snapshot(&run_id)
+    }
+
     async fn start_compose(
         &self,
         ready: Ready,
@@ -686,6 +752,43 @@ impl Assistant {
         self.inner
             .with_store(|service| service.summary_delete_all())
             .await
+    }
+
+    /// Reads cached L2 AI-extracted action items for `email_id` merged with
+    /// local `added` / `dismissed` user states.
+    pub async fn email_action_items(
+        &self,
+        email_id: &str,
+        time_zone: Option<&str>,
+    ) -> Result<Option<CachedEmailActionItems>, AppError> {
+        if !action_items::valid_id(email_id) {
+            return Err(AppError::validation("emailId"));
+        }
+        let inner = &self.inner;
+        let settings = inner.settings.get()?.settings.assistant;
+        if !settings.enabled {
+            return Err(AppError::new(ErrorCode::AssistantDisabled));
+        }
+        let tz = action_items::normalize_time_zone(time_zone);
+        let source = action_items::read(inner, &settings, email_id, &tz).await?;
+        let found = inner
+            .with_store(move |service| {
+                let Some(mut extracted) = service.action_extraction_get(&source.key())? else {
+                    return Ok(None);
+                };
+                let states = service.action_states_for_message(&source.message_id)?;
+                for item in &mut extracted.items {
+                    if let Some(status) = states.get(&item.id) {
+                        item.status = *status;
+                    }
+                }
+                Ok(Some(CachedEmailActionItems {
+                    items: extracted.items,
+                    updated_at: extracted.updated_at,
+                }))
+            })
+            .await?;
+        Ok(found)
     }
 
     /// Answers the confirmation a run is waiting on: `approved` runs the
