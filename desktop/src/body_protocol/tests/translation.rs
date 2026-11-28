@@ -57,7 +57,9 @@ async fn translated_variant_serves_translated_text_with_bound_slots_and_lang() {
         .serve(&core, request(Method::GET, &href), APP_ORIGIN)
         .await;
     assert_eq!(link.status(), StatusCode::NO_CONTENT);
-    assert!(event.is_some_and(|event| event.url.starts_with("https://example.invalid/")));
+    assert!(event
+        .and_then(ProtocolEvent::into_link)
+        .is_some_and(|event| event.url.starts_with("https://example.invalid/")));
 
     // The original document is untouched by the translated one.
     let (_, again) = serve_document(&protocol, &core, id, &original.document_token).await;

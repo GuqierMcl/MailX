@@ -20,6 +20,7 @@ import type { SummaryLanguage, SummaryStyle } from '@/generated/accounts'
 import type { MailxClient } from '@/lib/mailx-client'
 import { cn } from '@/lib/utils'
 import { nativeLanguageName, TRANSLATION_TARGETS } from '../translation/languages'
+import type { EmailActionItemsState } from '../action-items/use-email-action-items'
 import type { EmailSummaryState } from './use-email-summary'
 
 const STYLES: { id: SummaryStyle; label: () => string; lines: number[] }[] = [
@@ -49,17 +50,27 @@ const languageFrom = (value: string): SummaryLanguage =>
   value === INTERFACE ? { mode: 'interface' } : value === ORIGINAL ? { mode: 'original' } : { mode: 'fixed', code: value }
 
 /**
- * The reader toolbar's AI button: a small panel to pick the style and language, mark the sender as always
- * summarized, and make the summary. "Summarize" has the focus, so Enter makes it.
+ * The reader toolbar's AI button: segmented tabs for Summary and Calendar/Tasks
+ * when action items are available, keeping existing summary options intact.
  */
-export function SummaryToolbarButton({ summary, senderName }: { summary: EmailSummaryState; senderName: string }) {
+export function SummaryToolbarButton({
+  summary,
+  senderName,
+  actionItems,
+}: {
+  summary: EmailSummaryState
+  senderName: string
+  actionItems?: EmailActionItemsState
+}) {
   useTranslation()
   const anchor = useRef<HTMLDivElement>(null)
   const generateButton = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState<'summary' | 'actions'>('summary')
   const [style, setStyle] = useState(summary.preferredStyle)
   const [language, setLanguage] = useState(languageValue(summary.preferredLanguage))
-  const busy = summary.phase === 'working'
+  const busy = summary.phase === 'working' || actionItems?.phase === 'working'
+  const showTabs = Boolean(actionItems?.aiAvailable)
   const languages: Record<string, string> = {
     [INTERFACE]: t('mail:summaryLanguageInterface'),
     [ORIGINAL]: t('mail:summaryLanguageOriginal'),
@@ -70,6 +81,7 @@ export function SummaryToolbarButton({ summary, senderName }: { summary: EmailSu
       // The panel opens on the saved choices.
       setStyle(summary.preferredStyle)
       setLanguage(languageValue(summary.preferredLanguage))
+      if (!showTabs) setTab('summary')
     }
     setOpen(next)
   }
@@ -77,10 +89,16 @@ export function SummaryToolbarButton({ summary, senderName }: { summary: EmailSu
     setOpen(false)
     summary.generate(style, languageFrom(language))
   }
+  const runActionExtract = () => {
+    if (!actionItems) return
+    setOpen(false)
+    if (actionItems.phase === 'working') actionItems.stop()
+    else actionItems.extract(actionItems.aiItems.length > 0)
+  }
   return (
     <div ref={anchor} className="flex items-center not-first:ml-3">
       <IconButton
-        label={t('mail:summaryButton')}
+        label={showTabs ? t('mail:aiToolbarButton') : t('mail:summaryButton')}
         aria-expanded={open}
         aria-busy={busy || undefined}
         className="aria-expanded:bg-muted"
@@ -89,45 +107,93 @@ export function SummaryToolbarButton({ summary, senderName }: { summary: EmailSu
         {busy ? <Spinner aria-hidden role="presentation" /> : <AiMark className="size-4" />}
       </IconButton>
       <Popover open={open} onOpenChange={show}>
-        <PopoverContent anchor={anchor} align="start" initialFocus={generateButton} className="w-72 gap-3 text-sm" aria-label={t('mail:summaryPanelTitle')}>
-          <p className="font-medium">{t('mail:summaryPanelTitle')}</p>
-          <div role="radiogroup" aria-label={t('mail:summaryStyle')} className="grid grid-cols-3 gap-1.5">
-            {STYLES.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                role="radio"
-                aria-checked={style === item.id}
-                onClick={() => setStyle(item.id)}
-                className={cn(
-                  'flex flex-col items-center gap-1.5 rounded-md px-2 py-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring',
-                  style === item.id && 'bg-muted text-foreground',
-                )}
-              >
-                <StyleGlyph lines={item.lines} />
-                {item.label()}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <label htmlFor="summary-language" className="text-muted-foreground">{t('mail:summaryLanguage')}</label>
-            <Select value={language} items={languages} onValueChange={(value: string | null) => value && setLanguage(value)}>
-              <SelectTrigger id="summary-language" size="sm" className="w-40"><SelectValue /></SelectTrigger>
-              <SelectContent className="max-h-72">
-                <SelectItem value={INTERFACE}>{languages[INTERFACE]}</SelectItem>
-                <SelectItem value={ORIGINAL}>{languages[ORIGINAL]}</SelectItem>
-                <SelectSeparator />
-                {TRANSLATION_TARGETS.map((code) => <SelectItem key={code} value={code}>{languages[code]}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          {summary.senderAddress && (
-            <label className="flex items-start gap-2 text-muted-foreground">
-              <Checkbox className="mt-0.5" checked={summary.alwaysForSender} onCheckedChange={(checked) => summary.setAlwaysForSender(checked === true)} />
-              <span className="min-w-0 break-words">{t('mail:summaryAlwaysSender', { sender: senderName })}</span>
-            </label>
+        <PopoverContent anchor={anchor} align="start" initialFocus={generateButton} className="w-72 gap-3 text-sm" aria-label={showTabs ? t('mail:aiToolbarButton') : t('mail:summaryPanelTitle')}>
+          {showTabs ? (
+            <div role="tablist" className="grid grid-cols-2 gap-1 rounded-md bg-muted p-1">
+              {(['summary', 'actions'] as const).map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === item}
+                  onClick={() => setTab(item)}
+                  className={cn(
+                    'rounded-sm px-2 py-1 text-xs font-medium transition-colors',
+                    tab === item ? 'bg-background text-foreground shadow-xs' : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {item === 'summary' ? t('mail:aiTabSummary') : t('mail:aiTabActionItems')}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="font-medium">{t('mail:summaryPanelTitle')}</p>
           )}
-          <Button ref={generateButton} onClick={make}>{t('mail:summaryGenerate')}</Button>
+
+          {tab === 'summary' || !actionItems ? (
+            <>
+              <div role="radiogroup" aria-label={t('mail:summaryStyle')} className="grid grid-cols-3 gap-1.5">
+                {STYLES.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={style === item.id}
+                    onClick={() => setStyle(item.id)}
+                    className={cn(
+                      'flex flex-col items-center gap-1.5 rounded-md px-2 py-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring',
+                      style === item.id && 'bg-muted text-foreground',
+                    )}
+                  >
+                    <StyleGlyph lines={item.lines} />
+                    {item.label()}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="summary-language" className="text-muted-foreground">{t('mail:summaryLanguage')}</label>
+                <Select value={language} items={languages} onValueChange={(value: string | null) => value && setLanguage(value)}>
+                  <SelectTrigger id="summary-language" size="sm" className="w-40"><SelectValue /></SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    <SelectItem value={INTERFACE}>{languages[INTERFACE]}</SelectItem>
+                    <SelectItem value={ORIGINAL}>{languages[ORIGINAL]}</SelectItem>
+                    <SelectSeparator />
+                    {TRANSLATION_TARGETS.map((code) => <SelectItem key={code} value={code}>{languages[code]}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              {summary.senderAddress && (
+                <label className="flex items-start gap-2 text-muted-foreground">
+                  <Checkbox className="mt-0.5" checked={summary.alwaysForSender} onCheckedChange={(checked) => summary.setAlwaysForSender(checked === true)} />
+                  <span className="min-w-0 break-words">{t('mail:summaryAlwaysSender', { sender: senderName })}</span>
+                </label>
+              )}
+              <Button ref={generateButton} onClick={make}>{t('mail:summaryGenerate')}</Button>
+            </>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-muted-foreground">
+                {actionItems.aiItems.length > 0
+                  ? t('mail:actionItemsFoundCount', { count: actionItems.aiItems.length })
+                  : t('mail:actionItemsPanelHint')}
+              </p>
+              <label className="flex items-start gap-2 text-xs text-muted-foreground">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={actionItems.autoExtract}
+                  onCheckedChange={(checked) => actionItems.setAutoExtract(checked === true)}
+                />
+                <span className="min-w-0 break-words">{t('mail:actionItemsAutoToggle')}</span>
+              </label>
+              <Button ref={generateButton} onClick={runActionExtract}>
+                {actionItems.phase === 'working'
+                  ? t('mail:actionItemsStop')
+                  : actionItems.aiItems.length > 0
+                    ? t('mail:actionItemsReextract')
+                    : t('mail:actionItemsExtract')}
+              </Button>
+            </div>
+          )}
         </PopoverContent>
       </Popover>
     </div>

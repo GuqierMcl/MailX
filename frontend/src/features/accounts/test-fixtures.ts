@@ -34,7 +34,7 @@ export function exampleSyncState(overrides: Partial<AccountSyncState> = {}): Acc
 }
 
 export function testClient(rows: Account[] = [], startup: StartupStatus = { state: 'ready', revision: 1 }) {
-  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false, syncWindow: 'days30' }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false } }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }
+  let preferences: import('@/generated/accounts').AppSettings = { general: { language: 'zh-CN', autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false, syncWindow: 'days30', detectActionItems: true }, appearance: DEFAULT_APPEARANCE, security: { remoteImages: 'ask', senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false }, actionItems: { autoExtract: false, promptDismissed: false } }, translation: { provider: null, microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }
   let settingsRevision = 0
   let autostart = { enabled: false, available: true }
   const settingsSnapshot = () => ({ settings: preferences, effectiveLocale: preferences.general.language === 'en' ? 'en' as const : 'zh-CN' as const, revision: settingsRevision, stored: true, recovered: false })
@@ -141,6 +141,13 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     requestLink: vi.fn<MailxClient['requestLink']>().mockResolvedValue(undefined),
     openLink: vi.fn<MailxClient['openLink']>().mockResolvedValue(undefined),
     onLinkRequest: vi.fn<MailxClient['onLinkRequest']>().mockReturnValue(() => undefined),
+    getCalendarItems: vi.fn<MailxClient['getCalendarItems']>().mockResolvedValue([]),
+    listDocumentActions: vi.fn<MailxClient['listDocumentActions']>().mockImplementation(async (_id, documentToken) => ({ documentToken, items: [] })),
+    onActionItemRequest: vi.fn<MailxClient['onActionItemRequest']>().mockReturnValue(() => undefined),
+    setActionItemStatus: vi.fn<MailxClient['setActionItemStatus']>().mockResolvedValue(undefined),
+    openActionItemCalendar: vi.fn<MailxClient['openActionItemCalendar']>().mockResolvedValue('saved'),
+    saveActionItemIcs: vi.fn<MailxClient['saveActionItemIcs']>().mockResolvedValue('saved'),
+    copyActionItemText: vi.fn<MailxClient['copyActionItemText']>().mockResolvedValue(undefined),
     getSettings: vi.fn<MailxClient['getSettings']>().mockImplementation(async () => settingsSnapshot()),
     updateSettings: vi.fn<MailxClient['updateSettings']>().mockImplementation(async (patch) => { preferences = { ...preferences, ...patch, layout: { ...preferences.layout, ...patch.layout } }; settingsRevision += 1; return settingsSnapshot() }),
     onSettingsChanged: vi.fn<MailxClient['onSettingsChanged']>().mockImplementation(async () => () => undefined),
@@ -222,6 +229,7 @@ export function testClient(rows: Account[] = [], startup: StartupStatus = { stat
     assistantDeleteConversation: vi.fn<MailxClient['assistantDeleteConversation']>().mockResolvedValue(undefined),
     assistantClearConversations: vi.fn<MailxClient['assistantClearConversations']>().mockResolvedValue(undefined),
     assistantEmailSummary: vi.fn<MailxClient['assistantEmailSummary']>().mockResolvedValue(null),
+    assistantEmailActionItems: vi.fn<MailxClient['assistantEmailActionItems']>().mockResolvedValue(null),
     assistantClearEmailSummaries: vi.fn<MailxClient['assistantClearEmailSummaries']>().mockResolvedValue(0),
     composeAssistState: vi.fn<MailxClient['composeAssistState']>().mockResolvedValue({ usable: false, consented: false, service: '' }),
     composeAssistGrantConsent: vi.fn<MailxClient['composeAssistGrantConsent']>().mockResolvedValue({ connectionId: 'c1', baseUrl: 'https://api.example.test/v1' }),

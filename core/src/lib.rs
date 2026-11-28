@@ -56,7 +56,8 @@ pub use app::{
 };
 pub use app::{DiscoverEwsSettings, EwsDiscoveryStatus, EwsSettingsDiscovery};
 pub use assistant::{
-    Assistant, AssistantEvent, AssistantEventKind, CachedEmailSummary, ChatContext,
+    Assistant, AssistantEvent, AssistantEventKind, CachedEmailActionItems, CachedEmailSummary,
+    ChatContext,
     ComposeAssistState, ComposeTask, ConfirmAction, ConfirmAttachment, ConfirmDraftChange,
     ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason, FlagRestore,
     Occasion, OrganizeChange, PendingConfirmation, RewriteStyle, RunKind, RunKindTag, RunReasoning,
@@ -78,11 +79,15 @@ pub use events::{
     MailStateChangeKind, MailStateChanged, NewMail, NewMailMessage, SentCopiesChanged,
 };
 pub use localization::{LanguagePreference, SupportedLocale};
+pub use mail::action_items::{
+    ActionItemExportInput, ActionItemKind, ActionItemSource, ActionItemStatus, DetectedActionItem,
+};
 pub use mail::*;
 pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
-    AiConsent, AppSettings, AppearanceSettings, AssistantMode, AssistantSendMode,
+    ActionItemSettings, AiConsent, AppSettings, AppearanceSettings, AssistantMode,
+    AssistantSendMode,
     AssistantSettings, BadgeSettings, CloseBehavior, ComposeOpenMode, ComposeSettings, FontSize,
     GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailSettings, MailTheme, MailboxLabel,
     McpSettings, NotificationSettings, NotificationSound, NowArrangement, NowSettings,

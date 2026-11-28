@@ -123,6 +123,10 @@ frontend/src/features/startup/
 
 `0037_history_sync.sql` 为 `accounts` 增加可空的 `sync_window`（单账号同步范围覆盖，空值表示跟随全局设置），并为 `folder_sync_cursors` 增加历史回填的目标日期、已覆盖起点、游标边界、已拉取/总计封数、任务状态（`idle` / `running` / `paused` / `completed` / `failed`）与受控失败码。已有账号与游标保持为空和 `idle`，不重抓或隐藏既有缓存。
 
+### 日程与待办提取缓存及操作状态
+
+`0038_action_items.sql` 新建 `message_action_extractions` 与 `message_action_states`，均外键引用 `messages(id)` 并随邮件级联删除，不改已有表与数据。前者按 `message_id` 缓存内置 AI 提取的日程与待办 JSON 及 `source_sha256`、`prompt_version`（随清除摘要缓存一并清理）；后者按 `(message_id, item_key)` 记录本机 `added` / `dismissed` 操作状态（设计见[日程与待办识别](action-items.md)）。
+
 ## 4. 版本与执行规则
 
 ### 4.1 沿用 v1 记录格式

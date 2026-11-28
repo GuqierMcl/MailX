@@ -108,6 +108,16 @@ pub struct EmailSummarySettings {
     pub collapsed: bool,
 }
 
+/// AI action-item (calendar event / task) extraction in the reader.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ActionItemSettings {
+    /// Automatically extract events and tasks when L1 local rules hit. Off by default.
+    pub auto_extract: bool,
+    /// User chose "Do not ask again" on the first-hit guidance banner.
+    pub prompt_dismissed: bool,
+}
+
 fn canonical_address(address: &str) -> Option<String> {
     let address = address.trim().to_lowercase();
     let (local, domain) = address.split_once('@')?;
@@ -194,6 +204,8 @@ pub struct AssistantSettings {
     pub read_html: bool,
     /// Email summaries in the reader.
     pub summary: EmailSummarySettings,
+    /// Calendar event and task extraction in the reader.
+    pub action_items: ActionItemSettings,
 }
 
 impl Default for AssistantSettings {
@@ -210,6 +222,7 @@ impl Default for AssistantSettings {
             save_history: true,
             read_html: false,
             summary: EmailSummarySettings::default(),
+            action_items: ActionItemSettings::default(),
         }
     }
 }
@@ -308,8 +321,20 @@ pub(super) fn repair_assistant(value: &mut serde_json::Value) {
         "send" => serde_json::from_value::<AssistantSendMode>(v.clone()).is_ok(),
         "instructions" => v.is_string(),
         "summary" => repair_summary(v),
+        "actionItems" => repair_action_items(v),
         _ => true,
     });
+}
+
+fn repair_action_items(value: &mut serde_json::Value) -> bool {
+    let Some(section) = value.as_object_mut() else {
+        return false;
+    };
+    section.retain(|key, v| match key.as_str() {
+        "autoExtract" | "promptDismissed" => v.is_boolean(),
+        _ => true,
+    });
+    true
 }
 
 /// Keeps a usable `summary` section, dropping its broken fields; `false`

@@ -1,10 +1,14 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import type {
+  ActionItemExportInput,
+  ActionItemStatus,
   AiCatalog,
   AiConsent,
   AssistantEvent,
+  CachedEmailActionItems,
   CachedEmailSummary,
+  DetectedActionItem,
   ComposeAssistState,
   ComposeTask,
   ConversationDetail,
@@ -95,6 +99,19 @@ export type ClientFailure = AppError | {
   code: 'hostUnavailable' | 'transport'
   message: string
   field: null
+}
+
+export interface BodyActionItemRequest {
+  emailId: string
+  index: number
+  documentToken: string
+  requestId: string
+  item: DetectedActionItem
+}
+
+export interface DocumentActions {
+  documentToken: string
+  items: DetectedActionItem[]
 }
 
 /** Current-user OS login registration, managed only by the desktop host. */
@@ -307,6 +324,20 @@ export interface MailxClient {
   requestLink(request: BodyLinkIdentity): Promise<void>
   openLink(request: BodyLinkIdentity & { requestId: string }): Promise<void>
   onLinkRequest(listener: (request: BodyLinkRequest) => void): () => void
+  /** L0 `.ics` calendar events extracted from a received email, merged with user states. */
+  getCalendarItems(emailId: string): Promise<DetectedActionItem[]>
+  /** L1 locally detected items bound to a prepared reader document token. */
+  listDocumentActions(emailId: string, documentToken: string): Promise<DocumentActions>
+  /** Fires when the user clicks an L1 highlighted date or action phrase in the isolated body frame. */
+  onActionItemRequest(listener: (request: BodyActionItemRequest) => void): () => void
+  /** Persists `added`, `dismissed`, or `pending` state for one item on an email. */
+  setActionItemStatus(emailId: string, itemId: string, status: ActionItemStatus): Promise<void>
+  /** Generates a safe `.ics` file and opens it in the system default calendar (falling back to Save). */
+  openActionItemCalendar(input: ActionItemExportInput): Promise<'saved' | 'cancelled'>
+  /** Generates a safe `.ics` file and saves it through the system save dialog. */
+  saveActionItemIcs(input: ActionItemExportInput): Promise<'saved' | 'cancelled'>
+  /** Formats a task as plain text and copies it to the system clipboard. */
+  copyActionItemText(input: ActionItemExportInput): Promise<void>
   /** App preferences from the core's `settings.json`; available even when startup failed. */
   getSettings(): Promise<SettingsSnapshot>
   /** Updates preference sections (layout fields merge individually) and returns the canonical form. */
@@ -430,6 +461,8 @@ export interface MailxClient {
    * is not downloaded, `notFound` outside the assistant's accounts, `assistantDisabled` when it is off.
    */
   assistantEmailSummary(emailId: string): Promise<CachedEmailSummary | null>
+  /** Cached L2 AI-extracted action items for `emailId` merged with user states; `null` when absent or stale. */
+  assistantEmailActionItems(emailId: string, timeZone?: string): Promise<CachedEmailActionItems | null>
   /** Deletes every kept email summary; resolves with how many there were. */
   assistantClearEmailSummaries(): Promise<number>
   // --- Writing help in the composer (ai-chat-ui.md 5.3). Composer windows and the inline composer, each for its own draft.
@@ -709,6 +742,21 @@ export function createDesktopClient(): MailxClient {
         .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
       return () => { disposed = true; unlisten?.() }
     },
+    getCalendarItems: (emailId) => call<DetectedActionItem[]>('mail_get_calendar_items', { emailId }),
+    listDocumentActions: (emailId, documentToken) => call<DocumentActions>('mail_list_document_actions', { emailId, documentToken }),
+    onActionItemRequest(listener) {
+      if (!available) return () => undefined
+      let disposed = false
+      let unlisten: (() => void) | undefined
+      getCurrentWebviewWindow()
+        .listen<BodyActionItemRequest>('mailx://action-item-request', (event) => { if (!disposed) listener(event.payload) })
+        .then((stop) => (disposed ? stop() : (unlisten = stop)), () => undefined)
+      return () => { disposed = true; unlisten?.() }
+    },
+    setActionItemStatus: (emailId, itemId, status) => call<void>('mail_set_action_item_status', { emailId, itemId, status }),
+    openActionItemCalendar: (input) => call<'saved' | 'cancelled'>('mail_open_action_item_calendar', { input }),
+    saveActionItemIcs: (input) => call<'saved' | 'cancelled'>('mail_save_action_item_ics', { input }),
+    copyActionItemText: (input) => call<void>('mail_copy_action_item_text', { input }),
     getSettings: () => call<SettingsSnapshot>('settings_get'),
     async onSettingsChanged(listener) {
       if (!available) return () => undefined
@@ -813,6 +861,8 @@ export function createDesktopClient(): MailxClient {
     assistantDeleteConversation: (conversationId) => call<void>('assistant_delete_conversation', { conversationId }),
     assistantClearConversations: () => call<void>('assistant_clear_conversations'),
     assistantEmailSummary: (emailId) => call<CachedEmailSummary | null>('assistant_email_summary', { emailId }),
+    assistantEmailActionItems: (emailId, timeZone) =>
+      call<CachedEmailActionItems | null>('assistant_email_action_items', timeZone ? { emailId, timeZone } : { emailId }),
     assistantClearEmailSummaries: () => call<number>('assistant_clear_email_summaries'),
     composeAssistState: () => call<ComposeAssistState>('compose_assist_state'),
     composeAssistGrantConsent: () => call<AiConsent>('compose_assist_grant_consent'),

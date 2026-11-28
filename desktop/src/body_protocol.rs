@@ -7,8 +7,11 @@ use std::{
 };
 
 use mailx_core::{
-    AppError, BodyBinding, ErrorCode, MailxCore,
-    mail::render::{self, ResourceBinding},
+    AppError, BodyBinding, DetectedActionItem, ErrorCode, LOCAL_SENT_PREFIX, MailxCore,
+    mail::{
+        action_detect,
+        render::{self, ResourceBinding},
+    },
     translate,
 };
 use serde::Serialize;
@@ -24,6 +27,7 @@ use source::BodySource;
 const TOKEN_LIFETIME: Duration = Duration::from_secs(30 * 60);
 const MAX_DOCUMENTS: usize = 128;
 pub(crate) const LINK_EVENT: &str = "mailx://link-request";
+pub(crate) const ACTION_ITEM_EVENT: &str = "mailx://action-item-request";
 /// The origin body frames load from. wry hands the handler a request rewritten
 /// to `mailx-body://localhost` on every platform, so bound URLs must come from
 /// here rather than from the request.
@@ -60,6 +64,7 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
                 {
                     protocol.set_base_css(mailx_core::mail_body_css(&snapshot.settings.appearance));
                     protocol.set_locale(snapshot.effective_locale);
+                    protocol.set_detect_action_items(snapshot.settings.mail.detect_action_items);
                 }
                 if matches!(
                     parse_route(&request.uri().to_string()),
@@ -97,7 +102,19 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
                     ),
                 };
                 if let Some(event) = event {
-                    let _ = app.emit_to(EventTarget::webview_window("main"), LINK_EVENT, event);
+                    match event {
+                        ProtocolEvent::Link(link) => {
+                            let _ =
+                                app.emit_to(EventTarget::webview_window("main"), LINK_EVENT, link);
+                        }
+                        ProtocolEvent::Action(action) => {
+                            let _ = app.emit_to(
+                                EventTarget::webview_window("main"),
+                                ACTION_ITEM_EVENT,
+                                action,
+                            );
+                        }
+                    }
                 }
                 responder.respond(reply);
             });
@@ -108,25 +125,41 @@ pub(crate) fn register(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<ta
 /// can also reach this hook; its subframe protocol fallback remains a 204.
 pub(crate) fn navigation(app: &tauri::AppHandle, url: &Url) -> bool {
     use tauri::{Emitter, EventTarget, Manager};
-    let Some((Route::Link { id, index, token }, _)) = parse_route(url.as_str()) else {
+    let Some((route, _)) = parse_route(url.as_str()) else {
         return true;
     };
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let protocol = app.state::<std::sync::Arc<BodyProtocol>>();
-        let Some(core) = app
-            .try_state::<crate::state::DesktopState>()
-            .and_then(|s| s.core().ok())
-        else {
-            return;
-        };
-        if let Ok(document) = protocol.resolve(&id, &token)
-            && let Ok(event) = protocol.prepare_link(&core, document, id, index).await
-        {
-            let _ = app.emit_to(EventTarget::webview_window("main"), LINK_EVENT, event);
+    match route {
+        Route::Link { id, index, token } => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let protocol = app.state::<std::sync::Arc<BodyProtocol>>();
+                let Some(core) = app
+                    .try_state::<crate::state::DesktopState>()
+                    .and_then(|s| s.core().ok())
+                else {
+                    return;
+                };
+                if let Ok(document) = protocol.resolve(&id, &token)
+                    && let Ok(event) = protocol.prepare_link(&core, document, id, index).await
+                {
+                    let _ = app.emit_to(EventTarget::webview_window("main"), LINK_EVENT, event);
+                }
+            });
+            false
         }
-    });
-    false
+        Route::Action { id, index, token } => {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let protocol = app.state::<std::sync::Arc<BodyProtocol>>();
+                if let Ok(event) = protocol.prepare_action(&id, &token, index) {
+                    let _ =
+                        app.emit_to(EventTarget::webview_window("main"), ACTION_ITEM_EVENT, event);
+                }
+            });
+            false
+        }
+        _ => true,
+    }
 }
 
 #[derive(Clone)]
@@ -153,7 +186,9 @@ pub(crate) struct BodyProtocol {
     base_css: Mutex<String>,
     /// Language of host-generated text in reader documents (quote fold label).
     locale: Mutex<mailx_core::SupportedLocale>,
+    detect_action_items: Mutex<bool>,
     documents: Mutex<HashMap<String, Document>>,
+    document_actions: Mutex<HashMap<String, Vec<DetectedActionItem>>>,
     confirmations: Mutex<HashMap<String, Confirmation>>,
 }
 
@@ -196,6 +231,38 @@ pub(crate) struct LinkRequest {
     pub request_id: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ActionItemRequest {
+    pub email_id: String,
+    pub index: usize,
+    pub document_token: String,
+    pub request_id: String,
+    pub item: DetectedActionItem,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DocumentActions {
+    pub document_token: String,
+    pub items: Vec<DetectedActionItem>,
+}
+
+pub(crate) enum ProtocolEvent {
+    Link(LinkRequest),
+    Action(ActionItemRequest),
+}
+
+#[cfg(test)]
+impl ProtocolEvent {
+    fn into_link(self) -> Option<LinkRequest> {
+        match self {
+            Self::Link(link) => Some(link),
+            Self::Action(_) => None,
+        }
+    }
+}
+
 /// Inverts the whole page, then inverts images back so photos keep their colors.
 /// The canvas color is the inverse of the app's near-black background.
 const DARK_CSS: &str = "html{background:#e8e8e8;filter:invert(1) hue-rotate(180deg)}img{filter:invert(1) hue-rotate(180deg)}";
@@ -218,6 +285,11 @@ enum Route {
         token: String,
     },
     Link {
+        id: String,
+        index: usize,
+        token: String,
+    },
+    Action {
         id: String,
         index: usize,
         token: String,
@@ -304,7 +376,7 @@ fn parse_route(value: &str) -> Option<(Route, String)> {
             token,
             dark,
         },
-        kind @ ("part" | "link") if segments.len() == 3 => {
+        kind @ ("part" | "link" | "action") if segments.len() == 3 => {
             if kind == "part" {
                 if segments[2].is_empty() {
                     return None;
@@ -319,10 +391,18 @@ fn parse_route(value: &str) -> Option<(Route, String)> {
                 if index.to_string() != segments[2] {
                     return None;
                 }
-                Route::Link {
-                    id: id.clone(),
-                    index,
-                    token,
+                if kind == "link" {
+                    Route::Link {
+                        id: id.clone(),
+                        index,
+                        token,
+                    }
+                } else {
+                    Route::Action {
+                        id: id.clone(),
+                        index,
+                        token,
+                    }
                 }
             }
         }
@@ -370,7 +450,9 @@ impl BodyProtocol {
             numbered_links,
             base_css: Mutex::new(mailx_core::mail_body_css(&Default::default())),
             locale: Mutex::new(Default::default()),
+            detect_action_items: Mutex::new(true),
             documents: Mutex::new(HashMap::new()),
+            document_actions: Mutex::new(HashMap::new()),
             confirmations: Mutex::new(HashMap::new()),
         }
     }
@@ -495,6 +577,12 @@ impl BodyProtocol {
         }
     }
 
+    fn set_detect_action_items(&self, enabled: bool) {
+        if let Ok(mut current) = self.detect_action_items.lock() {
+            *current = enabled;
+        }
+    }
+
     fn permits_remote_request(&self, value: &str, policy: mailx_core::RemoteImagePolicy) -> bool {
         let Some((Route::Remote { id, token, .. }, _)) = parse_route(value) else {
             return false;
@@ -546,6 +634,9 @@ impl BodyProtocol {
         }
         if let Ok(mut confirmations) = self.confirmations.lock() {
             confirmations.clear();
+        }
+        if let Ok(mut actions) = self.document_actions.lock() {
+            actions.clear();
         }
     }
 
@@ -634,6 +725,9 @@ impl BodyProtocol {
             .lock()
             .map_err(|_| missing())?
             .retain(|_, confirmation| confirmation.document.token != token);
+        if let Ok(mut actions) = self.document_actions.lock() {
+            actions.remove(token);
+        }
         Ok(())
     }
 
@@ -654,7 +748,7 @@ impl BodyProtocol {
         core: &MailxCore,
         request: Request<Vec<u8>>,
         app_origin: &str,
-    ) -> (Response<Vec<u8>>, Option<LinkRequest>) {
+    ) -> (Response<Vec<u8>>, Option<ProtocolEvent>) {
         if request.method() != Method::GET {
             return (
                 response(
@@ -700,7 +794,7 @@ impl BodyProtocol {
         route: Route,
         origin: &str,
         app_origin: &str,
-    ) -> Result<(Response<Vec<u8>>, Option<LinkRequest>), AppError> {
+    ) -> Result<(Response<Vec<u8>>, Option<ProtocolEvent>), AppError> {
         match route {
             Route::Document { id, token, dark } => {
                 let document = self.resolve(&id, &token)?;
@@ -731,6 +825,38 @@ impl BodyProtocol {
                     (Some(_), BodySource::Draft(_)) => return Err(missing()),
                     (None, _) => html,
                 };
+                // L1 local rule annotation runs after translation/folding and before
+                // binding on received mail (both original and translated variants),
+                // never on drafts or local sent copies.
+                let detect_enabled = self
+                    .detect_action_items
+                    .lock()
+                    .map(|v| *v)
+                    .unwrap_or(true);
+                let html = if detect_enabled
+                    && matches!(document.binding, BodySource::Email(_))
+                    && !id.starts_with(LOCAL_SENT_PREFIX)
+                {
+                    let (subject, received_at) = core
+                        .email_l1_context(id.clone())
+                        .await
+                        .unwrap_or_else(|_| (String::new(), None));
+                    let (annotated, detected) = action_detect::annotate_html(
+                        &html,
+                        &subject,
+                        received_at.as_deref(),
+                        action_detect::MAX_DETECTED_ITEMS,
+                    );
+                    if let Ok(mut actions) = self.document_actions.lock() {
+                        actions.insert(token.clone(), detected);
+                    }
+                    annotated
+                } else {
+                    if let Ok(mut actions) = self.document_actions.lock() {
+                        actions.remove(&token);
+                    }
+                    html
+                };
                 let resolve = |binding: ResourceBinding<'_>| {
                     Some(match binding {
                         ResourceBinding::Remote { index } => {
@@ -744,6 +870,9 @@ impl BodyProtocol {
                         }
                         ResourceBinding::Link { index } => {
                             resource_url(origin, "link", &id, &index.to_string(), &token)
+                        }
+                        ResourceBinding::Action { index } => {
+                            resource_url(origin, "action", &id, &index.to_string(), &token)
                         }
                     })
                 };
@@ -825,10 +954,69 @@ impl BodyProtocol {
                         app_origin,
                         None,
                     ),
-                    Some(event),
+                    Some(ProtocolEvent::Link(event)),
+                ))
+            }
+            Route::Action { id, index, token } => {
+                if self.numbered_links {
+                    return Err(missing());
+                }
+                let event = self.prepare_action(&id, &token, index)?;
+                Ok((
+                    response(
+                        StatusCode::NO_CONTENT,
+                        "text/plain; charset=utf-8",
+                        vec![],
+                        app_origin,
+                        None,
+                    ),
+                    Some(ProtocolEvent::Action(event)),
                 ))
             }
         }
+    }
+
+    pub(crate) fn list_document_actions(
+        &self,
+        id: String,
+        token: String,
+    ) -> Result<DocumentActions, AppError> {
+        let _ = self.resolve(&id, &token)?;
+        let items = self
+            .document_actions
+            .lock()
+            .map_err(|_| missing())?
+            .get(&token)
+            .cloned()
+            .unwrap_or_default();
+        Ok(DocumentActions {
+            document_token: token,
+            items,
+        })
+    }
+
+    fn prepare_action(
+        &self,
+        id: &str,
+        token: &str,
+        index: usize,
+    ) -> Result<ActionItemRequest, AppError> {
+        let _ = self.resolve(id, token)?;
+        let item = self
+            .document_actions
+            .lock()
+            .map_err(|_| missing())?
+            .get(token)
+            .and_then(|list| list.get(index))
+            .cloned()
+            .ok_or_else(missing)?;
+        Ok(ActionItemRequest {
+            email_id: id.to_owned(),
+            index,
+            document_token: token.to_owned(),
+            request_id: Uuid::new_v4().to_string(),
+            item,
+        })
     }
 
     pub(crate) async fn list_links(

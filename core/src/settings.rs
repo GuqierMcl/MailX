@@ -22,7 +22,7 @@ mod assistant;
 mod now;
 use assistant::repair_assistant;
 pub use assistant::{
-    AssistantMode, AssistantSendMode, AssistantSettings, EmailSummarySettings,
+    ActionItemSettings, AssistantMode, AssistantSendMode, AssistantSettings, EmailSummarySettings,
     MAX_INSTRUCTIONS_CHARS, MAX_SUMMARY_SENDERS, SummaryLanguage, SummaryStyle,
 };
 
@@ -965,7 +965,7 @@ impl<'de> Deserialize<'de> for SyncWindow {
 }
 
 /// Optional mail-workflow enhancements, independent of notification delivery.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 pub struct MailSettings {
     /// After a dedicated verification-code copy succeeds, move that email to
@@ -973,6 +973,18 @@ pub struct MailSettings {
     pub trash_verification_mail_after_copy: bool,
     /// Global default synchronization history depth; individual accounts may override.
     pub sync_window: SyncWindow,
+    /// Highlight detected dates and high-signal action phrases in the reader body.
+    pub detect_action_items: bool,
+}
+
+impl Default for MailSettings {
+    fn default() -> Self {
+        Self {
+            trash_verification_mail_after_copy: false,
+            sync_window: SyncWindow::default(),
+            detect_action_items: true,
+        }
+    }
 }
 
 fn deserialize_language<'de, D: serde::Deserializer<'de>>(
@@ -1349,8 +1361,11 @@ pub fn mail_body_css(appearance: &AppearanceSettings) -> String {
         FontSize::Default => "14px",
         FontSize::Large => "16px",
     };
+    let accent = normalize_accent_color(&appearance.accent_color)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "#2563eb".to_owned());
     format!(
-        "html{{background:white;color:black}}body{{margin:0;{font};font-size:{size};line-height:1.5}}.mailx-page{{box-sizing:border-box;min-height:100vh;padding:16px;overflow-wrap:break-word}}.mailx-body{{box-sizing:border-box;min-height:100vh;margin:-16px;padding:16px}}img{{max-width:100%;height:auto}}{QUOTE_FOLD_CSS}"
+        "html{{background:white;color:black}}body{{margin:0;{font};font-size:{size};line-height:1.5}}.mailx-page{{box-sizing:border-box;min-height:100vh;padding:16px;overflow-wrap:break-word}}.mailx-body{{box-sizing:border-box;min-height:100vh;margin:-16px;padding:16px}}img{{max-width:100%;height:auto}}.mailx-detected-action{{color:inherit;text-decoration:underline dashed 1.5px;text-decoration-color:{accent};text-underline-offset:3px;background-color:color-mix(in srgb,{accent} 7%,transparent);padding:0 2px;border-radius:3px;cursor:pointer}}.mailx-detected-action:hover,.mailx-detected-action:focus-visible{{text-decoration-style:solid;background-color:color-mix(in srgb,{accent} 15%,transparent);outline:none}}{QUOTE_FOLD_CSS}"
     )
 }
 

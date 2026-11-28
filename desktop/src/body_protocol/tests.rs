@@ -391,7 +391,7 @@ async fn link_get_only_requests_confirmation_and_confirmation_is_consumed_once()
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert!(response.body().is_empty());
     response_headers(&response, "text/plain; charset=utf-8", APP_ORIGIN, None);
-    let event = event.unwrap();
+    let event = event.and_then(ProtocolEvent::into_link).unwrap();
     assert_eq!(event.email_id, ids[0]);
     assert_eq!(event.index, 0);
     assert_eq!(event.url, "https://example.invalid/full/path?x=1&y=2");
@@ -455,7 +455,7 @@ async fn edits_and_changed_link_mapping_revoke_pending_confirmations() {
         let (_, event) = protocol
             .serve(&core, request(Method::GET, &link), APP_ORIGIN)
             .await;
-        let event = event.unwrap();
+        let event = event.and_then(ProtocolEvent::into_link).unwrap();
         db.execute(mutation, []).unwrap();
         assert_eq!(
             protocol
@@ -490,7 +490,7 @@ async fn expired_tokens_and_pending_confirmations_are_rejected() {
     let (_, event) = protocol
         .serve(&core, request(Method::GET, &link), APP_ORIGIN)
         .await;
-    let event = event.unwrap();
+    let event = event.and_then(ProtocolEvent::into_link).unwrap();
     // A freshly booted Windows runner may have less than TOKEN_LIFETIME of
     // monotonic history. An elapsed deadline needs no subtraction from Instant.
     let expired = Instant::now();

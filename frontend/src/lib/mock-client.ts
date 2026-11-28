@@ -109,7 +109,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
   const sentCopiesListeners = new Set<(change: import('@/generated/accounts').SentCopiesChanged) => void>()
   const folders = accounts.flatMap((account) => buildFolders(account.id, emails, dataset.customFolders))
   // A stored settings file that opens on the inbox (the app default is the Now page): the workbench tests start from the list.
-  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false, syncWindow: 'days30' }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false } }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
+  let settings: import('@/generated/accounts').SettingsSnapshot = { effectiveLocale: cachedLanguage().effectiveLocale, revision: 1, settings: { general: { language: cachedLanguage().language, autoUpdate: true, closeBehavior: 'ask', releaseUiInBackground: false, showMenuBarIcon: true, silentStart: false, singleKeyShortcuts: true, startupView: 'inbox' }, mail: { trashVerificationMailAfterCopy: false, syncWindow: 'days30', detectActionItems: true }, appearance: cachedAppearance(), security: { remoteImages: 'ask' as const, senderAvatars: false }, layout: DEFAULT_LAYOUT, notifications: DEFAULT_NOTIFICATIONS, badge: DEFAULT_BADGE, now: DEFAULT_NOW, compose: { defaultAccountId: '', undoSendSeconds: 0, openMode: 'window' }, mcp: { enabled: false }, assistant: { enabled: true, model: null, consented: null, excludedAccounts: [], organize: 'direct' as const, aiDrafts: 'direct' as const, send: 'confirm' as const, instructions: '', saveHistory: true, readHtml: false, summary: { auto: false, senders: [], style: 'brief' as const, language: { mode: 'interface' as const }, collapsed: false }, actionItems: { autoExtract: false, promptDismissed: false } }, translation: { provider: 'microsoftFree', microsoftRegion: '', route: { kind: 'direct' }, targetLanguage: 'auto', suggest: true, neverSuggest: [], alwaysTranslate: [], includeQuotes: false, consentedProvider: null, consentedAi: null } }, stored: true, recovered: false }
 
   function readStoredSettings() {
     try {
@@ -120,7 +120,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           ['appearance', 'security', 'layout', 'notifications', 'compose'].every((key) =>
             typeof value.settings[key as keyof typeof value.settings] === 'object')) {
         // Like the core, fields a stored copy lacks (saved by an older preview) take their defaults.
-        settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true, syncWindow: value.settings.mail?.syncWindow ?? 'days30' }, translation: value.settings.translation ?? settings.settings.translation,
+        settings = { ...value, settings: { ...value.settings, mail: { trashVerificationMailAfterCopy: value.settings.mail?.trashVerificationMailAfterCopy === true, syncWindow: value.settings.mail?.syncWindow ?? 'days30', detectActionItems: value.settings.mail?.detectActionItems !== false }, translation: value.settings.translation ?? settings.settings.translation,
           assistant: { ...settings.settings.assistant, ...value.settings.assistant },
           now: { ...DEFAULT_NOW, ...value.settings.now },
           layout: { ...DEFAULT_LAYOUT, ...value.settings.layout,
@@ -1145,6 +1145,13 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     requestLink: async () => { throw notFound() },
     openLink: async () => { throw notFound() },
     onLinkRequest: () => () => undefined,
+    getCalendarItems: async () => [],
+    listDocumentActions: async (_emailId, documentToken) => ({ documentToken, items: [] }),
+    onActionItemRequest: () => () => undefined,
+    setActionItemStatus: async () => undefined,
+    openActionItemCalendar: async () => 'saved',
+    saveActionItemIcs: async () => 'saved',
+    copyActionItemText: async () => undefined,
     // A browser has no notification center or sound device to drive.
     testNotification: async () => undefined,
     previewSound: async () => undefined,
@@ -1302,6 +1309,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     assistantDeleteConversation: (conversationId) => history.remove(conversationId),
     assistantClearConversations: () => history.clear(),
     assistantEmailSummary: (emailId) => assistant.emailSummary(emailId),
+    assistantEmailActionItems: async () => null,
     assistantClearEmailSummaries: () => assistant.clearEmailSummaries(),
     async composeAssistState() {
       const binding = settings.settings.assistant.enabled ? assistantBinding() : null
@@ -1349,7 +1357,7 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
           const next = JSON.parse(event.newValue) as typeof settings
           if (typeof next.revision === 'number' && next.revision > settings.revision &&
               (next.effectiveLocale === 'en' || next.effectiveLocale === 'zh-CN') && next.settings?.general) {
-            settings = { ...next, settings: { ...next.settings, mail: { trashVerificationMailAfterCopy: next.settings.mail?.trashVerificationMailAfterCopy === true, syncWindow: next.settings.mail?.syncWindow ?? 'days30' }, now: { ...DEFAULT_NOW, ...next.settings.now } } }
+            settings = { ...next, settings: { ...next.settings, mail: { trashVerificationMailAfterCopy: next.settings.mail?.trashVerificationMailAfterCopy === true, syncWindow: next.settings.mail?.syncWindow ?? 'days30', detectActionItems: next.settings.mail?.detectActionItems !== false }, now: { ...DEFAULT_NOW, ...next.settings.now } } }
             listener({ revision: settings.revision })
           }
         } catch { /* Ignore an invalid preview cache. */ }

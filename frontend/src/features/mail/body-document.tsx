@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Delayed } from '@/components/ui/delayed'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { RemoteImagePolicy, RemoteImageStatus } from '@/generated/accounts'
+import type { DetectedActionItem, RemoteImagePolicy, RemoteImageStatus } from '@/generated/accounts'
 import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
 import { mockBackend } from '@/lib/dev-mock'
 import { useUpdateSecurity } from '@/features/settings/settings-queries'
@@ -38,11 +38,13 @@ export type BodyTranslation = {
   onFailed: (failure: unknown) => void
 }
 
-export function BodyDocument({ client, emailId, hasRemoteImages = false, banner, translated = null }: {
+export function BodyDocument({ client, emailId, hasRemoteImages = false, banner, translated = null, onDocumentActions, onActionItemClick }: {
   client: MailxClient; emailId: string; hasRemoteImages?: boolean
   /** A notice shown above the body's own notices, inside the same column. */
   banner?: ReactNode
   translated?: BodyTranslation | null
+  onDocumentActions?: (items: DetectedActionItem[]) => void
+  onActionItemClick?: (item: DetectedActionItem) => void
 }) {
   const { visible, settings, dark } = useBodyEnvironment(client)
   const [version, setVersion] = useState(0)
@@ -50,13 +52,18 @@ export function BodyDocument({ client, emailId, hasRemoteImages = false, banner,
   if (settings.isPending) return <BodySkeleton />
   // A settings read failure never silently grants remote access.
   const policy = settings.data?.settings.security.remoteImages ?? 'ask'
-  return <Reader key={`${emailId}:${version}:${policy}:${dark}`} client={client} emailId={emailId} policy={policy} dark={dark}
-    hasRemoteImages={hasRemoteImages} banner={banner} translated={translated} onReload={() => setVersion((value) => value + 1)} />
+  const detect = settings.data?.settings.mail.detectActionItems ?? true
+  return <Reader key={`${emailId}:${version}:${policy}:${dark}:${detect}`} client={client} emailId={emailId} policy={policy} dark={dark}
+    hasRemoteImages={hasRemoteImages} banner={banner} translated={translated} onDocumentActions={onDocumentActions} onActionItemClick={onActionItemClick}
+    onReload={() => setVersion((value) => value + 1)} />
 }
 
-function Reader({ client, emailId, policy, dark, hasRemoteImages, banner, translated, onReload }: {
+function Reader({ client, emailId, policy, dark, hasRemoteImages, banner, translated, onDocumentActions, onActionItemClick, onReload }: {
   client: MailxClient; emailId: string; policy: RemoteImagePolicy; dark: boolean; hasRemoteImages: boolean; banner: ReactNode
-  translated: BodyTranslation | null; onReload: () => void
+  translated: BodyTranslation | null
+  onDocumentActions?: (items: DetectedActionItem[]) => void
+  onActionItemClick?: (item: DetectedActionItem) => void
+  onReload: () => void
 }) {
   useTranslation()
   const [granted, setGranted] = useState(false)
@@ -89,12 +96,12 @@ function Reader({ client, emailId, policy, dark, hasRemoteImages, banner, transl
     <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]">
       <div className={cn('col-start-1 row-start-1 flex min-h-0 flex-col', showTranslated && 'invisible')} inert={showTranslated}>
         {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody /></Suspense> :
-          <BodySession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages} showing={!showTranslated} dark={dark} onReload={onReload} />}
+          <BodySession key={String(allowImages)} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages} showing={!showTranslated} dark={dark} onDocumentActions={onDocumentActions} onActionItemClick={onActionItemClick} onReload={onReload} />}
       </div>
       {translationMounted && <div className={cn('col-start-1 row-start-1 flex min-h-0 flex-col', !showTranslated && 'invisible')} inert={!showTranslated}>
         {DevelopmentBody ? <Suspense fallback={<BodySkeleton />}><DevelopmentBody translated /></Suspense> :
           <BodySession key={`${allowImages}:${translationKey}`} client={client} emailId={emailId} allowImages={allowImages} hasRemoteImages={hasRemoteImages}
-            dark={dark} showing={showTranslated} translation={translated.target} title={t('mail:htmlBodyTranslated')} onReload={onReload}
+            dark={dark} showing={showTranslated} translation={translated.target} title={t('mail:htmlBodyTranslated')} onActionItemClick={onActionItemClick} onReload={onReload}
             onPrepareFailed={(failure) => { setFailedKey(translationKey); translated.onFailed(failure) }} />}
       </div>}
     </div>
@@ -102,7 +109,7 @@ function Reader({ client, emailId, policy, dark, hasRemoteImages, banner, transl
 }
 
 /** The host binds this read-only session to either a saved draft revision or an email. */
-export function BodySession({ client, emailId, allowImages = false, hasRemoteImages = false, showing = true, dark, draftRevision, translation, title, onPrepareFailed, onReload }: {
+export function BodySession({ client, emailId, allowImages = false, hasRemoteImages = false, showing = true, dark, draftRevision, translation, title, onPrepareFailed, onDocumentActions, onActionItemClick, onReload }: {
   client: MailxClient; emailId: string; allowImages?: boolean; hasRemoteImages?: boolean; dark: boolean; draftRevision?: number
   /** Target language of the translated variant of the email body; the original when absent. */
   translation?: string
@@ -110,6 +117,8 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
   title?: string
   /** Called when the document could not be prepared (the failure also shows in place). */
   onPrepareFailed?: (failure: ClientFailure) => void
+  onDocumentActions?: (items: DetectedActionItem[]) => void
+  onActionItemClick?: (item: DetectedActionItem) => void
   onReload: () => void
 }) {
   useTranslation()
@@ -148,6 +157,15 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
         },
       )
     })
+    const seenActions = new Set<string>()
+    const stopAction = draftRevision === undefined
+      ? client.onActionItemRequest((event) => {
+          if (!live || !active.current || !loaded.current || document.visibilityState === 'hidden' || event.emailId !== emailId ||
+            event.documentToken !== currentToken.current || !event.requestId || seenActions.has(event.requestId)) return
+          seenActions.add(event.requestId)
+          onActionItemClick?.(event.item)
+        })
+      : () => undefined
     const preparation = draftRevision !== undefined
       ? client.prepareDraftBody(emailId, draftRevision)
       : translation === undefined ? client.prepareBody(emailId, allowImages) : client.prepareBody(emailId, allowImages, translation)
@@ -165,6 +183,7 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
       live = false
       active.current = false
       stop()
+      stopAction()
       if (currentToken.current) release(currentToken.current)
       currentToken.current = null
     }
@@ -246,7 +265,16 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
         src={bodyDocumentUrl(emailId, documentToken, dark)} className="min-h-0 w-full flex-1 border-0 bg-white"
         onLoad={() => {
           if (loaded.current) { active.current = false; onReload() }
-          else { loaded.current = true; setFrameReady(true) }
+          else {
+            loaded.current = true
+            setFrameReady(true)
+            if (translation === undefined && draftRevision === undefined && documentToken && onDocumentActions) {
+              void client.listDocumentActions(emailId, documentToken).then(
+                (listed) => { if (active.current && currentToken.current === documentToken) onDocumentActions(listed.items) },
+                () => undefined,
+              )
+            }
+          }
         }} />}
   </div>
 }
