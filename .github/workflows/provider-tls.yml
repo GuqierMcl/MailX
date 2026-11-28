@@ -31,7 +31,10 @@ jobs:
           - { name: ubuntu-22.04-x64, os: ubuntu-22.04 }
           - { name: fedora-x64, os: ubuntu-24.04, container: 'fedora:latest' }
           - { name: macos, os: macos-26 }
-          - { name: windows, os: windows-2025 }
+          # Hosted x64 Windows images are Server SKUs; windows-11-arm is a client SKU.
+          - { name: windows-server-2025, os: windows-2025 }
+          - { name: windows-server-2022, os: windows-2022 }
+          - { name: windows-11-arm64, os: windows-11-arm }
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     timeout-minutes: 30
