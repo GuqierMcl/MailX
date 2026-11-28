@@ -97,7 +97,7 @@
 
 当前同步窗口在首次建立游标或 UIDVALIDITY 变化时确定：`window_start` 为当日 UTC 日期减 30 天，之后沿用该起点，**不是每天滚动的最近 30 天**。IMAP `SEARCH SINCE` 使用服务器日期语义，时区边界可能相差一天。
 
-1. 按账号路由登录，必要时刷新文件夹目录；选择全部可选文件夹，收件箱优先，其余稳定遍历。优先用 `STATUS` 更新总数和未读数，再用 `EXAMINE` 获取 UIDVALIDITY；STATUS 完整成功但数据不可用时，改用 `EXAMINE` + `UID SEARCH UNSEEN` 取得计数并复用已打开的目录。缺少 UIDVALIDITY 时本轮失败，不写入邮件；兼容路径缺少 EXISTS 或完整未读搜索结果时不覆盖计数。
+1. 按账号路由登录，必要时刷新文件夹目录；选择全部可选文件夹，收件箱优先，其余稳定遍历。优先用 `STATUS` 更新总数和未读数，再用 `EXAMINE` 获取 UIDVALIDITY；STATUS 完整成功但数据不可用时，改用 `EXAMINE` + `UID SEARCH UNSEEN` 取得计数并复用已打开的目录。RFC 3501 要求 UIDVALIDITY 非零，但个别服务器返回 `0` 或完全不返回（例如新浪的分类文件夹在 STATUS 中报 `0`，EXAMINE 中省略）。与 Thunderbird 一致，两种情况都按代际 `0` 处理：保持不变时正常增量同步，之后变为其他值时与任何 UIDVALIDITY 变化一样重建该目录缓存。服务器若在代际不变时重新编号，客户端无法察觉，这是与其他客户端相同的取舍；兼容路径缺少 EXISTS 或完整未读搜索结果时不覆盖计数。
 2. 没有游标或 UIDVALIDITY 改变时，在短事务内将旧代际的 `present` 邮件标记为 `stale`，重建游标，设置固定窗口起点、`highest_uid=0`、`backfill_done=0`。旧代际不再对查询可见。
 3. 每轮重新执行完整 `UID SEARCH SINCE <window_start>`，对所有匹配 UID 排序，选取最大的 1,000 个。超过上限时设置 `window_capped=1`；此上限是每轮选择范围，不是本地总记录上限。非空目录同时执行 `UID SEARCH FLAGGED`（服务器拒绝时静默降级），将常规窗口之外的星标邮件按 UID 倒序额外纳入最多 500 封一并抓取，使 30 天前已有的星标邮件也能进入本地星标视图。
 4. 只抓取选定集合中尚无当前 `present` 记录的 UID，按新到旧每批最多 200 封。每批邮件与 `highest_uid` 在同一事务提交，重复写入保留本地 ID；选定集合头部全部取得，且删除与 flags 对账成功后，才标记 `backfill_done=1`。取消、断线或写库失败保留已提交批次，下一轮按实际缓存继续，最大 UID 不代表其之前都已缓存。
