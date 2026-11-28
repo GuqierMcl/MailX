@@ -18,7 +18,10 @@ const groups: { os: string; name: string; note: string; extra: string | null; li
     { id: 'arm', label: t.macos.arm, download: find('macos-arm64') },
     { id: 'intel', label: t.macos.intel, download: find('macos-x64') },
   ] }] },
-  { os: 'windows', name: t.windows.name, note: t.windows.note, extra: null, linkGroups: [{ links: [{ id: 'setup', label: t.windows.setup, download: find('windows-x64') }] }] },
+  { os: 'windows', name: t.windows.name, note: t.windows.note, extra: find('windows-arm64') ? t.windows.which : null, linkGroups: [{ links: [
+    { id: 'windows-x64', label: t.windows.x64, download: find('windows-x64') },
+    { id: 'windows-arm64', label: t.windows.arm64, download: find('windows-arm64') },
+  ] }] },
   { os: 'linux', name: t.linux.name, note: hasLinuxArm64 ? `${t.linux.ubuntuMinimum} ${t.linux.note}` : t.linux.note, extra: null, linkGroups: linuxArchitectures.map((arch) => ({
     label: t.linux[arch],
     links: linuxFormats.map((format) => ({
@@ -81,8 +84,16 @@ const groups: { os: string; name: string; note: string; extra: string | null; li
     grid.dataset.os = os
     card.classList.add('featured')
     const primary = (id: string) => card.querySelector(`[data-link="${id}"]`)?.classList.add('primary')
-    if (os === 'windows') primary('setup')
     const hints = (navigator as Navigator & { userAgentData?: { getHighEntropyValues(keys: string[]): Promise<{ architecture?: string; bitness?: string }> } }).userAgentData
+    if (os === 'windows') {
+      // Chromium reports the CPU; elsewhere x64 is the likelier guess. Releases
+      // without an ARM64 installer only show the x64 button.
+      const windows = (arm: boolean) =>
+        primary(arm && card.querySelector('[data-link="windows-arm64"]') ? 'windows-arm64' : 'windows-x64')
+      hints?.getHighEntropyValues(['architecture'])
+        .then((values) => windows(values.architecture === 'arm'))
+        .catch(() => windows(false)) ?? windows(false)
+    }
     if (os === 'linux') {
       // Reduced Linux user agents do not reliably identify the architecture.
       hints?.getHighEntropyValues(['architecture', 'bitness']).then(({ architecture, bitness }) => {

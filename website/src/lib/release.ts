@@ -9,12 +9,13 @@ export const RELEASES_URL = `https://github.com/${REPOSITORY}/releases`
 
 export type LinuxArchitecture = 'x64' | 'arm64'
 type LinuxFormat = 'appimage' | 'deb' | 'rpm'
-export type DownloadId = 'macos-arm64' | 'macos-x64' | 'windows-x64' | `linux-${LinuxArchitecture}-${LinuxFormat}`
+export type DownloadId = 'macos-arm64' | 'macos-x64' | 'windows-x64' | 'windows-arm64' | `linux-${LinuxArchitecture}-${LinuxFormat}`
 
 const SUFFIXES: Record<DownloadId, string> = {
   'macos-arm64': '_macos-arm64.dmg',
   'macos-x64': '_macos-x64.dmg',
   'windows-x64': '_windows-x64-setup.exe',
+  'windows-arm64': '_windows-arm64-setup.exe',
   'linux-x64-appimage': '_linux-x64.AppImage',
   'linux-x64-deb': '_linux-x64.deb',
   'linux-x64-rpm': '_linux-x64.rpm',

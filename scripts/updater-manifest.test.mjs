@@ -8,6 +8,7 @@ const assets = [
   "MailX_0.2.0_macos-arm64.app.tar.gz",
   "MailX_0.2.0_macos-x64.app.tar.gz",
   "MailX_0.2.0_windows-x64-setup.exe",
+  "MailX_0.2.0_windows-arm64-setup.exe",
   "MailX_0.2.0_linux-x64.AppImage",
   "MailX_0.2.0_linux-arm64.AppImage",
 ];
@@ -35,6 +36,7 @@ describe("latest.json", () => {
       url: "https://github.com/GuqierMcl/MailX/releases/download/v0.2.0/MailX_0.2.0_macos-arm64.app.tar.gz",
     });
     expect(built.platforms["windows-x86_64"].url).toEndWith("MailX_0.2.0_windows-x64-setup.exe");
+    expect(built.platforms["windows-aarch64"].url).toEndWith("MailX_0.2.0_windows-arm64-setup.exe");
   });
 
   test("pairs each Linux architecture with its signed AppImage regardless of file order", () => {
@@ -56,6 +58,7 @@ describe("latest.json", () => {
     const cases = [
       [all.filter((name) => !name.includes("macos-arm64")), ["darwin-aarch64"]],
       [all.filter((name) => name !== "MailX_0.2.0_windows-x64-setup.exe.sig"), ["windows-x86_64"]],
+      [all.filter((name) => !name.startsWith("MailX_0.2.0_windows-arm64-setup.exe")), ["windows-aarch64"]],
       [all.filter((name) => !name.includes("macos-x64")), ["darwin-x86_64"]],
       [all.filter((name) => name !== "MailX_0.2.0_linux-x64.AppImage"), ["linux-x86_64"]],
       [all.filter((name) => name !== "MailX_0.2.0_linux-arm64.AppImage.sig"), ["linux-aarch64"]],
@@ -143,7 +146,7 @@ describe("the command line", () => {
     expect(result.exitCode).toBe(0);
     const written = JSON.parse(readFileSync(join(directory, "latest.json"), "utf8"));
     expect(written.notes).toBe("- 更新。");
-    expect(Object.keys(written.platforms)).toHaveLength(5);
+    expect(Object.keys(written.platforms)).toHaveLength(PLATFORMS.length);
   });
 
   test("exits non-zero without writing a partial manifest", () => {
