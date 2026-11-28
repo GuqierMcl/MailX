@@ -154,10 +154,19 @@ fn learned_stack(key: &(String, u16)) -> Option<TlsStack> {
 }
 
 fn learn_stack(key: (String, u16), stack: TlsStack) {
-    learned_stacks()
+    let mut stacks = learned_stacks()
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(key, stack);
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    match stack {
+        // A rustls success pins the endpoint against later downgrades.
+        TlsStack::Rustls => {
+            stacks.insert(key, TlsStack::Rustls);
+        }
+        // Platform fallback must never overwrite an already-recorded rustls success.
+        TlsStack::Platform => {
+            stacks.entry(key).or_insert(TlsStack::Platform);
+        }
+    }
 }
 
 /// Runs one mail connection attempt (`attempt` connects along the account
@@ -186,7 +195,11 @@ where
             }
             Ok(value)
         }
-        Err(error) if known.is_none() && incompatible(&error) => {
+        Err(error)
+            if known.is_none()
+                && incompatible(&error)
+                && learned_stack(&key) != Some(TlsStack::Rustls) =>
+        {
             let result = attempt(TlsStack::Platform).await;
             if result.is_ok() {
                 learn_stack(key, TlsStack::Platform);
@@ -197,12 +210,22 @@ where
     }
 }
 
+fn platform_tls_connector() -> Result<tokio_native_tls::TlsConnector, NetError> {
+    static CONNECTOR: OnceLock<Result<native_tls::TlsConnector, &'static str>> = OnceLock::new();
+    CONNECTOR
+        .get_or_init(|| {
+            native_tls::TlsConnector::builder()
+                .min_protocol_version(Some(native_tls::Protocol::Tlsv12))
+                .build()
+                .map_err(|_| "platform TLS unavailable")
+        })
+        .clone()
+        .map(tokio_native_tls::TlsConnector::from)
+        .map_err(|reason| NetError::Tls(reason.into()))
+}
+
 async fn platform_handshake(stream: BoxedStream, host: &str) -> Result<BoxedStream, NetError> {
-    let connector = native_tls::TlsConnector::builder()
-        .min_protocol_version(Some(native_tls::Protocol::Tlsv12))
-        .build()
-        .map_err(|_| NetError::Tls("platform TLS unavailable".into()))?;
-    let connector = tokio_native_tls::TlsConnector::from(connector);
+    let connector = platform_tls_connector()?;
     let handshake = connector.connect(host, stream);
     let stream = timeout(CONNECT_TIMEOUT, handshake)
         .await
@@ -451,5 +474,103 @@ mod tests {
         )
         .await;
         assert_eq!(tried, [Rustls, Platform]);
+    }
+
+    #[tokio::test]
+    async fn concurrent_rustls_success_blocks_and_never_loses_to_platform_fallback() {
+        use TlsStack::{Platform, Rustls};
+        use tokio::sync::oneshot;
+
+        // Case 1: both start with no learned stack; A succeeds on rustls before B
+        // finishes its failing rustls attempt -> B must not retry on Platform.
+        let host1 = "fallback-race-block.example";
+        let (b_started_tx, b_started_rx) = oneshot::channel();
+        let (a_done_tx, a_done_rx) = oneshot::channel();
+        let b_tried = Arc::new(Mutex::new(Vec::new()));
+        let b_tried_task = b_tried.clone();
+        let b_started = Mutex::new(Some(b_started_tx));
+        let a_done = Mutex::new(Some(a_done_rx));
+        let task_b = tokio::spawn(async move {
+            with_tls_fallback(
+                host1,
+                993,
+                move |stack| {
+                    b_tried_task.lock().unwrap().push(stack);
+                    let started = b_started.lock().unwrap().take();
+                    let wait = a_done.lock().unwrap().take();
+                    async move {
+                        if let Some(tx) = started {
+                            let _ = tx.send(());
+                        }
+                        if let Some(rx) = wait {
+                            let _ = rx.await;
+                        }
+                        match stack {
+                            Rustls => incompatible(),
+                            Platform => Ok(()),
+                        }
+                    }
+                },
+                NetError::is_tls_incompatible,
+            )
+            .await
+        });
+        b_started_rx.await.unwrap();
+        let (a_res, a_tried) = fallback(host1, Ok(()), Ok(())).await;
+        assert!(a_res.is_ok());
+        assert_eq!(a_tried, [Rustls]);
+        let _ = a_done_tx.send(());
+        let b_res = task_b.await.unwrap();
+        assert!(b_res.unwrap_err().is_tls_incompatible());
+        assert_eq!(*b_tried.lock().unwrap(), [Rustls]);
+
+        // Case 2: B already entered its Platform retry when A succeeds on rustls ->
+        // B's Platform success must never overwrite the recorded Rustls stack.
+        let host2 = "fallback-race-no-overwrite.example";
+        let (b_in_platform_tx, b_in_platform_rx) = oneshot::channel();
+        let (allow_b_tx, allow_b_rx) = oneshot::channel();
+        let b_in_platform = Mutex::new(Some(b_in_platform_tx));
+        let allow_b = Mutex::new(Some(allow_b_rx));
+        let task_b = tokio::spawn(async move {
+            with_tls_fallback(
+                host2,
+                993,
+                move |stack| {
+                    let signal = (stack == Platform)
+                        .then(|| b_in_platform.lock().unwrap().take())
+                        .flatten();
+                    let wait = (stack == Platform)
+                        .then(|| allow_b.lock().unwrap().take())
+                        .flatten();
+                    async move {
+                        match stack {
+                            Rustls => incompatible(),
+                            Platform => {
+                                if let Some(tx) = signal {
+                                    let _ = tx.send(());
+                                }
+                                if let Some(rx) = wait {
+                                    let _ = rx.await;
+                                }
+                                Ok(())
+                            }
+                        }
+                    }
+                },
+                NetError::is_tls_incompatible,
+            )
+            .await
+        });
+        b_in_platform_rx.await.unwrap();
+        let (a_res, a_tried) = fallback(host2, Ok(()), Ok(())).await;
+        assert!(a_res.is_ok());
+        assert_eq!(a_tried, [Rustls]);
+        let _ = allow_b_tx.send(());
+        assert!(task_b.await.unwrap().is_ok());
+
+        // Subsequent connections must stay pinned to Rustls.
+        let (after, tried) = fallback(host2, incompatible(), Ok(())).await;
+        assert!(after.unwrap_err().is_tls_incompatible());
+        assert_eq!(tried, [Rustls]);
     }
 }

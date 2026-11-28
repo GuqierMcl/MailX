@@ -1016,3 +1016,23 @@ async fn a_server_that_worked_with_rustls_is_never_downgraded() {
     let state = seen.lock().unwrap();
     assert_eq!((state.connections, state.tls_handshakes_refused), (2, 1));
 }
+
+#[tokio::test]
+async fn auth_rejection_still_remembers_the_working_tls_stack() {
+    let tls = TestTls::for_names(&["localhost"]);
+    let script = Script::new(Mode::Implicit(tls.server.clone()))
+        .reply(Stage::Auth, "535 5.7.8 authentication failed");
+    let refusals = script.refuse_handshakes.clone();
+    let (port, seen) = fake_server::start(script).await;
+    let mut run = Run::new(port, TlsMode::Implicit);
+    run.tls = tls_for(&tls);
+    let outcome = run.go(hook(&seen)).await;
+    assert_eq!(reason_of(&outcome), (false, FailureReason::AuthRejected));
+
+    // Even though AUTH failed, rustls succeeded on TLS + EHLO and must stay pinned.
+    refusals.store(1, std::sync::atomic::Ordering::SeqCst);
+    let outcome = run.go(hook(&seen)).await;
+    assert_eq!(reason_of(&outcome), (false, FailureReason::TlsVerification));
+    let state = seen.lock().unwrap();
+    assert_eq!((state.connections, state.tls_handshakes_refused), (2, 1));
+}

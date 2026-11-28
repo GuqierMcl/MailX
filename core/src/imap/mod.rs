@@ -367,6 +367,27 @@ fn proof_error(error: ImapError) -> crate::auth::OAuthError {
     }
 }
 
+enum ImapTlsSource {
+    Platform,
+    #[cfg(test)]
+    Test(std::sync::Arc<rustls::ClientConfig>),
+}
+
+impl ImapTlsSource {
+    async fn upgrade(
+        &self,
+        stream: BoxedStream,
+        host: &str,
+        stack: net::TlsStack,
+    ) -> Result<BoxedStream, NetError> {
+        match self {
+            Self::Platform => net::upgrade_tls_on(stream, host, stack).await,
+            #[cfg(test)]
+            Self::Test(config) => net::upgrade_tls_with(stream, host, config.clone()).await,
+        }
+    }
+}
+
 /// Transport setup shared with the dedicated body connection. Every plaintext
 /// authentication phase is bounded, including unsolicited policy rejections.
 /// A server that shares no TLS parameters with rustls is retried once on the
@@ -376,10 +397,19 @@ async fn connect_client(
     login: &ImapLogin,
     guard: &body::ReceiveGuard,
 ) -> Result<(Client<BoxedStream>, body::PlaintextGate), ImapError> {
+    connect_client_with_tls(route, login, guard, &ImapTlsSource::Platform).await
+}
+
+async fn connect_client_with_tls(
+    route: &NetRoute,
+    login: &ImapLogin,
+    guard: &body::ReceiveGuard,
+    tls: &ImapTlsSource,
+) -> Result<(Client<BoxedStream>, body::PlaintextGate), ImapError> {
     net::with_tls_fallback(
         &login.host,
         login.port,
-        |stack| connect_client_on(route, login, guard, stack),
+        |stack| connect_client_on(route, login, guard, tls, stack),
         |error| matches!(error, ImapError::Net(error) if error.is_tls_incompatible()),
     )
     .await
@@ -389,12 +419,13 @@ async fn connect_client_on(
     route: &NetRoute,
     login: &ImapLogin,
     guard: &body::ReceiveGuard,
+    tls: &ImapTlsSource,
     stack: net::TlsStack,
 ) -> Result<(Client<BoxedStream>, body::PlaintextGate), ImapError> {
     let stream = net::connect(route, &login.host, login.port).await?;
     match login.tls {
         TlsMode::Implicit => {
-            let stream = net::upgrade_tls_on(stream, &login.host, stack).await?;
+            let stream = tls.upgrade(stream, &login.host, stack).await?;
             let (stream, gate) = guard.wrap(stream);
             Ok((greet(stream).await?, gate))
         }
@@ -408,7 +439,7 @@ async fn connect_client_on(
                     _ => ImapError::Unsupported("STARTTLS".into()),
                 })?;
             plaintext.disable();
-            let stream = net::upgrade_tls_on(client.into_inner(), &login.host, stack).await?;
+            let stream = tls.upgrade(client.into_inner(), &login.host, stack).await?;
             let (stream, gate) = guard.wrap(stream);
             // STARTTLS continues inside TLS without another greeting.
             Ok((Client::new(stream), gate))
@@ -2841,5 +2872,179 @@ mod tests {
         assert!(session.store_flag(0, "\\Seen", true).await.is_err());
         drop(session);
         let _ = server.await;
+    }
+
+    async fn start_tls_imap_server(
+        tls: std::sync::Arc<rustls::ServerConfig>,
+        starttls: bool,
+        refusals: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let connections = std::sync::Arc::new(AtomicUsize::new(0));
+        let count = connections.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                count.fetch_add(1, Ordering::SeqCst);
+                let tls = tls.clone();
+                let refusals = refusals.clone();
+                tokio::spawn(async move {
+                    if starttls {
+                        if socket.write_all(b"* OK ready\r\n").await.is_err() {
+                            return;
+                        }
+                        let mut reader = BufReader::new(socket);
+                        let mut command = String::new();
+                        if reader.read_line(&mut command).await.is_err() {
+                            return;
+                        }
+                        let tag = command.split_whitespace().next().unwrap_or("A1");
+                        let reply = format!("{tag} OK begin TLS\r\n");
+                        if reader.get_mut().write_all(reply.as_bytes()).await.is_err() {
+                            return;
+                        }
+                        let _ = reader.get_mut().flush().await;
+                        socket = reader.into_inner();
+                    }
+                    let refuse = refusals
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                            left.checked_sub(1)
+                        })
+                        .is_ok();
+                    if refuse {
+                        let mut hello = [0; 512];
+                        let _ = socket.read(&mut hello).await;
+                        let _ = socket
+                            .write_all(&[0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28])
+                            .await;
+                        let _ = socket.flush().await;
+                        return;
+                    }
+                    let Ok(mut secured) = tokio_rustls::TlsAcceptor::from(tls).accept(socket).await
+                    else {
+                        return;
+                    };
+                    if !starttls {
+                        let _ = secured.write_all(b"* OK secure ready\r\n").await;
+                        let _ = secured.flush().await;
+                    }
+                    // Keep the stream open briefly until the client finishes.
+                    let mut drain = [0; 64];
+                    let _ = secured.read(&mut drain).await;
+                });
+            }
+        });
+        (port, connections)
+    }
+
+    #[tokio::test]
+    async fn incompatible_tls_retries_once_on_the_platform_stack_along_the_same_route() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use crate::accounts::types::ProxyKind;
+        use crate::net::test_support::{TestTls, fake_socks5, proxy_route};
+
+        for starttls in [false, true] {
+            let tls = TestTls::for_names(&["imap.example.test"]);
+            let refusals = Arc::new(AtomicUsize::new(1));
+            let (imap_port, connections) =
+                start_tls_imap_server(tls.server.clone(), starttls, refusals).await;
+            let (proxy, targets) = fake_socks5(imap_port).await;
+            let route = proxy_route(ProxyKind::Socks5, proxy);
+            let login = ImapLogin {
+                host: "imap.example.test".into(),
+                port: if starttls { 2143 } else { 2993 },
+                tls: if starttls {
+                    TlsMode::StartTls
+                } else {
+                    TlsMode::Implicit
+                },
+                username: "user@example.test".into(),
+                credential: ProtocolCredential::Password(SecretValue::new("secret".into())),
+            };
+            let guard = body::ReceiveGuard::default();
+            let result =
+                connect_client_with_tls(&route, &login, &guard, &ImapTlsSource::Test(tls.client))
+                    .await;
+            let (_, gate) = guard.check(result).unwrap();
+            gate.disable();
+            assert_eq!(connections.load(Ordering::SeqCst), 2, "{starttls}");
+            let targets = targets.lock().unwrap().clone();
+            assert_eq!(targets.len(), 2, "{starttls}: {targets:?}");
+            assert!(
+                targets
+                    .iter()
+                    .all(|target| target.contains("imap.example.test")),
+                "{targets:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn certificate_failures_and_rustls_verified_imap_servers_never_fall_back() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use crate::net::test_support::TestTls;
+
+        let tls = TestTls::for_names(&["localhost"]);
+        let other = TestTls::for_names(&["localhost"]);
+        let refusals = Arc::new(AtomicUsize::new(0));
+        let (port, connections) =
+            start_tls_imap_server(tls.server.clone(), false, refusals.clone()).await;
+        let login = ImapLogin {
+            host: "localhost".into(),
+            port,
+            tls: TlsMode::Implicit,
+            username: "user@localhost".into(),
+            credential: ProtocolCredential::Password(SecretValue::new("secret".into())),
+        };
+        let guard = body::ReceiveGuard::default();
+        let error = connect_client_with_tls(
+            &NetRoute::default(),
+            &login,
+            &guard,
+            &ImapTlsSource::Test(other.client),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(matches!(error, ImapError::Net(NetError::Tls(_))));
+        assert_eq!(connections.load(Ordering::SeqCst), 1);
+
+        // Once rustls succeeds, a subsequent forged handshake_failure must not retry.
+        let guard = body::ReceiveGuard::default();
+        let (_, gate) = connect_client_with_tls(
+            &NetRoute::default(),
+            &login,
+            &guard,
+            &ImapTlsSource::Test(tls.client.clone()),
+        )
+        .await
+        .unwrap();
+        gate.disable();
+        assert_eq!(connections.load(Ordering::SeqCst), 2);
+
+        refusals.store(1, Ordering::SeqCst);
+        let guard = body::ReceiveGuard::default();
+        let error = connect_client_with_tls(
+            &NetRoute::default(),
+            &login,
+            &guard,
+            &ImapTlsSource::Test(tls.client),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(matches!(error, ImapError::Net(error) if error.is_tls_incompatible()));
+        assert_eq!(connections.load(Ordering::SeqCst), 3);
     }
 }

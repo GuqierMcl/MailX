@@ -709,34 +709,38 @@ async fn authenticated_connection(
 
 /// A server that shares no TLS parameters with rustls is retried once on the
 /// platform TLS stack along the same route (see `net::with_tls_fallback`).
+/// Fallback and stack learning stop once the encrypted channel and post-TLS
+/// EHLO succeed, so credential errors do not discard a working TLS stack.
 async fn connect_and_authenticate(
     route: &NetRoute,
     login: &SmtpLogin,
     timeouts: &Timeouts,
     tls: &TlsSource,
 ) -> Result<(Conn, Capabilities), SmtpOutcome> {
-    net::with_tls_fallback(
-        &login.host,
-        login.port,
-        |stack| connect_and_authenticate_on(route, login, timeouts, tls, stack),
-        |failure: &SetupFailure| failure.tls_incompatible,
-    )
-    .await
-    .map_err(|failure| failure.outcome)
-}
-
-async fn connect_and_authenticate_on(
-    route: &NetRoute,
-    login: &SmtpLogin,
-    timeouts: &Timeouts,
-    tls: &TlsSource,
-    stack: net::TlsStack,
-) -> Result<(Conn, Capabilities), SetupFailure> {
     let secret = login
         .credential
         .secret()
         .map_err(|_| permanent(FailureReason::CredentialMissing))?;
+    let (mut conn, caps) = net::with_tls_fallback(
+        &login.host,
+        login.port,
+        |stack| connect_and_ehlo_on(route, login, secret, timeouts, tls, stack),
+        |failure: &SetupFailure| failure.tls_incompatible,
+    )
+    .await
+    .map_err(|failure| failure.outcome)?;
+    authenticate(&mut conn, login, &caps, timeouts.command).await?;
+    Ok((conn, caps))
+}
 
+async fn connect_and_ehlo_on(
+    route: &NetRoute,
+    login: &SmtpLogin,
+    secret: &SecretValue,
+    timeouts: &Timeouts,
+    tls: &TlsSource,
+    stack: net::TlsStack,
+) -> Result<(Conn, Capabilities), SetupFailure> {
     let stream = net::connect(route, &login.host, login.port)
         .await
         .map_err(net_outcome)?;
@@ -786,8 +790,6 @@ async fn connect_and_authenticate_on(
         // Capabilities learned before TLS are discarded, not trusted.
         caps = ehlo(&mut conn, timeouts.command, secret).await?;
     }
-
-    authenticate(&mut conn, login, &caps, timeouts.command).await?;
 
     Ok((conn, caps))
 }

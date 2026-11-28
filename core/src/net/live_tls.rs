@@ -76,27 +76,42 @@ impl fmt::Display for ProbeError {
 
 type Reader = BufReader<BoxedStream>;
 
-async fn line(reader: &mut Reader) -> String {
+async fn line(reader: &mut Reader) -> Result<String, ProbeError> {
     let mut text = String::new();
-    let _ = reader.read_line(&mut text).await;
-    text.trim_end().to_owned()
+    tokio::time::timeout(super::CONNECT_TIMEOUT, reader.read_line(&mut text))
+        .await
+        .map_err(|_| ProbeError::Net(NetError::Timeout))?
+        .map_err(|error| ProbeError::Reply(format!("read error: {error}")))?;
+    Ok(text.trim_end().to_owned())
+}
+
+async fn write_line(reader: &mut Reader, text: &str) -> Result<(), ProbeError> {
+    let write = async {
+        let stream = reader.get_mut();
+        stream.write_all(text.as_bytes()).await?;
+        stream.flush().await
+    };
+    tokio::time::timeout(super::CONNECT_TIMEOUT, write)
+        .await
+        .map_err(|_| ProbeError::Net(NetError::Timeout))?
+        .map_err(|error| ProbeError::Reply(format!("write error: {error}")))
 }
 
 /// Reads one SMTP reply (possibly multi-line) and returns its last line.
-async fn reply(reader: &mut Reader) -> String {
+async fn reply(reader: &mut Reader) -> Result<String, ProbeError> {
     loop {
-        let text = line(reader).await;
+        let text = line(reader).await?;
         if text.len() < 4 || text.as_bytes()[3] != b'-' {
-            return text;
+            return Ok(text);
         }
     }
 }
 
 async fn command(reader: &mut Reader, text: &str, expected: &str) -> Result<String, ProbeError> {
     if !text.is_empty() {
-        let _ = reader.get_mut().write_all(text.as_bytes()).await;
+        write_line(reader, text).await?;
     }
-    let answer = reply(reader).await;
+    let answer = reply(reader).await?;
     if answer.starts_with(expected) {
         Ok(answer)
     } else {
@@ -124,8 +139,8 @@ async fn probe(host: &str, port: u16, stack: TlsStack) -> Result<String, ProbeEr
     let mut reader = BufReader::new(stream);
     let greeting = match kind {
         Kind::Imap => {
-            let greeting = line(&mut reader).await;
-            let _ = reader.get_mut().write_all(b"a LOGOUT\r\n").await;
+            let greeting = line(&mut reader).await?;
+            let _ = write_line(&mut reader, "a LOGOUT\r\n").await;
             if !greeting.starts_with("* OK") {
                 return Err(ProbeError::Reply(greeting));
             }
@@ -135,7 +150,7 @@ async fn probe(host: &str, port: u16, stack: TlsStack) -> Result<String, ProbeEr
         Kind::SmtpStartTls => command(&mut reader, "EHLO mailx.invalid\r\n", "250").await?,
     };
     if kind != Kind::Imap {
-        let _ = reader.get_mut().write_all(b"QUIT\r\n").await;
+        let _ = write_line(&mut reader, "QUIT\r\n").await;
     }
     Ok(greeting)
 }
@@ -161,13 +176,29 @@ async fn connect(host: &str, port: u16) -> (Result<String, ProbeError>, TlsStack
 async fn live_provider_tls() {
     let survey = std::env::var("MAILX_TLS_SURVEY").ok();
     let endpoints: Vec<(String, u16)> = match &survey {
-        Some(list) => list
-            .split_whitespace()
-            .filter_map(|entry| {
-                let (host, port) = entry.rsplit_once(':')?;
-                Some((host.to_owned(), port.parse().ok()?))
-            })
-            .collect(),
+        Some(list) => {
+            let parsed: Vec<(String, u16)> = list
+                .split_whitespace()
+                .map(|entry| {
+                    let (host, port) = entry.rsplit_once(':').unwrap_or_else(|| {
+                        panic!("invalid MAILX_TLS_SURVEY entry (expected host:port): {entry:?}")
+                    });
+                    assert!(
+                        !host.is_empty(),
+                        "invalid MAILX_TLS_SURVEY entry (empty host): {entry:?}"
+                    );
+                    let port = port.parse::<u16>().unwrap_or_else(|_| {
+                        panic!("invalid MAILX_TLS_SURVEY port in entry: {entry:?}")
+                    });
+                    (host.to_owned(), port)
+                })
+                .collect();
+            assert!(
+                !parsed.is_empty(),
+                "MAILX_TLS_SURVEY was set but listed no host:port endpoints"
+            );
+            parsed
+        }
         None => PRESET_ENDPOINTS
             .iter()
             .map(|&(host, port)| (host.to_owned(), port))
