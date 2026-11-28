@@ -872,7 +872,6 @@ impl Session {
             uid_next: None,
             exists: None,
         };
-        let mut has_uid_validity = false;
         self.checked_command::<()>(&command, |response, _| {
             match response {
                 Response::MailboxData(MailboxDatum::Exists(value)) => result.exists = Some(*value),
@@ -880,10 +879,7 @@ impl Session {
                     status: Status::Ok,
                     outcome,
                 } => match outcome.code {
-                    Some(ResponseCode::UidValidity(value)) => {
-                        result.uid_validity = value;
-                        has_uid_validity = true;
-                    }
+                    Some(ResponseCode::UidValidity(value)) => result.uid_validity = value,
                     Some(ResponseCode::UidNext(value)) => result.uid_next = Some(value),
                     _ => {}
                 },
@@ -892,14 +888,10 @@ impl Session {
             Ok(None)
         })
         .await?;
-        // RFC 3501 requires a non-zero value, but some servers (Sina's
-        // category folders) answer 0. Like other clients, treat it as an
-        // ordinary generation: a later change still resets the cache.
-        if !has_uid_validity {
-            return Err(ImapError::Mailbox(
-                "EXAMINE did not return UIDVALIDITY".into(),
-            ));
-        }
+        // RFC 3501 requires a non-zero UIDVALIDITY, but some servers send 0
+        // or none at all (Sina's category folders report 0 in STATUS and
+        // omit it from EXAMINE). Like Thunderbird, both mean generation 0:
+        // an ordinary generation whose later change still resets the cache.
         Ok(result)
     }
 
@@ -912,7 +904,6 @@ impl Session {
             permanent_flags: Vec::new(),
             read_only: false,
         };
-        let mut has_uid_validity = false;
         self.checked_command::<()>(&command, |response, _| {
             if let Response::Data {
                 status: Status::Ok,
@@ -920,10 +911,7 @@ impl Session {
             } = response
             {
                 match outcome.code {
-                    Some(ResponseCode::UidValidity(value)) => {
-                        mailbox.uid_validity = value;
-                        has_uid_validity = true;
-                    }
+                    Some(ResponseCode::UidValidity(value)) => mailbox.uid_validity = value,
                     Some(ResponseCode::PermanentFlags(ref flags)) => {
                         mailbox.permanent_flags =
                             flags.iter().map(|flag| flag.to_string()).collect();
@@ -937,12 +925,7 @@ impl Session {
         .await?;
         // The server states the mode in the tagged OK, not in an untagged line.
         mailbox.read_only |= self.completion == Some(ResponseCodeKind::ReadOnly);
-        // A zero generation is accepted as in `examine`; only absence fails.
-        if !has_uid_validity {
-            return Err(ImapError::Mailbox(
-                "SELECT did not return UIDVALIDITY".into(),
-            ));
-        }
+        // A zero or missing UIDVALIDITY is generation 0, as in `examine`.
         Ok(mailbox)
     }
 
@@ -2154,20 +2137,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn requires_uid_validity_before_sync() {
-        let (mut session, server) = header_session(vec![(
-            "EXAMINE".into(),
-            "* 1 EXISTS\r\n{tag} OK [READ-ONLY]\r\n".into(),
-        )])
-        .await;
-        assert!(matches!(
-            session.examine("INBOX").await,
-            Err(ImapError::Mailbox(_))
-        ));
-        server.await.unwrap();
-    }
-
-    #[tokio::test]
     async fn empty_or_invalid_uid_requests_send_no_fetch() {
         let (mut session, server) =
             header_session(vec![("LOGOUT".into(), "{tag} OK\r\n".into())]).await;
@@ -2686,47 +2655,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn zero_uid_validity_is_an_ordinary_generation() {
-        // Verbatim from imap.sina.com's "其它邮件" category folder.
-        let zero = "* 0 EXISTS\r\n* 0 RECENT\r\n* OK [UIDVALIDITY 0] UID validity status\r\n* OK [UIDNEXT 2] Predicted next UID\r\n{tag} OK [READ-ONLY] EXAMINE completed\r\n";
-        let (mut session, server) = header_session(vec![("EXAMINE".into(), zero.into())]).await;
-        let mailbox = session.examine("&UXZbg5CuTvY-").await;
-        server.await.unwrap();
-        let mailbox = mailbox.unwrap();
-        assert_eq!(
-            (mailbox.uid_validity, mailbox.uid_next, mailbox.exists),
-            (0, Some(2), Some(0))
-        );
-
-        let (mut session, server) = writable_session(vec![(
-            "SELECT".into(),
-            "* OK [UIDVALIDITY 0] valid\r\n{tag} OK [READ-WRITE]\r\n".into(),
-        )])
-        .await;
-        let selected = session.select("&UXZbg5CuTvY-").await;
-        server.await.unwrap();
-        assert_eq!(selected.unwrap().uid_validity, 0);
-    }
-
-    #[tokio::test]
-    async fn missing_uid_validity_still_fails() {
-        for command in ["EXAMINE", "SELECT"] {
-            let script = vec![(
-                command.into(),
-                "* 1 EXISTS\r\n* OK [UIDNEXT 3] next\r\n{tag} OK\r\n".into(),
-            )];
-            let (mut session, server) = if command == "EXAMINE" {
-                header_session(script).await
-            } else {
-                writable_session(script).await
-            };
-            let failed = if command == "EXAMINE" {
-                session.examine("INBOX").await.is_err()
-            } else {
-                session.select("INBOX").await.is_err()
-            };
+    async fn zero_or_missing_uid_validity_is_generation_zero() {
+        // Captured from imap.sina.com's "其它邮件" folder, whose STATUS reports
+        // UIDVALIDITY 0 and whose EXAMINE omits UIDVALIDITY and UIDNEXT.
+        let sina = "* 0 EXISTS\r\n* 0 RECENT\r\n* FLAGS (\\Answered \\Flagged \\Deleted \\Draft \\Seen)\r\n* OK [PERMANENTFLAGS (\\* \\Answered \\Flagged \\Deleted \\Draft \\Seen)] Permanent flags\r\n{tag} OK [READ-ONLY] EXAMINE completed\r\n";
+        let zero = "* 3 EXISTS\r\n* OK [UIDVALIDITY 0] zero\r\n* OK [UIDNEXT 4] next\r\n{tag} OK [READ-ONLY]\r\n";
+        for (reply, expected) in [(sina, (0, None, Some(0))), (zero, (0, Some(4), Some(3)))] {
+            let (mut session, server) =
+                header_session(vec![("EXAMINE".into(), reply.into())]).await;
+            let mailbox = session.examine("&UXZbg5CuTvY-").await;
             server.await.unwrap();
-            assert!(failed, "{command} accepted a reply without UIDVALIDITY");
+            let mailbox = mailbox.unwrap();
+            assert_eq!(
+                (mailbox.uid_validity, mailbox.uid_next, mailbox.exists),
+                expected
+            );
+        }
+        for reply in [
+            "* OK [UIDVALIDITY 0] zero\r\n{tag} OK [READ-WRITE]\r\n",
+            "* OK [PERMANENTFLAGS (\\Seen)] flags\r\n{tag} OK [READ-WRITE]\r\n",
+        ] {
+            let (mut session, server) =
+                writable_session(vec![("SELECT".into(), reply.into())]).await;
+            let selected = session.select("&UXZbg5CuTvY-").await;
+            server.await.unwrap();
+            assert_eq!(selected.unwrap().uid_validity, 0);
         }
     }
 
@@ -2743,10 +2696,6 @@ mod tests {
             ),
             (
                 "EXAMINE".into(),
-                "* OK [UIDNEXT 3] no generation\r\n{tag} OK\r\n".into(),
-            ),
-            (
-                "EXAMINE".into(),
                 "* OK [UIDVALIDITY 9] valid\r\n{tag} OK\r\n".into(),
             ),
             ("LOGOUT".into(), "{tag} OK\r\n".into()),
@@ -2760,7 +2709,6 @@ mod tests {
                 .session_usable()
         );
         assert!(session.status("Later").await.unwrap_err().session_usable());
-        assert!(session.examine("Later").await.unwrap_err().session_usable());
         assert_eq!(session.examine("Later").await.unwrap().uid_validity, 9);
         session.logout().await.unwrap();
         server.await.unwrap();
@@ -2822,20 +2770,6 @@ mod tests {
         assert_eq!(quiet.keeps("\\Flagged"), None);
         assert!(!quiet.read_only);
         assert!(session.select("Ro").await.unwrap().read_only);
-        server.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn select_without_a_uidvalidity_is_refused() {
-        let (mut session, server) = writable_session(vec![(
-            "SELECT".into(),
-            "* 1 EXISTS\r\n{tag} OK [READ-WRITE] done\r\n".into(),
-        )])
-        .await;
-        assert!(matches!(
-            session.select("INBOX").await,
-            Err(ImapError::Mailbox(_))
-        ));
         server.await.unwrap();
     }
 
