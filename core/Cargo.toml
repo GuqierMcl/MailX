@@ -42,6 +42,9 @@ sspi = { version = "0.23.1", default-features = false }
 roxmltree = "0.21"
 x509-parser = { version = "0.18", default-features = false }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+# Platform TLS (Secure Transport / SChannel / OpenSSL) fallback for mail
+# servers that share no TLS parameters with rustls; see core/src/net/mod.rs.
+tokio-native-tls = "0.3"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 tokio-socks = "0.5"
 tower-service = "0.3"

@@ -3,12 +3,13 @@
 //! `on_data_started` hook ran relative to the first body byte.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -52,6 +53,10 @@ pub(crate) struct Script {
     /// Bytes written in the same segment as the `220` to STARTTLS.
     pub inject_after_starttls: Vec<u8>,
     pub final_reply: &'static str,
+    /// The next this-many TLS handshakes (shared across connections) answer
+    /// the ClientHello with a `handshake_failure` alert, as a server sharing
+    /// no cipher suite with the client does.
+    pub refuse_handshakes: Arc<AtomicUsize>,
 }
 
 impl Script {
@@ -69,6 +74,7 @@ impl Script {
             stall_body: false,
             inject_after_starttls: Vec::new(),
             final_reply: "250 2.0.0 queued as 42",
+            refuse_handshakes: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -87,6 +93,7 @@ pub(crate) struct SeenInner {
     pub body: Vec<u8>,
     pub connections: usize,
     pub tls_handshakes_failed: usize,
+    pub tls_handshakes_refused: usize,
 }
 
 pub(crate) type Seen = Arc<Mutex<SeenInner>>;
@@ -123,7 +130,11 @@ pub(crate) async fn start_at(port: u16, script: Script) -> (u16, Seen) {
             let script = script.clone();
             let record = record.clone();
             tokio::spawn(async move {
+                let mut socket = socket;
                 if let Mode::Implicit(config) = &script.mode {
+                    if refuse_handshake(&mut socket, &script, &record).await {
+                        return;
+                    }
                     match tokio_rustls::TlsAcceptor::from(config.clone())
                         .accept(socket)
                         .await
@@ -138,6 +149,31 @@ pub(crate) async fn start_at(port: u16, script: Script) -> (u16, Seen) {
         }
     });
     (port, seen)
+}
+
+/// Consumes one scripted refusal: reads the ClientHello and answers with a
+/// fatal `handshake_failure` alert. Returns whether the handshake was refused.
+async fn refuse_handshake<S: AsyncRead + AsyncWrite + Unpin>(
+    socket: &mut S,
+    script: &Script,
+    seen: &Seen,
+) -> bool {
+    let refuse = script
+        .refuse_handshakes
+        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+            left.checked_sub(1)
+        })
+        .is_ok();
+    if refuse {
+        let mut hello = [0; 512];
+        let _ = socket.read(&mut hello).await;
+        let _ = socket
+            .write_all(&[0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28])
+            .await;
+        let _ = socket.flush().await;
+        seen.lock().unwrap().tls_handshakes_refused += 1;
+    }
+    refuse
 }
 
 trait Duplex: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -233,7 +269,10 @@ async fn run(socket: Box<dyn Duplex>, script: Script, seen: Seen) -> std::io::Re
             reply.extend_from_slice(&script.inject_after_starttls);
             socket.get_mut().write_all(&reply).await?;
             socket.get_mut().flush().await?;
-            let plain = socket.into_inner();
+            let mut plain = socket.into_inner();
+            if refuse_handshake(&mut plain, &script, &seen).await {
+                return Ok(());
+            }
             match tokio_rustls::TlsAcceptor::from(config).accept(plain).await {
                 Ok(tls) => {
                     socket = BufReader::new(Box::new(tls));

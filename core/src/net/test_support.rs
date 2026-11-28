@@ -14,42 +14,49 @@ use tokio::net::{TcpListener, TcpStream};
 use super::{NetRoute, ProxyRoute};
 use crate::accounts::types::ProxyKind;
 
-/// A SOCKS5 proxy (no auth) that records the requested target host and forwards to `upstream`.
+/// A SOCKS5 proxy (no auth) that records each requested target host and forwards to `upstream`.
 pub(crate) async fn fake_socks5(upstream: u16) -> (u16, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let targets = Arc::new(Mutex::new(Vec::new()));
     let record = targets.clone();
     tokio::spawn(async move {
-        let (mut client, _) = listener.accept().await.unwrap();
-        let mut head = [0u8; 2];
-        client.read_exact(&mut head).await.unwrap();
-        let mut methods = vec![0u8; head[1] as usize];
-        client.read_exact(&mut methods).await.unwrap();
-        client.write_all(&[5, 0]).await.unwrap();
-        let mut request = [0u8; 4];
-        client.read_exact(&mut request).await.unwrap();
-        assert_eq!(
-            request[3], 3,
-            "target must be sent as an unresolved domain name"
-        );
-        let mut len = [0u8; 1];
-        client.read_exact(&mut len).await.unwrap();
-        let mut host = vec![0u8; len[0] as usize];
-        client.read_exact(&mut host).await.unwrap();
-        let mut target_port = [0u8; 2];
-        client.read_exact(&mut target_port).await.unwrap();
-        record.lock().unwrap().push(format!(
-            "{}:{}",
-            String::from_utf8(host).unwrap(),
-            u16::from_be_bytes(target_port)
-        ));
-        let mut server = TcpStream::connect(("127.0.0.1", upstream)).await.unwrap();
-        client
-            .write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0])
-            .await
-            .unwrap();
-        let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
+        loop {
+            let Ok((mut client, _)) = listener.accept().await else {
+                return;
+            };
+            let record = record.clone();
+            tokio::spawn(async move {
+                let mut head = [0u8; 2];
+                client.read_exact(&mut head).await.unwrap();
+                let mut methods = vec![0u8; head[1] as usize];
+                client.read_exact(&mut methods).await.unwrap();
+                client.write_all(&[5, 0]).await.unwrap();
+                let mut request = [0u8; 4];
+                client.read_exact(&mut request).await.unwrap();
+                assert_eq!(
+                    request[3], 3,
+                    "target must be sent as an unresolved domain name"
+                );
+                let mut len = [0u8; 1];
+                client.read_exact(&mut len).await.unwrap();
+                let mut host = vec![0u8; len[0] as usize];
+                client.read_exact(&mut host).await.unwrap();
+                let mut target_port = [0u8; 2];
+                client.read_exact(&mut target_port).await.unwrap();
+                record.lock().unwrap().push(format!(
+                    "{}:{}",
+                    String::from_utf8(host).unwrap(),
+                    u16::from_be_bytes(target_port)
+                ));
+                let mut server = TcpStream::connect(("127.0.0.1", upstream)).await.unwrap();
+                client
+                    .write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0])
+                    .await
+                    .unwrap();
+                let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
+            });
+        }
     });
     (port, targets)
 }

@@ -123,7 +123,7 @@ SMTP 连接器已支持显式 OAuth 凭证的 XOAUTH2，且不向 PLAIN / LOGIN 
 - 探针阶段的换流方案要求在 `220` 之后从内部缓冲读取器里取回底层流，并确认缓冲区为空；lettre 不暴露这一点，无法做 STARTTLS 注入防御。
 - `connect_with_transport` 的 EHLO 与 `send` 把 MAIL / RCPT / DATA 合并为一次调用，拿不到 354 与"正文开始"标记之间的钩子，也不能逐个收集 RCPT 拒绝。
 
-`lettre` 现在是 `mailx-core` 的普通依赖，仅启用 `builder`（`default-features = false`）：用于 MIME 构造、RFC 2047 编码和 `Address` 解析；不启用 `smtp-transport`、`tokio1` 或任何 TLS 特性，`cargo tree -e normal` 中没有 `native-tls`、`openssl`、`aws-lc`。`rcgen` 仍只是开发依赖。
+`lettre` 现在是 `mailx-core` 的普通依赖，仅启用 `builder`（`default-features = false`）：用于 MIME 构造、RFC 2047 编码和 `Address` 解析；不启用 `smtp-transport`、`tokio1` 或任何 TLS 特性，不通过 `lettre` 引入 TLS 依赖（系统 TLS 仅由 `core/src/net/` 的通用协商回退按需使用，见[连接 TLS 实现](provider-compatibility.md#7-连接-tls-实现)）。`rcgen` 仍只是开发依赖。
 
 ### 会话与探针结论（保留的探针证据）
 
@@ -131,8 +131,8 @@ SMTP 连接器已支持显式 OAuth 凭证的 XOAUTH2，且不向 PLAIN / LOGIN 
 
 ### 会话步骤
 
-1. 按账号路由 `net::connect`。465 端口立即走 `net::upgrade_tls`。
-2. 587 端口：读问候语、`EHLO`，服务器必须声明 `STARTTLS`，否则失败（`tlsUnavailable`），绝不明文继续。发 `STARTTLS` 后，从包装器的共享槽里取出底层流，用 `net::upgrade_tls` 升级后放回，再发一次 `EHLO`。这样 IMAP 和 SMTP 只有一套证书验证；换流的实现：会话持有 `BufReader<BoxedStream>`；收到 `220` 后检查读缓冲为空（非空说明有人在明文里抢跑，按 `protocol` 永久失败，不丢弃也不重放），再 `into_inner()` 取出底层流交给 `net::upgrade_tls`，用结果建立新的读取器并重新 `EHLO`；握手前学到的能力一律丢弃。测试用 `TlsSource::Test`（仅 `#[cfg(test)]`，对应 `net::upgrade_tls_with`）注入测试 CA；生产只有 `TlsSource::Platform`，没有任何跳过验证的开关。
+1. 按账号路由 `net::connect`。465 端口立即升级 TLS（默认 rustls；服务器与 rustls 没有共同的协议参数时，整个连接改由系统 TLS 重试一次，见[连接 TLS 实现](provider-compatibility.md#7-连接-tls-实现)）。
+2. 587 端口：读问候语、`EHLO`，服务器必须声明 `STARTTLS`，否则失败（`tlsUnavailable`），绝不明文继续。发 `STARTTLS` 后，从包装器的共享槽里取出底层流，用 `net::upgrade_tls_on` 升级后放回，再发一次 `EHLO`（若服务器与 rustls 没有共同的协议参数，同样经 `net::with_tls_fallback` 从建连和明文阶段改用系统 TLS 重试一次）。这样 IMAP 和 SMTP 只有一套证书验证；换流的实现：会话持有 `BufReader<BoxedStream>`；收到 `220` 后检查读缓冲为空（非空说明有人在明文里抢跑，按 `protocol` 永久失败，不丢弃也不重放），再 `into_inner()` 取出底层流交给 `net::upgrade_tls_on`，用结果建立新的读取器并重新 `EHLO`；握手前学到的能力一律丢弃。测试用 `TlsSource::Test`（仅 `#[cfg(test)]`，对应 `net::upgrade_tls_with`）注入测试 CA；生产只有 `TlsSource::Platform`，没有任何跳过验证的开关。
 3. 认证前核对凭证的受信端点（协议、主机、端口、TLS、用户名）：在建立登录计划时完成（`smtp_plan`，`TrustEndpoint::mail("smtp", ...)`），不符时返回永久失败，**不打开任何连接**。会话按服务器声明选用 `AUTH PLAIN`（优先）或 `LOGIN`；没有声明可用机制为 `authUnavailable`。
 4. 服务器声明了 `SIZE` 且快照超出时，在 `MAIL FROM` 之前失败。
 5. `MAIL FROM`，然后逐个发 `RCPT TO` 并记录每个地址的结果。只要有一个被拒，就 `RSET` 并整体失败，返回全部被拒地址，**不只发给部分收件人**。

@@ -1,0 +1,74 @@
+name: Provider TLS
+
+# Run on demand: handshakes with real mail servers through the production TLS
+# fallback path (core/src/net/live_tls.rs). It contacts third-party
+# servers, so it stays out of pull request CI. No account or credential is used.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-tls-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  live:
+    name: Live TLS (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: ubuntu-24.04-x64, os: ubuntu-24.04 }
+          - { name: ubuntu-24.04-arm64, os: ubuntu-24.04-arm }
+          - { name: ubuntu-22.04-x64, os: ubuntu-22.04 }
+          - { name: fedora-x64, os: ubuntu-24.04, container: 'fedora:latest' }
+          - { name: macos, os: macos-26 }
+          # Hosted x64 Windows images are Server SKUs; windows-11-arm is a client SKU.
+          # Windows Server 2022+ enables no static RSA or DHE suite by default, so
+          # servers that need the platform TLS fallback are expected to fail there.
+          - { name: windows-11-arm64, os: windows-11-arm }
+          - { name: windows-server-2025, os: windows-2025, known_failure: true }
+          - { name: windows-server-2022, os: windows-2022, known_failure: true }
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    continue-on-error: ${{ matrix.known_failure == true }}
+    timeout-minutes: 30
+    steps:
+      - name: Install Fedora build dependencies
+        if: matrix.container
+        run: |
+          dnf install -y --setopt=install_weak_deps=False gcc openssl-devel pkgconf-pkg-config perl git curl
+          # The container's $HOME (/github/home) differs from root's; pin both homes.
+          export RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile minimal --default-toolchain none
+          { echo "RUSTUP_HOME=$RUSTUP_HOME"; echo "CARGO_HOME=$CARGO_HOME"; } >> "$GITHUB_ENV"
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          cat /etc/crypto-policies/state/current || true
+      - uses: actions/checkout@v7
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux' && !matrix.container
+        timeout-minutes: 20
+        run: bash scripts/install-linux-build-deps.sh
+      # rustup reads rust-toolchain.toml and installs the pinned toolchain.
+      - run: rustup show active-toolchain || rustup toolchain install
+      - name: OpenSSL version
+        if: runner.os == 'Linux'
+        run: openssl version || true
+      - name: Windows TLS cipher suites and SChannel reference
+        if: runner.os == 'Windows'
+        # Informational only; the live test below is the verdict.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          [System.Environment]::OSVersion.VersionString
+          (Get-TlsCipherSuite) | Select-Object -ExpandProperty Name
+          foreach ($h in 'imap.sina.com', 'imap.sina.cn') {
+            Write-Output "== curl (SChannel) $h"
+            curl.exe -sS -v --max-time 15 "imaps://${h}/" 2>&1 | Select-String -Pattern 'schannel|SSL|TLS|OK|error' | Select-Object -First 12
+          }
+      - run: cargo test -p mailx-core live_provider_tls -- --ignored --nocapture

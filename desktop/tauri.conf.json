@@ -36,10 +36,10 @@
     "targets": ["app", "dmg", "nsis", "deb", "rpm", "appimage"],
     "linux": {
       "deb": {
-        "depends": ["libasound2t64 | libasound2", "libdbus-1-3"]
+        "depends": ["libasound2t64 | libasound2", "libdbus-1-3", "libssl3t64 | libssl3"]
       },
       "rpm": {
-        "depends": ["libasound.so.2()(64bit)", "libdbus-1.so.3()(64bit)"]
+        "depends": ["libasound.so.2()(64bit)", "libdbus-1.so.3()(64bit)", "libssl.so.3()(64bit)"]
       }
     },
     "windows": {
