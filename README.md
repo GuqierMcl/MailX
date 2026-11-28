@@ -10,7 +10,7 @@ The local-first, AI-native email client—lightweight, fast, and built to unite 
 [![Release](https://img.shields.io/github/v/release/GuqierMcl/MailX?include_prereleases&sort=semver&style=flat-square&labelColor=1f1f22)](https://github.com/GuqierMcl/MailX/releases)
 [![Platform: Windows | macOS | Linux](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square&labelColor=1f1f22)](https://github.com/GuqierMcl/MailX/releases)
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](README.zh-CN.md) | [Türkçe](README.tr.md)
 
 [Website](https://mailxapp.com/en/) · [Docs](https://mailxapp.com/en/docs/) · [Releases](https://github.com/GuqierMcl/MailX/releases)
 
