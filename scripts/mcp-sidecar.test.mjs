@@ -1,4 +1,6 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { builtPath, parseArguments, sidecarPath } from "./mcp-sidecar.mjs";
 
 test("sidecar names carry the target triple and the Windows extension", () => {
@@ -17,4 +19,23 @@ test("Tauri's environment picks the profile and target, flags override it", () =
   expect(parseArguments([], { TAURI_ENV_DEBUG: "true" }).release).toBe(false);
   expect(parseArguments(["--debug", "--target", "u", "--placeholder"], { TAURI_ENV_DEBUG: "false" })).toEqual({ release: false, target: "u", placeholder: true });
   expect(() => parseArguments(["--nope"], {})).toThrow();
+});
+
+describe("Tauri commands choose the bridge profile explicitly", () => {
+  // Tauri CLI 2.12 leaves TAURI_ENV_DEBUG unset for `tauri build`, so without
+  // a flag the release installers would carry a debug bridge.
+  const config = JSON.parse(readFileSync(join(import.meta.dirname, "../desktop/tauri.conf.json"), "utf8"));
+
+  test("tauri build makes a release bridge", () => {
+    expect(config.build.beforeBuildCommand).toContain("scripts/mcp-sidecar.mjs --release");
+  });
+
+  test("tauri dev makes a debug bridge", () => {
+    expect(config.build.beforeDevCommand).toContain("scripts/mcp-sidecar.mjs --debug");
+  });
+
+  test("an unset TAURI_ENV_DEBUG alone still means debug", () => {
+    expect(parseArguments([], {}).release).toBe(false);
+    expect(parseArguments(["--release"], {}).release).toBe(true);
+  });
 });
