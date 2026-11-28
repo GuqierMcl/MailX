@@ -5,9 +5,6 @@ name: Provider TLS
 # servers, so it stays out of pull request CI. No account or credential is used.
 on:
   workflow_dispatch:
-  # TEMPORARY: run once on this branch before the workflow exists on main.
-  push:
-    branches: [fix/sina-system-tls]
 
 permissions:
   contents: read
@@ -32,11 +29,14 @@ jobs:
           - { name: fedora-x64, os: ubuntu-24.04, container: 'fedora:latest' }
           - { name: macos, os: macos-26 }
           # Hosted x64 Windows images are Server SKUs; windows-11-arm is a client SKU.
-          - { name: windows-server-2025, os: windows-2025 }
-          - { name: windows-server-2022, os: windows-2022 }
+          # Windows Server 2022+ enables no static RSA or DHE suite by default, so
+          # endpoints registered for platform TLS are expected to fail there.
           - { name: windows-11-arm64, os: windows-11-arm }
+          - { name: windows-server-2025, os: windows-2025, known_failure: true }
+          - { name: windows-server-2022, os: windows-2022, known_failure: true }
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
+    continue-on-error: ${{ matrix.known_failure == true }}
     timeout-minutes: 30
     steps:
       - name: Install Fedora build dependencies
