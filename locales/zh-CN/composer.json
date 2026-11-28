@@ -256,6 +256,7 @@
     "missing": "图片已丢失"
   },
   "attachment": {
+    "button": "附件",
     "add": "添加附件",
     "adding": "正在添加附件…",
     "list": "附件",
@@ -265,6 +266,13 @@
     "overSize": "附件总大小超过 {{limit}} 的上限，请移除部分附件后再发送。",
     "overCount_other": "最多只能添加 {{count}} 个附件，请移除部分后再发送。",
     "serverHint": "发信服务器可能拒收超过约 {{limit}} MB 的邮件。"
+  },
+  "signature": {
+    "button": "签名",
+    "none": "无签名",
+    "manage": "管理签名…",
+    "choose": "选择签名",
+    "current": "当前签名：{{name}}"
   },
   "ai": {
     "button": "AI 写作",

@@ -43,6 +43,12 @@ export const settingsKeys = {
   all: ['settings'] as const,
 }
 
+/** Global email signatures and per-account defaults; refreshed on edit or host broadcast. */
+export const signatureKeys = {
+  all: ['signatures'] as const,
+  state: () => [...signatureKeys.all, 'state'] as const,
+}
+
 /**
  * Drafts and the send queue. Sync rounds never touch them; `mailx://outbox` and
  * `mailx://drafts` events invalidate them (see `features/composer/compose-queries.ts`).

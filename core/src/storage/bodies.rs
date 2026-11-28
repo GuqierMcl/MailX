@@ -850,6 +850,7 @@ impl Storage {
             let mut statement = self.db.prepare(
                 "SELECT raw_sha256 FROM message_bodies
                  UNION SELECT blob_hash FROM draft_attachments
+                 UNION SELECT blob_hash FROM signature_images
                  UNION SELECT snapshot_hash FROM outbox WHERE snapshot_hash IS NOT NULL",
             )?;
             statement

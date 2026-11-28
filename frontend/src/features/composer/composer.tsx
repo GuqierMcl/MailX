@@ -5,10 +5,16 @@ import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, 
 import { DragDropProvider } from '@dnd-kit/react'
 import { Accessibility, Feedback, PointerActivationConstraints, PointerSensor } from '@dnd-kit/dom'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { AlertCircleIcon, Attachment01Icon, MailOpen01Icon } from '@hugeicons/core-free-icons'
+import { AlertCircleIcon, Attachment01Icon, MailOpen01Icon, QuillWrite01Icon, Tick02Icon } from '@hugeicons/core-free-icons'
 import type { Account, AttachmentPolicy } from '@/generated/accounts'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { IconButton } from '@/components/icon-button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { MOD_KEY } from '@/features/mail/shortcuts'
 import {
   AlertDialog,
@@ -33,6 +39,10 @@ import { RecipientField, type RecipientDragData, type RecipientDropData, type Re
 import { RowToggle } from './row-toggle'
 import { SendButton, type SendButtonHandle } from './send-button'
 import { useAppMenuCommands } from '@/features/app-menu/commands'
+import { currentMenuWindow, forwardMenuCommand } from '@/features/app-menu/desktop'
+import { requestSettings } from '@/features/settings/settings-requests'
+import { useSignatures } from '@/features/settings/signature-queries'
+import { extractSignatureBlock } from './draft-html'
 import { draftMentionsAttachment, foldsReplyQuote } from './reply-quote'
 import { AttachmentBar } from './attachment-bar'
 import type { MailBodyEditorHandle } from './mail-body-editor'
@@ -209,13 +219,65 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
   }, [client, accountId])
 
   // Every attachment command reports its failure in the bottom bar, like sending does.
-  const { addAttachments, addDroppedAttachments, addInlineImages, addInlineImageBytes, removeAttachment } = editor
+  const { addAttachments, addDroppedAttachments, addInlineImages, addInlineImageBytes, removeAttachment, applySignature } = editor
+  const signaturesQuery = useSignatures(client)
+  const signaturesState = signaturesQuery.data
+  const manualSignatureRef = useRef(false)
+  const expectedSignatureRef = useRef<string | null | undefined>(undefined)
+  // Capture the opening signature block HTML once the draft loads so we can tell if the user edited it.
+  useEffect(() => {
+    if (!fields || expectedSignatureRef.current !== undefined) return
+    expectedSignatureRef.current = extractSignatureBlock(fields.bodyHtml)?.innerHtml ?? null
+  }, [fields])
+
   const runAttachment = useCallback(async (command: () => Promise<unknown>) => {
     setError(null)
     try {
       await command()
     } catch (cause) {
       setError(cause instanceof DraftUnsavedError ? { key: 'composer:validation.unsaved' } : { cause })
+    }
+  }, [])
+
+  const pickSignature = useCallback((signatureId: string | null) => {
+    manualSignatureRef.current = true
+    void runAttachment(async () => {
+      const updated = await applySignature(signatureId)
+      if (updated) {
+        expectedSignatureRef.current = extractSignatureBlock(updated.bodyHtml)?.innerHtml ?? null
+      }
+    })
+  }, [applySignature, runAttachment])
+
+  const handleAccountChange = useCallback((nextAccountId: string) => {
+    const current = editor.latest()
+    editor.update({ accountId: nextAccountId })
+    if (!current || manualSignatureRef.current || !signaturesState) return
+    const currentBlock = extractSignatureBlock(current.bodyHtml)
+    const currentInner = currentBlock?.innerHtml ?? null
+    if (expectedSignatureRef.current !== undefined && currentInner !== expectedSignatureRef.current) return
+    const override = signaturesState.accountDefaults.find((item) => item.accountId === nextAccountId)?.selection
+    const globalDefaultId = signaturesState.signatures.find((item) => item.isDefault)?.id ?? null
+    const nextDefaultId = !override || override.mode === 'followDefault'
+      ? globalDefaultId
+      : override.mode === 'none'
+        ? null
+        : override.signatureId
+    const currentSigId = currentBlock?.signatureId || null
+    if (nextDefaultId === currentSigId) return
+    void runAttachment(async () => {
+      const updated = await applySignature(nextDefaultId)
+      if (updated) {
+        expectedSignatureRef.current = extractSignatureBlock(updated.bodyHtml)?.innerHtml ?? null
+      }
+    })
+  }, [applySignature, editor, runAttachment, signaturesState])
+
+  const openManageSignatures = useCallback(() => {
+    if (currentMenuWindow() === 'main') {
+      requestSettings({ section: 'signatures' })
+    } else {
+      void forwardMenuCommand('signatures')
     }
   }, [])
   // The host tells the window when the OS dropped files on it; it keeps the paths itself.
@@ -282,7 +344,10 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
 
   const readOnly = editor.readOnly
   const hasInvalid = [...fields.to, ...fields.cc, ...fields.bcc].some((item) => !item.valid)
-  const empty = fieldsAreEmpty(fields) && editor.attachments.length === 0
+  const empty = fieldsAreEmpty(fields) && regularAttachments === 0
+  const activeSignatureBlock = extractSignatureBlock(fields.bodyHtml)
+  const activeSignatureId = activeSignatureBlock?.signatureId || null
+  const activeSignature = signaturesState?.signatures.find((item) => item.id === activeSignatureId) ?? null
 
   // First press of the send button: check, save, and hand back the saved revision.
   // "仍要发送" runs it again without the forgotten-attachment check.
@@ -422,7 +487,7 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
                   <span id="composer-from-label" className="w-14 shrink-0 text-xs leading-6 text-muted-foreground">{t('composer:field.from')}</span>
                   <div className="-ml-2 flex min-w-0 flex-1 items-center">
                     <SenderPicker accounts={accounts} value={fields.accountId} disabled={readOnly} labelId="composer-from-label"
-                      onChange={(accountId) => editor.update({ accountId })} onFocus={leaveBody} />
+                      onChange={handleAccountChange} onFocus={leaveBody} />
                   </div>
                   {origin && <span className="shrink-0 truncate text-xs text-muted-foreground">{origin}</span>}
                 </div>
@@ -519,15 +584,58 @@ export function Composer({ client, draftId, accounts, onSubjectChange, onSent, o
           </span>
         </div>
       )}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-3">
-        <IconButton
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 py-3">
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 gap-1.5 px-2.5 text-sm font-normal text-muted-foreground hover:text-foreground"
           disabled={!canAttach}
-          label={t('composer:attachment.add')}
+          aria-label={t('composer:attachment.add')}
           onClick={() => void attach()}
         >
-          <HugeiconsIcon icon={Attachment01Icon} aria-hidden="true" />
-        </IconButton>
+          <HugeiconsIcon icon={Attachment01Icon} className="size-4 shrink-0" aria-hidden="true" />
+          <span>{t('composer:attachment.button')}</span>
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  'h-8 max-w-44 gap-1.5 px-2.5 text-sm font-normal',
+                  activeSignature ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                )}
+                disabled={!canAttach}
+                aria-label={activeSignature ? t('composer:signature.current', { name: activeSignature.name }) : t('composer:signature.choose')}
+                title={activeSignature ? t('composer:signature.current', { name: activeSignature.name }) : t('composer:signature.choose')}
+              />
+            }
+          >
+            <HugeiconsIcon icon={QuillWrite01Icon} className="size-4 shrink-0" aria-hidden="true" />
+            <span className="truncate">{activeSignature ? activeSignature.name : t('composer:signature.button')}</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="top" className="min-w-44">
+            {(signaturesState?.signatures ?? []).map((sig) => (
+              <DropdownMenuItem key={sig.id} onClick={() => pickSignature(sig.id)}>
+                <span className="flex-1 truncate">{sig.name}</span>
+                {activeSignatureId === sig.id && <HugeiconsIcon icon={Tick02Icon} className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+              </DropdownMenuItem>
+            ))}
+            {(signaturesState?.signatures.length ?? 0) > 0 && (
+              <DropdownMenuItem onClick={() => pickSignature(null)}>
+                <span className="flex-1 truncate">{t('composer:signature.none')}</span>
+                {!activeSignatureBlock && <HugeiconsIcon icon={Tick02Icon} className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+              </DropdownMenuItem>
+            )}
+            {(signaturesState?.signatures.length ?? 0) > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuItem onClick={openManageSignatures}>
+              {t('composer:signature.manage')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
           {/* The width and height are reserved so the status coming and going never moves the buttons. */}
           <span

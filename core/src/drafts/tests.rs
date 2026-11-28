@@ -115,6 +115,7 @@ impl Fixture {
             subject: String::new(),
             body_html: String::new(),
             client_mutation_id: id(),
+            signature: None,
         }
     }
 
@@ -123,6 +124,7 @@ impl Fixture {
             email_id: self.emails[index].clone(),
             kind,
             client_mutation_id: id(),
+            signature: None,
         })
     }
 }
@@ -722,6 +724,7 @@ async fn from_requests_are_idempotent_and_reject_new() {
         email_id: f.emails[0].clone(),
         kind: DraftKind::Reply,
         client_mutation_id: id(),
+        signature: None,
     };
     let first = f.core.create_draft_from(request.clone()).unwrap();
     assert_eq!(
@@ -769,6 +772,7 @@ async fn localized_quotes_escape_values_and_replay_the_original_language() {
         email_id: f.emails[0].clone(),
         kind: DraftKind::Reply,
         client_mutation_id: id(),
+        signature: None,
     };
     let english = f
         .core
@@ -796,6 +800,7 @@ async fn localized_quotes_escape_values_and_replay_the_original_language() {
                 email_id: f.emails[0].clone(),
                 kind: DraftKind::Forward,
                 client_mutation_id: id(),
+                signature: None,
             },
             crate::SupportedLocale::En,
         )
@@ -847,12 +852,14 @@ async fn uncached_bodies_and_invisible_messages_are_distinct_errors() {
         email_id: id(),
         kind: DraftKind::Reply,
         client_mutation_id: id(),
+        signature: None,
     });
     assert_eq!(code(unknown).0, ErrorCode::NotFound);
     let malformed = f.core.create_draft_from(CreateDraftFromRequest {
         email_id: "x".into(),
         kind: DraftKind::Reply,
         client_mutation_id: id(),
+        signature: None,
     });
     assert_eq!(
         code(malformed),
@@ -1148,6 +1155,7 @@ async fn localized_image_labels_follow_creation_language_and_replay_unchanged() 
             email_id: f.emails[0].clone(),
             kind,
             client_mutation_id: id(),
+            signature: None,
         };
         let english = f
             .core
@@ -1429,6 +1437,7 @@ async fn forward_carries_non_inline_attachments_only_and_replays_add_nothing() {
         email_id: f.emails[0].clone(),
         kind: DraftKind::Forward,
         client_mutation_id: id(),
+        signature: None,
     };
     let draft = f.core.create_draft_from(request.clone()).unwrap();
     let [file] = &draft.attachments[..] else {
@@ -2008,6 +2017,7 @@ async fn local_sent_copy_can_be_replied_to_and_forwarded() {
             email_id: email.clone(),
             kind,
             client_mutation_id: id(),
+            signature: None,
         })
     };
     let reply = derive(DraftKind::Reply).unwrap();
@@ -2122,6 +2132,7 @@ async fn local_sent_copy_with_a_missing_or_corrupt_snapshot_is_a_clean_error() {
         email_id: email,
         kind: DraftKind::Reply,
         client_mutation_id: id(),
+        signature: None,
     });
     assert!(reply.is_err());
 }
@@ -2166,6 +2177,7 @@ async fn a_forward_carries_the_originals_inline_images_under_its_own_content_ids
                 email_id: f.emails[0].clone(),
                 kind: DraftKind::Forward,
                 client_mutation_id: id(),
+                signature: None,
             },
             crate::SupportedLocale::En,
         )
@@ -2210,6 +2222,7 @@ async fn a_forward_carries_the_originals_inline_images_under_its_own_content_ids
                 email_id: f.emails[0].clone(),
                 kind: DraftKind::Reply,
                 client_mutation_id: id(),
+                signature: None,
             },
             crate::SupportedLocale::En,
         )
@@ -2221,4 +2234,175 @@ async fn a_forward_carries_the_originals_inline_images_under_its_own_content_ids
         "{}",
         reply.body_text
     );
+}
+
+#[tokio::test]
+async fn signatures_crud_defaults_blank_detection_and_switching() {
+    let f = fixture(&[plain("Original body")]);
+    let acc1 = f.account.clone();
+
+    // 1. Save two global signatures and bind account default.
+    let state = f
+        .core
+        .save_signature(crate::SaveSignatureRequest {
+            id: None,
+            name: "Work".into(),
+            body_html: "<p><strong>Alice</strong></p><p>Product Design</p>".into(),
+            staged_images: vec![],
+        })
+        .unwrap();
+    assert_eq!(state.signatures.len(), 1);
+    let sig_work = state.signatures[0].id.clone();
+
+    let state = f
+        .core
+        .save_signature(crate::SaveSignatureRequest {
+            id: None,
+            name: "Personal".into(),
+            body_html: "<p>Best, Alice</p>".into(),
+            staged_images: vec![],
+        })
+        .unwrap();
+    assert_eq!(state.signatures.len(), 2);
+    let sig_personal = state
+        .signatures
+        .iter()
+        .find(|s| s.name == "Personal")
+        .unwrap()
+        .id
+        .clone();
+
+    // Mark sig_work as the global default; account follows default automatically.
+    let state = f
+        .core
+        .set_default_signature(crate::SetDefaultSignatureRequest {
+            signature_id: Some(sig_work.clone()),
+        })
+        .unwrap();
+    assert!(
+        state
+            .signatures
+            .iter()
+            .find(|s| s.id == sig_work)
+            .unwrap()
+            .is_default
+    );
+    assert!(state.account_defaults.is_empty());
+
+    // 2. New draft for acc1 automatically receives the global default signature block, yet still counts as blank.
+    let draft = f.core.draft_create(f.blank(Some(&acc1)), "").unwrap();
+    assert!(
+        draft
+            .body_html
+            .contains(&format!("data-mailx-signature=\"{sig_work}\""))
+    );
+    assert!(draft.body_html.contains("<strong>Alice</strong>"));
+    assert!(
+        draft.is_blank(),
+        "untouched draft with only default signature must stay blank"
+    );
+    assert!(f.core.draft_list(None).unwrap().is_empty());
+
+    // 2b. Setting acc1 override to None suppresses the global default signature.
+    let state = f
+        .core
+        .set_account_default_signature(crate::SetAccountSignatureRequest {
+            account_id: acc1.clone(),
+            selection: crate::AccountSignatureMode::None,
+        })
+        .unwrap();
+    assert_eq!(state.account_defaults.len(), 1);
+    let muted = f.core.draft_create(f.blank(Some(&acc1)), "").unwrap();
+    assert!(!muted.body_html.contains("data-mailx-signature"));
+
+    // Restore acc1 to explicit specific signature sig_work for remaining checks.
+    let state = f
+        .core
+        .set_account_default_signature(crate::SetAccountSignatureRequest {
+            account_id: acc1.clone(),
+            selection: crate::AccountSignatureMode::Specific {
+                signature_id: sig_work.clone(),
+            },
+        })
+        .unwrap();
+    assert_eq!(state.account_defaults.len(), 1);
+
+    // 3. Outgoing email_document strips internal data-mailx-signature attribute.
+    let email_html = crate::drafts::body::email_document(&draft.body_html);
+    assert!(!email_html.contains("data-mailx-signature"));
+    assert!(email_html.contains("<strong>Alice</strong>"));
+
+    // 4. Reply draft inserts signature above the quoted original.
+    let reply = f
+        .core
+        .create_draft_from(CreateDraftFromRequest {
+            email_id: f.emails[0].clone(),
+            kind: DraftKind::Reply,
+            client_mutation_id: id(),
+            signature: None,
+        })
+        .unwrap();
+    let sig_pos = reply
+        .body_html
+        .find(&format!("data-mailx-signature=\"{sig_work}\""))
+        .expect("reply should include default signature");
+    let quote_pos = reply
+        .body_html
+        .find("<blockquote>")
+        .expect("reply should include blockquote");
+    assert!(
+        sig_pos < quote_pos,
+        "signature must appear above the quoted original"
+    );
+
+    // 5. Switching signature on the draft replaces the block in place, and removing clears it.
+    let switched = f
+        .core
+        .draft_apply_signature(crate::ApplyDraftSignatureRequest {
+            draft_id: draft.id.clone(),
+            expected_revision: draft.revision,
+            signature_id: Some(sig_personal.clone()),
+        })
+        .unwrap();
+    assert!(
+        switched
+            .body_html
+            .contains(&format!("data-mailx-signature=\"{sig_personal}\""))
+    );
+    assert!(switched.body_html.contains("Best, Alice"));
+    assert!(!switched.body_html.contains("Product Design"));
+
+    let cleared = f
+        .core
+        .draft_apply_signature(crate::ApplyDraftSignatureRequest {
+            draft_id: draft.id.clone(),
+            expected_revision: switched.revision,
+            signature_id: None,
+        })
+        .unwrap();
+    assert!(!cleared.body_html.contains("data-mailx-signature"));
+    assert!(!cleared.body_html.contains("Best, Alice"));
+
+    // 6. Explicit DraftSignatureSelection::None omits default signature on creation.
+    let mut no_sig_req = f.blank(Some(&acc1));
+    no_sig_req.signature = Some(crate::DraftSignatureSelection::None);
+    let no_sig = f.core.draft_create(no_sig_req, "").unwrap();
+    assert!(!no_sig.body_html.contains("data-mailx-signature"));
+
+    // 7. Explicit DraftSignatureSelection::Specific overrides the account default.
+    let mut explicit_req = f.blank(Some(&acc1));
+    explicit_req.signature = Some(crate::DraftSignatureSelection::Specific {
+        signature_id: sig_personal.clone(),
+    });
+    let explicit = f.core.draft_create(explicit_req, "").unwrap();
+    assert!(
+        explicit
+            .body_html
+            .contains(&format!("data-mailx-signature=\"{sig_personal}\""))
+    );
+
+    // 8. Deleting a signature clears any account default pointing to it.
+    let state = f.core.delete_signature(&sig_work).unwrap();
+    assert_eq!(state.signatures.len(), 1);
+    assert!(state.account_defaults.is_empty());
 }

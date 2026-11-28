@@ -131,6 +131,12 @@ frontend/src/features/startup/
 
 `0039_zero_uid_validity.sql` 重建 `message_deletions`，把 `uid_validity` 的约束从 `> 0` 放宽为 `>= 0`，使返回 UIDVALIDITY `0` 的目录中的邮件也能排队删除。其余列、约束、默认值与两个索引不变，已有待删除记录原样保留。
 
+### 全局发信签名、内嵌图片与账号默认绑定
+
+`0040_signatures.sql` 新建 `signatures`、`signature_images` 与 `account_signatures` 三张表，不改已有表与数据。`signature_images` 外键引用 `signatures(id)` 级联删除，其 `blob_hash` 纳入启动时的 blob GC 集合；`account_signatures` 以 `account_id` 为主键，同时外键引用 `accounts(id)` 与 `signatures(id)` 级联删除，删除账号或删除签名时自动清理默认绑定。
+
+`0041_signature_default_mode.sql` 为 `signatures` 增加 `is_default`（配合部分唯一索引保证至多一个全局默认签名），并重建 `account_signatures` 增加 `mode`（`none` / `specific`；未记录行即表示跟随全局默认签名），已有行保留为 `specific`。
+
 ## 4. 版本与执行规则
 
 ### 4.1 沿用 v1 记录格式

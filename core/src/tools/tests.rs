@@ -1541,6 +1541,7 @@ async fn reply_draft_origin_follows_the_principal_and_the_text_goes_above_the_qu
                 email_id: f.emails[0].clone(),
                 kind: crate::DraftKind::Reply,
                 client_mutation_id: Uuid::new_v4().to_string(),
+                signature: None,
             },
             crate::SupportedLocale::default(),
         )
@@ -1787,6 +1788,7 @@ fn user_draft(f: &Fx, account: &str, subject: &str) -> Draft {
                 subject: subject.into(),
                 body_html: "<p>mine</p>".into(),
                 client_mutation_id: Uuid::new_v4().to_string(),
+                signature: None,
             },
             account,
         )

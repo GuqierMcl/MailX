@@ -772,6 +772,61 @@ impl MailxCore {
         Ok(draft)
     }
 
+    pub fn signatures_state(&self) -> Result<crate::SignaturesState, AppError> {
+        self.accounts()?.signatures_state()
+    }
+
+    pub fn save_signature(
+        &self,
+        request: crate::SaveSignatureRequest,
+    ) -> Result<crate::SignaturesState, AppError> {
+        self.accounts()?.save_signature(request)
+    }
+
+    pub fn delete_signature(&self, id: &str) -> Result<crate::SignaturesState, AppError> {
+        self.accounts()?.delete_signature(id)
+    }
+
+    pub fn set_default_signature(
+        &self,
+        request: crate::SetDefaultSignatureRequest,
+    ) -> Result<crate::SignaturesState, AppError> {
+        self.accounts()?.set_default_signature(request)
+    }
+
+    pub fn set_account_default_signature(
+        &self,
+        request: crate::SetAccountSignatureRequest,
+    ) -> Result<crate::SignaturesState, AppError> {
+        self.accounts()?.set_account_default_signature(request)
+    }
+
+    pub fn prepare_signature_image(
+        &self,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<(crate::StagedSignatureImage, String, Vec<u8>), AppError> {
+        self.accounts()?.prepare_signature_image(file_name, bytes)
+    }
+
+    pub fn signature_image_preview(
+        &self,
+        signature_id: &str,
+        image_id: &str,
+    ) -> Result<(String, Vec<u8>), AppError> {
+        self.accounts()?
+            .signature_image_preview(signature_id, image_id)
+    }
+
+    pub fn draft_apply_signature(
+        &self,
+        request: crate::ApplyDraftSignatureRequest,
+    ) -> Result<Draft, AppError> {
+        let draft = self.accounts()?.draft_apply_signature(request)?;
+        self.announce_draft(&draft, DraftChange::Updated);
+        Ok(draft)
+    }
+
     /// Attaches `bytes` (read by the host) to a draft as `request.file_name`.
     pub fn add_attachment(
         &self,
@@ -1238,6 +1293,7 @@ mod tests {
                     subject: "local draft".into(),
                     body_html: "<p>text</p>".into(),
                     client_mutation_id: Uuid::new_v4().to_string(),
+                    signature: None,
                 },
                 "",
             )

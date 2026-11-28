@@ -1,11 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import { t } from '@/i18n'
-import { useState } from 'react'
-import { ScrollArea as ScrollAreaPrimitive } from '@base-ui/react/scroll-area'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import { AiMagicIcon, ComputerIcon, InboxIcon, InformationCircleIcon, KeyboardIcon, LanguagesIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, Shield01Icon, SunriseIcon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
+import { AiMagicIcon, ComputerIcon, InboxIcon, InformationCircleIcon, KeyboardIcon, LanguagesIcon, McpServerIcon, Notification03Icon, PaintBoardIcon, PencilEdit02Icon, QuillWrite01Icon, Shield01Icon, SunriseIcon, UserMultiple02Icon } from '@hugeicons/core-free-icons'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Sidebar,
   SidebarGroup,
@@ -31,8 +29,9 @@ import { MailEnhancementsPane } from './mail-enhancements-pane'
 import { McpPane } from './mcp-pane'
 import { AboutPane } from './about-pane'
 import { ShortcutsPane } from './shortcuts-pane'
+import { SignaturesPane } from './signatures-pane'
 
-export type SettingsSection = 'general' | 'appearance' | 'now' | 'shortcuts' | 'notifications' | 'compose' | 'contacts' | 'mailEnhancements' | 'security' | 'translation' | 'ai' | 'mcp' | 'about'
+export type SettingsSection = 'general' | 'appearance' | 'now' | 'shortcuts' | 'notifications' | 'compose' | 'signatures' | 'contacts' | 'mailEnhancements' | 'security' | 'translation' | 'ai' | 'mcp' | 'about'
 /** Where the dialog opens. */
 export type SettingsTarget = { section: SettingsSection }
 
@@ -66,6 +65,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
       heading: t('settings:groupMail'),
       items: [
         { id: 'compose', name: t('settings:compose'), icon: PencilEdit02Icon },
+        { id: 'signatures', name: t('settings:signatures'), icon: QuillWrite01Icon },
         { id: 'contacts', name: t('settings:contacts'), icon: UserMultiple02Icon },
         { id: 'mailEnhancements', name: t('settings:mailEnhancements'), icon: InboxIcon },
         { id: 'security', name: t('settings:security'), icon: Shield01Icon },
@@ -87,37 +87,60 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
   }
 
   const sectionName = GROUPS.flatMap((group) => group.items).find((item) => item.id === section)?.name
+  const navRef = useRef<HTMLElement>(null)
+  const [fade, setFade] = useState({ top: false, bottom: false })
+  const updateFade = () => {
+    const el = navRef.current
+    if (!el) return
+    const top = el.scrollTop > 1
+    const bottom = el.scrollTop + el.clientHeight < el.scrollHeight - 1
+    setFade((prev) => (prev.top === top && prev.bottom === bottom ? prev : { top, bottom }))
+  }
+  useEffect(() => {
+    if (!target) return
+    const el = navRef.current
+    if (!el) return
+    updateFade()
+    const observer = new ResizeObserver(updateFade)
+    observer.observe(el)
+    for (const child of el.children) observer.observe(child)
+    return () => observer.disconnect()
+  }, [target])
 
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 md:max-w-[760px] lg:max-w-[880px]">
         <DialogDescription className="sr-only">{t('settings:dialogDescription')}</DialogDescription>
         {/* Narrow windows turn the side navigation into a top strip instead of hiding it. */}
-        <SidebarProvider className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] md:grid-cols-[var(--sidebar-width)_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_auto]">
+        <SidebarProvider
+          style={{ '--sidebar-width': '13rem' } as CSSProperties}
+          className="settings-sidebar grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] md:grid-cols-[var(--sidebar-width)_minmax(0,1fr)] md:grid-rows-[minmax(0,1fr)_auto]"
+        >
           <Sidebar collapsible="none"
             className="h-auto w-full shrink-0 flex-row items-center border-b pr-12 md:col-start-1 md:row-start-1 md:h-full md:w-(--sidebar-width) md:flex-col md:items-stretch md:border-b-0 md:pr-0">
-            <SidebarHeader className="shrink-0 px-4 py-3 md:pt-5 md:pb-1">
+            <SidebarHeader className="shrink-0 px-4 py-3 md:px-4 md:pt-5 md:pb-2">
               <DialogTitle className="text-base font-semibold">{t('settings:title')}</DialogTitle>
             </SidebarHeader>
-            <ScrollArea
-              render={<nav />}
+            <nav
+              ref={navRef}
               role="navigation"
               aria-label={t('settings:title')}
-              className="settings-nav min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-thumb]]:bg-sidebar-foreground/45"
-              horizontal
+              onScroll={updateFade}
+              style={navFadeMask(fade)}
+              className="base-ui-disable-scrollbar flex min-h-0 min-w-0 flex-1 flex-row overflow-x-auto overflow-y-hidden md:flex-col md:overflow-x-hidden md:overflow-y-auto"
             >
-              <ScrollAreaPrimitive.Content className="flex w-max data-has-overflow-x:pb-2.5 md:w-full md:flex-col md:data-has-overflow-y:pe-2.5">
+              <div className="flex w-max md:w-full md:flex-col md:pb-2">
                 {GROUPS.map((group) => (
-                  <SidebarGroup key={group.id} className="w-auto shrink-0 py-2 md:w-full md:px-2 md:pt-3 md:pb-1" data-testid={`settings-nav-group-${group.id}`}>
+                  <SidebarGroup key={group.id} className="w-auto shrink-0 py-2 md:w-full md:px-2 md:pt-2 md:pb-1" data-testid={`settings-nav-group-${group.id}`}>
                     {/* The strip in narrow windows has no room for headings. */}
                     <SidebarGroupLabel className="hidden md:flex">{group.heading}</SidebarGroupLabel>
                     <NavMenu items={group.items} section={section} onSelect={setSection} />
                   </SidebarGroup>
                 ))}
-              </ScrollAreaPrimitive.Content>
-            </ScrollArea>
+              </div>
+            </nav>
           </Sidebar>
-          <main className="flex min-h-0 min-w-0 flex-col overflow-hidden md:col-start-2 md:row-span-2 md:row-start-1">
+          <main className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background md:col-start-2 md:row-span-2 md:row-start-1">
             <header className="flex h-14 shrink-0 items-center gap-2 px-6 md:h-16 md:pr-12">
               <h2 className="text-sm font-medium">{sectionName}</h2>
             </header>
@@ -128,6 +151,7 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
               {section === 'shortcuts' && <ShortcutsPane client={client} />}
               {section === 'notifications' && <NotificationsPane client={client} />}
               {section === 'compose' && <ComposePane client={client} />}
+              {section === 'signatures' && <SignaturesPane client={client} />}
               {section === 'contacts' && <ContactsPane client={client} />}
               {section === 'mailEnhancements' && <MailEnhancementsPane client={client} />}
               {section === 'security' && <SecurityPane client={client} />}
@@ -145,6 +169,13 @@ export function SettingsDialog({ client, target, onClose }: SettingsDialogProps)
       </DialogContent>
     </Dialog>
   )
+}
+
+function navFadeMask({ top, bottom }: { top: boolean; bottom: boolean }): CSSProperties | undefined {
+  if (!top && !bottom) return undefined
+  const stops = `${top ? 'transparent, black 20px' : 'black, black'}, ${bottom ? 'black calc(100% - 20px), transparent' : 'black, black'}`
+  const gradient = `linear-gradient(to bottom, ${stops})`
+  return { maskImage: gradient, WebkitMaskImage: gradient }
 }
 
 function NavMenu({ items, section, onSelect }: { items: { id: SettingsSection; name: string; icon: IconSvgElement }[]; section: SettingsSection; onSelect: (section: SettingsSection) => void }) {

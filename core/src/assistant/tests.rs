@@ -2066,6 +2066,7 @@ async fn a_reply_draft_is_written_from_the_original_without_tools_and_events_nam
             email_id: fx.emails[0].clone(),
             kind: crate::DraftKind::Reply,
             client_mutation_id: uuid::Uuid::new_v4().to_string(),
+            signature: None,
         })
         .unwrap();
     fx.model(vec![say("Hi,\n\nThanks, Wednesday works.\n\nBest")]);

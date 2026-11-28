@@ -12,6 +12,7 @@ pub(crate) mod oauth;
 pub(crate) mod oauth_sessions;
 pub(crate) mod outbox;
 mod removal;
+mod signatures;
 mod translations;
 pub(crate) use drafts::{DraftSource, SourceMessage, local_offset};
 pub(crate) use outbox::{Next, SendAdmission};

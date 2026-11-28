@@ -55,6 +55,8 @@ export function forwardHeaderIndex(paragraphs: readonly string[]): number {
 export function ownBodyText(html: string, kind: DraftKind): string {
   const template = document.createElement('template')
   template.innerHTML = html
+  // Exclude signature blocks so fixed signature wording never triggers forgotten-attachment reminders.
+  template.content.querySelectorAll('div[data-mailx-signature]').forEach((node) => node.remove())
   // Whitespace between blocks is not a block of its own.
   const blocks = Array.from(template.content.childNodes).filter((node) => node.nodeType !== Node.TEXT_NODE || node.textContent?.trim())
   let keep: (index: number) => boolean = () => true

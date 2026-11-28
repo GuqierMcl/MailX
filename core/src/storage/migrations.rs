@@ -265,6 +265,18 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         required_tables: &["message_deletions"],
         sql: include_str!("migrations/0039_zero_uid_validity.sql"),
     },
+    Migration {
+        version: 40,
+        description: "global email signatures, signature inline images, and account defaults",
+        required_tables: &["signatures", "signature_images", "account_signatures"],
+        sql: include_str!("migrations/0040_signatures.sql"),
+    },
+    Migration {
+        version: 41,
+        description: "global default signature flag and account follow-default mode",
+        required_tables: &["signatures", "account_signatures"],
+        sql: include_str!("migrations/0041_signature_default_mode.sql"),
+    },
 ];
 
 pub(crate) fn checksum(sql: &str) -> String {

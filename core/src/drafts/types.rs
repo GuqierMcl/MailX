@@ -1,5 +1,7 @@
 //! Draft wire contract. Drafts are local only; nothing here reaches a server.
 use super::attachments::DraftAttachmentSummary;
+use super::body::{body_text_without_signature, referenced_cids_outside_signature};
+use super::signatures::DraftSignatureSelection;
 use crate::mail::MailAddress;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -99,15 +101,27 @@ pub struct Draft {
 }
 
 impl Draft {
-    /// No recipients and a subject and body of only whitespace: nothing worth
-    /// keeping or listing.
+    /// No recipients, no subject, no non-signature body text, and no user
+    /// attachments (inline images referenced only inside a signature block do
+    /// not make an untouched draft non-blank).
     pub fn is_blank(&self) -> bool {
-        self.to.is_empty()
-            && self.cc.is_empty()
-            && self.bcc.is_empty()
-            && self.subject.trim().is_empty()
-            && self.body_text.trim().is_empty()
-            && self.attachments.is_empty()
+        if !self.to.is_empty()
+            || !self.cc.is_empty()
+            || !self.bcc.is_empty()
+            || !self.subject.trim().is_empty()
+        {
+            return false;
+        }
+        if !body_text_without_signature(&self.body_html)
+            .trim()
+            .is_empty()
+        {
+            return false;
+        }
+        if self.attachments.iter().any(|item| !item.inline) {
+            return false;
+        }
+        referenced_cids_outside_signature(&self.body_html).is_empty()
     }
 }
 
@@ -142,6 +156,10 @@ pub struct CreateDraftRequest {
     pub subject: String,
     pub body_html: String,
     pub client_mutation_id: String,
+    /// Optional signature override; omitted uses the sending account's default.
+    #[serde(default)]
+    #[ts(optional)]
+    pub signature: Option<DraftSignatureSelection>,
 }
 
 /// Creates a reply, reply-all or forward draft from a cached message. The
@@ -153,6 +171,10 @@ pub struct CreateDraftFromRequest {
     /// `reply`, `replyAll` or `forward`.
     pub kind: DraftKind,
     pub client_mutation_id: String,
+    /// Optional signature override; omitted uses the sending account's default.
+    #[serde(default)]
+    #[ts(optional)]
+    pub signature: Option<DraftSignatureSelection>,
 }
 
 /// Replaces the draft's content. Fails with `conflict` unless

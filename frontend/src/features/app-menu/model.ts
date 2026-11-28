@@ -13,7 +13,7 @@ export const definitions = {
 
 export const themes = ['themeSystem', 'themeLight', 'themeDark'] as const
 export type GroupId = keyof typeof definitions
-export type CommandId = Exclude<typeof definitions[GroupId][number], 'appearance' | 'openWindows'> | typeof themes[number]
+export type CommandId = Exclude<typeof definitions[GroupId][number], 'appearance' | 'openWindows'> | typeof themes[number] | 'signatures'
 
 export const accelerators: Partial<Record<CommandId, string>> = {
   settings: 'CmdOrCtrl+Comma',

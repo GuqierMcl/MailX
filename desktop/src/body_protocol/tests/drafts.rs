@@ -12,6 +12,7 @@ fn create(core: &MailxCore, html: &str) -> Draft {
             subject: "Draft preview fixture".into(),
             body_html: html.into(),
             client_mutation_id: Uuid::new_v4().to_string(),
+            signature: None,
         },
         "",
     )

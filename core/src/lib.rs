@@ -72,6 +72,13 @@ pub use drafts::attachments::{
     AddAttachmentRequest, AttachmentOrigin, AttachmentPolicy, DraftAttachmentSummary, InlineImage,
     RemoveAttachmentRequest,
 };
+pub use drafts::signatures::{
+    AccountSignatureDefault, AccountSignatureMode, ApplyDraftSignatureRequest,
+    DraftSignatureSelection, MAX_SIGNATURE_HTML_BYTES, MAX_SIGNATURE_IMAGE_BYTES,
+    MAX_SIGNATURE_IMAGES, MAX_SIGNATURE_NAME_BYTES, MAX_SIGNATURES, SaveSignatureRequest,
+    SetAccountSignatureRequest, SetDefaultSignatureRequest, Signature, SignatureImage,
+    SignaturesState, StagedSignatureImage,
+};
 pub use drafts::types::*;
 pub use error::{ApiFailure, ApiResult, ApiSuccess, AppError, ErrorCode};
 pub use events::{

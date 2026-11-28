@@ -41,6 +41,7 @@ export function PreferencesMenuActions() {
   const { snapshot, check } = useUpdater()
   useAppMenuCommands({
     settings: { run: () => requestSettings({ section: 'general' }) },
+    signatures: { run: () => requestSettings({ section: 'signatures' }) },
     about: { run: () => requestSettings({ section: 'about' }) },
     shortcuts: { run: () => requestSettings({ section: 'shortcuts' }) },
     update: {

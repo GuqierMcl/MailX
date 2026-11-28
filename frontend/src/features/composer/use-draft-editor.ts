@@ -97,7 +97,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
   const lockedRef = useRef(false)
   // An attachment command in flight; saves wait for it so two writers never name the same revision.
   const applyAttachments = useCallback((list: DraftAttachmentSummary[]) => {
-    attachmentCount.current = list.length
+    attachmentCount.current = list.filter((item) => !item.inline).length
     setAttachments(list)
   }, [])
   const mutating = useRef<Promise<unknown> | null>(null)
@@ -359,6 +359,44 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     [client, draftId, mutateAttachments],
   )
 
+  /** Replaces or removes the draft's signature block after flushing pending edits. */
+  const applySignature = useCallback(async (signatureId: string | null): Promise<Draft | null> => {
+    if (detached.current || !alive.current || lockedRef.current || mutating.current) return null
+    setAttaching(true)
+    const run = (async (): Promise<Draft | null> => {
+      const { ok } = await flush()
+      if (!ok) throw new DraftUnsavedError()
+      try {
+        const draft = await client.applyDraftSignature({
+          draftId,
+          expectedRevision: revision.current,
+          signatureId,
+        })
+        if (!alive.current || detached.current) return null
+        revision.current = draft.revision
+        applyAttachments(draft.attachments)
+        const next = latest.current ? { ...latest.current, bodyHtml: draft.bodyHtml } : fieldsOf(draft)
+        latest.current = next
+        setFields(next)
+        setChangeToken((value) => value + 1)
+        return draft
+      } catch (cause) {
+        if (!alive.current || detached.current) throw cause
+        const code = clientFailureCode(cause)
+        if (code === 'conflict') await reload()
+        else if (code === 'draftLocked') setLocked(true)
+        throw cause
+      }
+    })()
+    mutating.current = run
+    try {
+      return await run
+    } finally {
+      mutating.current = null
+      if (alive.current) setAttaching(false)
+    }
+  }, [applyAttachments, client, draftId, flush, reload, setLocked])
+
   /** Retries a failed save now. */
   const retry = useCallback(() => {
     if (detached.current || !alive.current || !dirty.current) return
@@ -427,6 +465,7 @@ export function useDraftEditor(client: MailxClient, draftId: string, onNotice?: 
     addInlineImages,
     addInlineImageBytes,
     removeAttachment,
+    applySignature,
     changeToken,
     update,
     flush,

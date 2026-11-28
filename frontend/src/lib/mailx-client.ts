@@ -57,6 +57,12 @@ import type {
   DraftChanged,
   InlineImage,
   DraftSummary,
+  SignaturesState,
+  StagedSignatureImage,
+  SaveSignatureRequest,
+  SetDefaultSignatureRequest,
+  SetAccountSignatureRequest,
+  ApplyDraftSignatureRequest,
   OutboxChanged,
   SentCopiesChanged,
   OutboxItem,
@@ -396,6 +402,26 @@ export interface MailxClient {
   addInlineImageBytes(draftId: string, expectedRevision: number, fileName: string, bytes: Uint8Array): Promise<{ draft: Draft; inserted: InlineImage[] }>
   /** Composer window. A displayable copy of an inline image (PNG / JPEG ...); `notFound` when the attachment is gone. */
   inlineImagePreview(draftId: string, attachmentId: string): Promise<ArrayBuffer>
+  /** Both windows. Lists all saved signatures and each account's default signature binding. */
+  listSignatures(): Promise<SignaturesState>
+  /** Main window. Creates or updates a signature and returns the updated state. */
+  saveSignature(request: SaveSignatureRequest): Promise<SignaturesState>
+  /** Main window. Deletes a signature and clears any account override pointing to it. */
+  deleteSignature(id: string): Promise<SignaturesState>
+  /** Main window. Sets or clears the global default signature (`null` clears). */
+  setDefaultSignature(request: SetDefaultSignatureRequest): Promise<SignaturesState>
+  /** Main window. Sets an account's signature preference (`followDefault`, `none`, or `specific`). */
+  setAccountDefaultSignature(request: SetAccountSignatureRequest): Promise<SignaturesState>
+  /** Main window. Opens the image picker for the signature editor and returns staged images, or `null` if cancelled. */
+  addSignatureImages(): Promise<StagedSignatureImage[] | null>
+  /** Main window. Stages one pasted image for the signature editor from raw bytes. */
+  addSignatureImageBytes(fileName: string, bytes: Uint8Array): Promise<StagedSignatureImage>
+  /** Main window. Returns validated preview bytes for a saved or staged signature image. */
+  signatureImagePreview(signatureId: string | null, imageId: string): Promise<ArrayBuffer>
+  /** Both windows. Fires whenever signatures or account defaults change. */
+  onSignaturesChanged(listener: (state: SignaturesState) => void): () => void
+  /** Both windows (draft-scoped). Replaces or removes a draft's signature block and updates inline images. */
+  applyDraftSignature(request: ApplyDraftSignatureRequest): Promise<Draft>
   /** Composer window, own draft only. `draftLocked` once the draft is queued. */
   removeAttachment(request: RemoveAttachmentRequest): Promise<Draft>
   /** Limits for drafts of this account; `serverLimitMb` is only a hint, the core stays authoritative. */
@@ -541,6 +567,7 @@ export const HOST_EVENTS = {
   composerCloseRequested: 'mailx://composer-close-requested',
   filesDropped: 'composer://files-dropped',
   settingsChanged: 'mailx://settings-changed',
+  signaturesChanged: 'mailx://signatures-changed',
   updater: 'mailx://updater-state',
   mcp: 'mailx://mcp-status-changed',
   assistant: 'mailx://assistant',
@@ -834,6 +861,37 @@ export function createDesktopClient(): MailxClient {
         throw new MailxClientError(rawFailure(cause))
       }
     },
+    listSignatures: () => call<SignaturesState>('signatures_list'),
+    saveSignature: (request) => call<SignaturesState>('signatures_save', { request }),
+    deleteSignature: (id) => call<SignaturesState>('signatures_delete', { id }),
+    setDefaultSignature: (request) => call<SignaturesState>('signatures_set_default', { request }),
+    setAccountDefaultSignature: (request) => call<SignaturesState>('signatures_set_account_default', { request }),
+    addSignatureImages: () => call<StagedSignatureImage[] | null>('signatures_add_image'),
+    async addSignatureImageBytes(fileName, bytes) {
+      if (!available) throw new MailxClientError({ code: 'hostUnavailable', message: '请在 MailX 桌面应用中管理账号。', field: null })
+      const headers = { 'x-mailx-file-name': encodeURIComponent(fileName) }
+      let result: unknown
+      try {
+        result = await invoke<unknown>('signatures_add_image_bytes', bytes, { headers })
+      } catch (cause) {
+        throw new MailxClientError(rawFailure(cause))
+      }
+      if (isApiResult(result)) {
+        if (result.ok === false) throw new MailxClientError(result.error)
+        return result.data as StagedSignatureImage
+      }
+      return result as StagedSignatureImage
+    },
+    async signatureImagePreview(signatureId, imageId) {
+      if (!available) throw new MailxClientError({ code: 'hostUnavailable', message: '请在 MailX 桌面应用中管理账号。', field: null })
+      try {
+        return await invoke<ArrayBuffer>('signatures_image_preview', { signatureId, imageId })
+      } catch (cause) {
+        throw new MailxClientError(rawFailure(cause))
+      }
+    },
+    onSignaturesChanged: (listener) => subscribe<SignaturesState>(HOST_EVENTS.signaturesChanged, listener),
+    applyDraftSignature: (request) => call<Draft>('drafts_apply_signature', { request }),
     removeAttachment: (request) => call<Draft>('attachments_remove', { request }),
     attachmentPolicy: (accountId) => call<AttachmentPolicy>('attachments_policy', { accountId }),
     onFilesDropped: (listener) => subscribe<void>(HOST_EVENTS.filesDropped, () => listener()),
