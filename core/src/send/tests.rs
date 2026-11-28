@@ -194,19 +194,17 @@ impl Fx {
             .collect()
     }
 
-    /// Waits until the announced states are `expected`, the order of the first
-    /// two aside. The worker commits a state before it emits the event, and
-    /// `queue_send` announces `Queued` only after its own commit, so a worker that
-    /// is already running can announce `Sending` first, and a test that saw the
-    /// new state in the database can be a moment ahead of the events. The UI
-    /// treats events as "reload the outbox", so the order does not matter there.
+    /// Waits until the announced states are `expected`, wherever `Queued` falls.
+    /// The worker commits a state before it emits the event, and `queue_send`
+    /// announces `Queued` only after its own commit, so a worker that is already
+    /// running can announce `Sending` (or even the final state, on a slow
+    /// machine) first, and a test that saw the new state in the database can be
+    /// a moment ahead of the events. The UI treats events as "reload the
+    /// outbox", so the order does not matter there. The worker's own states
+    /// must still arrive in order, and `Queued` exactly once.
     async fn states_become(&self, id: &str, expected: &[OutboxState]) {
         let matches = |got: &[OutboxState]| {
-            let mut got = got.to_vec();
-            if got.len() >= 2 && got[0] == OutboxState::Sending && got[1] == OutboxState::Queued {
-                got.swap(0, 1);
-            }
-            got == expected
+            queued_first(got).is_some_and(|got| Some(got) == queued_first(expected))
         };
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while !matches(&self.states(id)) && std::time::Instant::now() < deadline {
@@ -214,6 +212,45 @@ impl Fx {
         }
         let got = self.states(id);
         assert!(matches(&got), "{got:?} is not {expected:?}");
+    }
+}
+
+/// The announced states with the single `Queued` moved to the front, or `None`
+/// unless `Queued` appears exactly once. See `states_become`.
+fn queued_first(states: &[OutboxState]) -> Option<Vec<OutboxState>> {
+    let queued = states
+        .iter()
+        .filter(|state| **state == OutboxState::Queued)
+        .count();
+    (queued == 1).then(|| {
+        let mut ordered = vec![OutboxState::Queued];
+        ordered.extend(
+            states
+                .iter()
+                .copied()
+                .filter(|state| *state != OutboxState::Queued),
+        );
+        ordered
+    })
+}
+
+#[test]
+fn queued_may_arrive_anywhere_but_the_worker_order_is_kept() {
+    use OutboxState::{Failed, Queued, Sending};
+    let expected = queued_first(&[Queued, Sending, Failed]);
+    for got in [
+        [Queued, Sending, Failed],
+        [Sending, Queued, Failed],
+        [Sending, Failed, Queued],
+    ] {
+        assert_eq!(queued_first(&got), expected, "{got:?}");
+    }
+    for got in [
+        &[Sending, Failed][..],
+        &[Queued, Queued, Sending, Failed],
+        &[Queued, Failed, Sending],
+    ] {
+        assert_ne!(queued_first(got), expected, "{got:?}");
     }
 }
 
