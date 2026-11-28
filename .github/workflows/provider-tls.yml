@@ -5,6 +5,9 @@ name: Provider TLS
 # servers, so it stays out of pull request CI. No account or credential is used.
 on:
   workflow_dispatch:
+  # TEMPORARY: run once on this branch before the workflow exists on main.
+  push:
+    branches: [fix/sina-system-tls]
 
 permissions:
   contents: read
