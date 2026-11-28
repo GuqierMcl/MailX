@@ -118,7 +118,7 @@ CI、手动 Linux 打包检查与 Release 共用 `scripts/install-linux-build-de
 
 - 官网：构建所用的文件有变化时运行 `version:check`、`site:check` 与 `site:build`，计入 `CI result`；没有变化时跳过。只改官网时不运行下面的应用检查。
 - Ubuntu：`version:check`、`i18n:check`、`typecheck`、`lint`、`frontend:test` 与前端 `build`。
-- Ubuntu、macOS 与 Windows：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
+- Ubuntu、macOS、Windows（x64）与 Windows 11（ARM64）：前端构建后运行 `rust:clippy`（`-D warnings`）与 `rust:test`；Ubuntu 另外运行 `rust:fmt` 与 `types:check`。Linux 任务安装 WebKitGTK、libdbus 等 Tauri 与 Secret Service 依赖。
 
 `.github/workflows/linux-appimage.yml` 通过 `workflow_dispatch` 手动触发，在各自原生的 Ubuntu 24.04 runner 上构建无更新签名的 x64 和 ARM64 AppImage、DEB、RPM。检查安装包架构及主程序和 `mailx-mcp` 的 ELF 架构，并在干净的同架构 Ubuntu 容器中用 APT 安装 DEB。RPM 的安装和启动在目标发行版上验证。
 
