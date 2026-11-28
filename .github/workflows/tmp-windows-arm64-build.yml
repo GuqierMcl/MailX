@@ -1,0 +1,47 @@
+name: TEMP Windows ARM64 build
+
+# TEMPORARY: proves the ARM64 Windows installer builds before the release
+# workflow (environment-restricted to main and tags) can run it. Removed
+# before merge. No updater signing key, so updater artifacts are off.
+on:
+  push:
+    branches: [release/windows-arm64]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-11-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-11-arm-release
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Verify Windows executable architectures
+        shell: bash
+        run: |
+          sidecar=$(find desktop/binaries -maxdepth 1 -name 'mailx-mcp-*windows*.exe' | head -n 1)
+          test -n "$sidecar"
+          echo "sidecar: $sidecar"
+          bun scripts/check-windows-binaries.mjs --platform windows-arm64 target/release/mailx-desktop.exe "$sidecar"
+      - name: Rename like the release
+        shell: bash
+        run: |
+          mkdir dist-release
+          find target/release/bundle -type f -name '*-setup.exe' -exec cp -v {} dist-release/ \;
+          bun scripts/release-assets.mjs --dir dist-release --version 0.0.0-test --platform windows-arm64
+          ls -l dist-release
+          test -f dist-release/MailX_0.0.0-test_windows-arm64-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-installer
+          path: dist-release/*
+          retention-days: 3
