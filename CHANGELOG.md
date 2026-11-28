@@ -14,11 +14,11 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🚀 Feature
 
-- Add email signatures with a global signature library (supporting rich text and local inline images), per-account default signature binding in Settings → Signatures, an editable in-body signature block with quick switching in the composer bottom bar, automatic signature switching when changing the sender account, and MCP / AI draft signature selection. / 新增发信签名功能：提供全局签名库（支持富文本格式与本地内嵌图片）、在「设置 → 签名」中为各账号配置默认签名、写信区正文内可编辑签名块与底栏快捷切换菜单、切换发件账号自动联动默认签名，以及 MCP / 内置 AI 创建草稿时的签名选择支持。
+- Add email signatures with a global signature library (supporting rich text and local inline images), per-account default signature binding in Settings → Signatures, an editable in-body signature block with quick switching in the composer bottom bar, automatic signature switching when changing the sender account, and MCP / AI draft signature selection. / 新增发信签名功能：提供全局签名库（支持富文本格式与本地内嵌图片）、在「设置 → 签名」中为各账号配置默认签名、写信区正文内可编辑签名块与底栏快捷切换菜单、切换发件账号自动联动默认签名，以及 MCP / 内置 AI 创建草稿时的签名选择支持。 ([#212](https://github.com/GuqierMcl/MailX/pull/212))
 
 ### ✨ Optimization
 
-- Refine the Settings sidebar navigation with softer contrast, a tighter width, and edge-fade scrolling matching the main window sidebar, and show icon + label for the composer's Attach button alongside the signature selector. / 优化设置弹窗左侧导航栏的底色对比、宽度与边缘渐隐滚动，向主界面侧边栏看齐；写信页底栏的附件按钮展开为图标加文字，与签名按钮风格统一。
+- Refine the Settings sidebar navigation with softer contrast, a tighter width, and edge-fade scrolling matching the main window sidebar, and show icon + label for the composer's Attach button alongside the signature selector. / 优化设置弹窗左侧导航栏的底色对比、宽度与边缘渐隐滚动，向主界面侧边栏看齐；写信页底栏的附件按钮展开为图标加文字，与签名按钮风格统一。 ([#212](https://github.com/GuqierMcl/MailX/pull/212))
 
 ## [0.5.2] - 2026-11-28
 
