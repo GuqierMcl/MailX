@@ -707,9 +707,8 @@ async fn authenticated_connection(
     }
 }
 
-/// SMTP endpoints have no registered platform-TLS hosts; a server that shares
-/// no TLS parameters with rustls is retried once on the platform stack along
-/// the same route (see `net::with_tls_fallback`).
+/// A server that shares no TLS parameters with rustls is retried once on the
+/// platform TLS stack along the same route (see `net::with_tls_fallback`).
 async fn connect_and_authenticate(
     route: &NetRoute,
     login: &SmtpLogin,
@@ -719,7 +718,6 @@ async fn connect_and_authenticate(
     net::with_tls_fallback(
         &login.host,
         login.port,
-        net::TlsStack::Rustls,
         |stack| connect_and_authenticate_on(route, login, timeouts, tls, stack),
         |failure: &SetupFailure| failure.tls_incompatible,
     )

@@ -15,7 +15,7 @@
 
 发现有证据的服务商行为偏差时，优先在服务商模块中解释，并按需增加中立扩展点。遵循标准行为的账号继续使用默认策略，无需为新增前端预设建立空模块。通用主流程描述“需要什么结果”，服务商实现描述“怎样从该服务商的响应得到结果”。前端的服务商入口、图标与账号显示资料不是证明服务器行为的证据。
 
-新浪免费邮、飞书邮箱（中国版）和 Lark 邮箱（国际版）均沿用标准协议策略；新浪 IMAP 端点另需系统 TLS 完成握手，见[第 7 节](#7-连接-tls-实现)。新浪按地址后缀选择预先登记的端点；飞书与 Lark 接受企业自有域名，但分别使用用户所选服务商的固定端点。失败时不向另一个服务提交凭证，已有账号也不因地址后缀被重新归类。不以品牌标识在 core 中改变已发送副本、同步或连接路由。端点、凭证与范围见[接入评估](../reference/mail-provider-preset-candidates.md)。
+新浪免费邮、飞书邮箱（中国版）和 Lark 邮箱（国际版）均沿用标准协议策略。新浪 IMAP 端点只提供 rustls 不支持的旧式套件，经通用的 TLS 回退连接，见[第 7 节](#7-连接-tls-实现)。新浪按地址后缀选择预先登记的端点；飞书与 Lark 接受企业自有域名，但分别使用用户所选服务商的固定端点。失败时不向另一个服务提交凭证，已有账号也不因地址后缀被重新归类。不以品牌标识在 core 中改变已发送副本、同步或连接路由。端点、凭证与范围见[接入评估](../reference/mail-provider-preset-candidates.md)。
 
 空文件夹缺少 SEARCH 响应的容错属于通用 IMAP 同步规则。只读 EXAMINE 明确给出 `0 EXISTS` 且该证据在搜索期间仍有效时，匹配的 tagged OK 可以完成空结果。规则适用于各 IMAP 端点，详见[邮件同步](mail-sync.md)。
 
@@ -111,27 +111,20 @@ EWS 使用共用账号路由、SecretStore、消息缓存和发送队列。协�
 
 ## 7. 连接 TLS 实现
 
-邮件协议连接默认使用 rustls，证书按操作系统信任库验证（`core/src/net/mod.rs`）。rustls 有意不实现有限域 DHE 和静态 RSA 密钥交换。少数服务器只提供这两类套件，rustls 与其没有共同的协议参数，握手失败，用户看到“无法建立安全连接”。这类连接改由系统 TLS 完成：macOS 为 Secure Transport，Windows 为 SChannel，Linux 为 OpenSSL。
+邮件协议连接默认使用 rustls，证书按操作系统信任库验证（`core/src/net/mod.rs`）。rustls 有意不实现有限域 DHE 和静态 RSA 密钥交换。少数服务器只提供这两类套件（例如新浪与 139 邮箱的 IMAP），rustls 与其没有共同的协议参数。这类连接改由系统 TLS 完成：macOS 为 Secure Transport，Windows 为 SChannel，Linux 为 OpenSSL。这是与服务商无关的通用规则，core 中没有按服务商或主机名登记的 TLS 例外。
 
-IMAP 与 SMTP 建连时按以下顺序选择（`net::with_tls_fallback`）：
+IMAP 与 SMTP 建连时按以下规则选择（`net::with_tls_fallback`）：
 
-1. **登记的端点**直接使用系统 TLS。`core/src/providers/mod.rs` 的 `imap_tls_stack` 按 IMAP 主机名精确匹配（不区分 ASCII 大小写），只看实际连接的主机名，不看邮箱后缀、`providerId` 或图标；后缀相似的主机不匹配。
-2. **其他端点**先用 rustls。仅当握手因协商失败而终止——服务器回 `handshake_failure`、`insufficient_security`、`protocol_version` 告警，或 rustls 判定对方不兼容（`PeerIncompatible`）——才从建立连接开始用系统 TLS 重试一次，STARTTLS 的明文阶段也重新进行。证书错误、超时、连接中断、代理失败和其他握手错误都不重试。
-3. 结果按端点（小写主机名、端口）记在进程内存中，不持久化。重试成功的端点在本次运行内直接使用系统 TLS，正文连接、IDLE 和重连不再先失败一次；重试失败不记录，下次仍从 rustls 开始。用 rustls 成功过的端点在本次运行内不再回退。
+1. 先用 rustls。仅当握手因协商失败而终止——服务器回 `handshake_failure`、`insufficient_security`、`protocol_version` 告警，或 rustls 判定对方不兼容（`PeerIncompatible`）——才从建立连接开始用系统 TLS 重试一次，STARTTLS 的明文阶段也重新进行。证书错误、超时、连接中断、代理失败和其他握手错误都不重试。
+2. 结果按端点（小写主机名、端口）记在进程内存中，不持久化。重试成功的端点在本次运行内直接使用系统 TLS，正文连接、IDLE 和重连不再先失败一次；重试失败不记录，下次仍从 rustls 开始。
+3. 用 rustls 成功过的端点在本次运行内不再回退。
 
 约束如下：
 
 - 两次尝试都走同一账号路由，代理失败不回退直连。
 - 系统库按系统信任库验证证书，最低 TLS 1.2；握手错误与 rustls 一样只返回脱敏的通用原因。
-- EWS 与 HTTPS（图片、翻译、AI、OAuth）只用 rustls，不经过此选择。
-- 回退存在降级风险：主动攻击者可伪造告警，把从未用 rustls 成功连接过的端点推向系统 TLS，进而协商没有前向保密的套件。证书仍由系统验证，攻击者无法冒充服务器。登记的端点不先尝试 rustls，在本次运行内用 rustls 成功过的端点也不再回退。
+- EWS 与 HTTPS（图片、翻译、AI、OAuth）只用 rustls，不经过回退。
+- 降级风险：主动攻击者可伪造告警，把本次运行内尚未用 rustls 成功连接过的端点推向系统 TLS，从而在服务器支持时协商没有前向保密的套件。证书仍由系统验证，攻击者无法冒充服务器。
 - Linux 安装包因此依赖系统 `libssl3`（DEB `libssl3t64 | libssl3`，RPM `libssl.so.3()(64bit)`）。
 
-已知只能经系统 TLS 连接的服务商端点应当登记，省去首次失败的尝试，也不给伪造告警留机会：
-
-| 服务商 | 登记的 IMAP 主机 | 原因 |
-| --- | --- | --- |
-| 新浪（`core/src/providers/sina.rs`） | `imap.sina.com`、`imap.sina.cn`、`imap.vip.sina.com`、`imap.vip.sina.cn` | 只提供 TLS 1.2 的 `DHE-RSA-*` 与静态 `RSA` 套件；SMTP 端点支持 ECDHE，保持 rustls |
-| 139 邮箱（`core/src/providers/mail139.rs`） | `imap.139.com` | 只提供 TLS 1.2 的静态 `RSA` 套件；SMTP 端点支持 ECDHE，保持 rustls |
-
-Windows 上能否握手取决于系统启用的套件。Windows 11 默认启用静态 RSA（`TLS_RSA_*`），未启用 `TLS_DHE_RSA_*`，因此与上述端点协商的是静态 RSA，没有前向保密。Windows Server 2022 起默认只启用 TLS 1.3 与 ECDHE 套件，这些端点在其上无法握手；手动禁用静态 RSA 的客户端也是如此。若 Windows 11 日后默认禁用静态 RSA 而服务器仍未支持 ECDHE，需要改用其他 TLS 实现。回退到系统 TLS 的端点同样受此限制。真实端点的检查方式见[验证指引](../development/validation.md)。服务器开始支持 ECDHE 后，可从登记中移除对应主机。
+Windows 上能否回退成功取决于系统启用的套件。Windows 11 默认启用静态 RSA（`TLS_RSA_*`），未启用 `TLS_DHE_RSA_*`，与上述服务器协商的是静态 RSA，没有前向保密。Windows Server 2022 起默认只启用 TLS 1.3 与 ECDHE 套件，这类服务器在其上无法连接；手动禁用静态 RSA 的客户端也是如此。若 Windows 11 日后默认禁用静态 RSA 而服务器仍未支持 ECDHE，需要改用其他 TLS 实现。真实端点的检查方式见[验证指引](../development/validation.md)。

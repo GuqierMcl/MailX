@@ -6,14 +6,15 @@
 //! TLS is verified against the operating system trust store.
 //!
 //! rustls is the TLS stack. Some mail servers only offer cipher suites rustls
-//! deliberately omits (finite-field DHE, static RSA key exchange);
-//! `TlsStack::Platform` runs those handshakes on the operating system library
-//! instead, over the same route. Registered endpoints use it directly; other
-//! IMAP / SMTP endpoints fall back to it through `with_tls_fallback` only when
-//! the server rejects every parameter rustls offered.
+//! deliberately omits (finite-field DHE, static RSA key exchange); IMAP and
+//! SMTP connections to them fall back to the operating system library through
+//! `with_tls_fallback`, over the same route, only when the server rejects
+//! every parameter rustls offered.
 
 pub(crate) mod http;
 pub(crate) mod images;
+#[cfg(test)]
+mod live_tls;
 mod proxy;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -117,7 +118,7 @@ pub(crate) async fn connect(
 }
 
 /// Which library performs a mail protocol TLS handshake. Chosen per endpoint by
-/// `crate::providers`, never by the account's brand or address.
+/// `with_tls_fallback`, never by the account's brand or address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TlsStack {
     Rustls,
@@ -162,25 +163,20 @@ fn learn_stack(key: (String, u16), stack: TlsStack) {
 /// Runs one mail connection attempt (`attempt` connects along the account
 /// route and performs the TLS handshake with the stack it is given).
 ///
-/// A registered `Platform` endpoint uses the platform stack directly. Any other
-/// endpoint starts with rustls; only if `incompatible` says the server shared
-/// no TLS parameters with rustls is the whole attempt repeated once on the
-/// platform stack, which then serves that endpoint for the rest of the process.
-/// An endpoint that has completed a rustls attempt never falls back, so a
-/// forged alert cannot downgrade a server already known to work with rustls.
+/// An endpoint starts with rustls. Only if `incompatible` says the server
+/// shared no TLS parameters with rustls is the whole attempt repeated once on
+/// the platform stack, which then serves that endpoint for the rest of the
+/// process. An endpoint that has completed a rustls attempt never falls back,
+/// so a forged alert cannot downgrade a server known to work with rustls.
 pub(crate) async fn with_tls_fallback<T, E, Fut>(
     host: &str,
     port: u16,
-    registered: TlsStack,
     mut attempt: impl FnMut(TlsStack) -> Fut,
     incompatible: impl Fn(&E) -> bool,
 ) -> Result<T, E>
 where
     Fut: Future<Output = Result<T, E>>,
 {
-    if registered == TlsStack::Platform {
-        return attempt(TlsStack::Platform).await;
-    }
     let key = (host.to_ascii_lowercase(), port);
     let known = learned_stack(&key);
     match attempt(known.unwrap_or(TlsStack::Rustls)).await {
@@ -381,7 +377,6 @@ mod tests {
     /// the stacks attempted, in order.
     async fn fallback(
         host: &str,
-        registered: TlsStack,
         rustls: Result<(), NetError>,
         platform: Result<(), NetError>,
     ) -> (Result<(), NetError>, Vec<TlsStack>) {
@@ -389,7 +384,6 @@ mod tests {
         let result = with_tls_fallback(
             host,
             993,
-            registered,
             |stack| {
                 tried.lock().unwrap().push(stack);
                 let result = match stack {
@@ -412,12 +406,11 @@ mod tests {
     async fn fallback_retries_once_and_remembers_the_platform_stack() {
         use TlsStack::{Platform, Rustls};
         let host = "Fallback-Learns.example";
-        let (result, tried) = fallback(host, Rustls, incompatible(), Ok(())).await;
+        let (result, tried) = fallback(host, incompatible(), Ok(())).await;
         assert!(result.is_ok());
         assert_eq!(tried, [Rustls, Platform]);
         // Learned per endpoint, case-insensitively: no second rustls attempt.
-        let (result, tried) =
-            fallback("fallback-learns.example", Rustls, incompatible(), Ok(())).await;
+        let (result, tried) = fallback("fallback-learns.example", incompatible(), Ok(())).await;
         assert!(result.is_ok());
         assert_eq!(tried, [Platform]);
     }
@@ -425,10 +418,9 @@ mod tests {
     #[tokio::test]
     async fn fallback_keeps_rustls_when_it_ever_worked_or_the_failure_is_not_negotiation() {
         use TlsStack::{Platform, Rustls};
-        let (_, tried) = fallback("fallback-sticky.example", Rustls, Ok(()), Ok(())).await;
+        let (_, tried) = fallback("fallback-sticky.example", Ok(()), Ok(())).await;
         assert_eq!(tried, [Rustls]);
-        let (result, tried) =
-            fallback("fallback-sticky.example", Rustls, incompatible(), Ok(())).await;
+        let (result, tried) = fallback("fallback-sticky.example", incompatible(), Ok(())).await;
         assert!(result.unwrap_err().is_tls_incompatible());
         assert_eq!(tried, [Rustls]);
 
@@ -438,7 +430,7 @@ mod tests {
             NetError::Proxy("refused".into()),
         ] {
             let (result, tried) =
-                fallback("fallback-other.example", Rustls, Err(error.clone()), Ok(())).await;
+                fallback("fallback-other.example", Err(error.clone()), Ok(())).await;
             assert_eq!(result, Err(error));
             assert_eq!(tried, [Rustls]);
         }
@@ -446,7 +438,6 @@ mod tests {
         // A failed retry teaches nothing: the next connection starts on rustls.
         let (result, tried) = fallback(
             "fallback-fails.example",
-            Rustls,
             incompatible(),
             Err(NetError::Timeout),
         )
@@ -455,17 +446,10 @@ mod tests {
         assert_eq!(tried, [Rustls, Platform]);
         let (_, tried) = fallback(
             "fallback-fails.example",
-            Rustls,
             incompatible(),
             Err(NetError::Timeout),
         )
         .await;
         assert_eq!(tried, [Rustls, Platform]);
-
-        // Registered endpoints go straight to the platform stack, no rustls try.
-        let (result, tried) =
-            fallback("fallback-registered.example", Platform, Ok(()), Ok(())).await;
-        assert!(result.is_ok());
-        assert_eq!(tried, [Platform]);
     }
 }

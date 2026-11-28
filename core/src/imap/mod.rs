@@ -379,7 +379,6 @@ async fn connect_client(
     net::with_tls_fallback(
         &login.host,
         login.port,
-        crate::providers::imap_tls_stack(&login.host),
         |stack| connect_client_on(route, login, guard, stack),
         |error| matches!(error, ImapError::Net(error) if error.is_tls_incompatible()),
     )
