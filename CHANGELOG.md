@@ -24,7 +24,7 @@ This file records user-facing changes to MailX, in English and Chinese on the sa
 
 ### 🩹 Fixed
 
-- Fix Sina Mail, 139 Mail and other mail servers that only support older encryption failing with "Could not establish a secure connection" by automatically retrying with the system's encryption. / 修复新浪邮箱、139 邮箱等仅支持旧式加密的邮件服务器提示“无法建立安全连接”的问题，连接时自动改用系统加密组件重试。
+- Fix Sina Mail, 139 Mail and other mail servers that only support older encryption failing with "Could not establish a secure connection" by automatically retrying with the system's encryption. / 修复新浪邮箱、139 邮箱等仅支持旧式加密的邮件服务器提示“无法建立安全连接”的问题，连接时自动改用系统加密组件重试。 ([#201](https://github.com/GuqierMcl/MailX/pull/201))
 - Reconcile IMAP flags immediately on manual refresh and IDLE updates, and fetch existing starred messages from before the 30-day sync window. / 修复手动刷新和 IMAP IDLE 推送时跳过标记同步的问题，并补拉 30 天同步窗口之前已有的星标邮件。
 
 ### 🔄 Changed
