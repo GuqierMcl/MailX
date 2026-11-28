@@ -22,6 +22,7 @@ use crate::{
     attachment_save::{self, SaveOutcome},
     body_protocol::{BodyProtocol, DocumentActions},
     commands::{authorize as authorize_window, respond},
+    eventkit::{self, NativeAddOutcome, NativeCalendarCapabilities},
     state::DesktopState,
 };
 
@@ -72,6 +73,16 @@ struct SetActionStatusArgs {
 struct ExportInputArgs {
     input: ActionItemExportInput,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PrivacySettingsArgs {
+    kind: mailx_core::ActionItemKind,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmptyArgs {}
 
 fn temp_ics_dir(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
     let base = app
@@ -150,7 +161,8 @@ pub(crate) async fn mail_list_document_actions(
         async {
             let args = args?;
             let core = state.core()?;
-            let mut listed = protocol.list_document_actions(args.email_id.clone(), args.document_token)?;
+            let mut listed =
+                protocol.list_document_actions(args.email_id.clone(), args.document_token)?;
             if !listed.items.is_empty()
                 && let Ok(states) = core.email_action_states(args.email_id).await
             {
@@ -331,6 +343,73 @@ pub(crate) async fn mail_copy_action_item_text(
                     ActionItemStatus::Added,
                 )
                 .await;
+            Ok(())
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn mail_action_item_capabilities(
+    window: WebviewWindow,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<NativeCalendarCapabilities>, ()> {
+    let args = authorize(&window, "mail_action_item_capabilities")
+        .and_then(|_| parse::<EmptyArgs>(request.body()));
+    Ok(respond(
+        async {
+            args?;
+            Ok(eventkit::capabilities())
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn mail_add_action_item_native(
+    window: WebviewWindow,
+    state: State<'_, DesktopState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<NativeAddOutcome>, ()> {
+    let args = authorize(&window, "mail_add_action_item_native")
+        .and_then(|_| parse::<ExportInputArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            let input = args.input.clone();
+            let outcome = tokio::task::spawn_blocking(move || eventkit::add_native(&input))
+                .await
+                .map_err(|_| AppError::new(ErrorCode::Internal))??;
+            if outcome == NativeAddOutcome::Added {
+                let _ = state
+                    .core()?
+                    .set_action_item_status(
+                        args.input.email_id,
+                        args.input.item_id,
+                        ActionItemStatus::Added,
+                    )
+                    .await;
+            }
+            Ok(outcome)
+        }
+        .await,
+    ))
+}
+
+#[tauri::command]
+pub(crate) async fn mail_open_calendar_privacy_settings(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    request: tauri::ipc::Request<'_>,
+) -> Result<ApiResult<()>, ()> {
+    let args = authorize(&window, "mail_open_calendar_privacy_settings")
+        .and_then(|_| parse::<PrivacySettingsArgs>(request.body()));
+    Ok(respond(
+        async {
+            let args = args?;
+            if let Some(url) = eventkit::privacy_settings_url(args.kind) {
+                let _ = app.opener().open_url(url, None::<&str>);
+            }
             Ok(())
         }
         .await,

@@ -217,7 +217,9 @@ pub(crate) fn email_summary_system(
 /// System prompt for L2 calendar event and task extraction.
 pub(crate) fn action_items_system(locale: crate::SupportedLocale, time_zone: &str) -> String {
     let lang = match locale {
-        crate::SupportedLocale::ZhCn => "Simplified Chinese (keeping proper nouns and purely English titles intact)",
+        crate::SupportedLocale::ZhCn => {
+            "Simplified Chinese (keeping proper nouns and purely English titles intact)"
+        }
         crate::SupportedLocale::En => "English (preserving proper nouns from the email)",
     };
     format!(
@@ -229,7 +231,7 @@ pub(crate) fn action_items_system(locale: crate::SupportedLocale, time_zone: &st
          - \"kind\": \"event\" (scheduled meeting, appointment, dated deadline) or \"task\" (action requested from the recipient)\n\
          - \"title\": concise descriptive title in {lang}\n\
          - \"startAt\": RFC 3339 timestamp with offset (e.g. \"2026-12-03T14:30:00+08:00\") or \"YYYY-MM-DD\" for all-day dates, or null if no date/time is given\n\
-         - \"endAt\": RFC 3339 timestamp or \"YYYY-MM-DD\", or null\n\
+         - \"endAt\": RFC 3339 timestamp or inclusive \"YYYY-MM-DD\" end date (null or same date for single-day all-day events), or null\n\
          - \"allDay\": boolean (true when only a date without a clock time is given)\n\
          - \"location\": physical location or room name, or null\n\
          - \"url\": exact http/https meeting or action link copied verbatim from the email, or null (never invent URLs)\n\

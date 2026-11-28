@@ -28,9 +28,14 @@ export function localTimeZone(): string {
   }
 }
 
-function sameDatePrefix(a: string | null, b: string | null): boolean {
-  if (!a || !b || a.length < 10 || b.length < 10) return false
-  return a.slice(0, 10) === b.slice(0, 10)
+function matchesCandidateTime(a: DetectedActionItem, b: DetectedActionItem): boolean {
+  if (!a.startAt || !b.startAt || a.startAt.length < 10 || b.startAt.length < 10) return false
+  if (a.startAt.slice(0, 10) !== b.startAt.slice(0, 10)) return false
+  if (a.allDay || b.allDay || a.startAt.length <= 10 || b.startAt.length <= 10) return true
+  const ta = Date.parse(a.startAt)
+  const tb = Date.parse(b.startAt)
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return true
+  return Math.abs(ta - tb) <= 2 * 60 * 60 * 1000
 }
 
 export type EmailActionItemsState = {
@@ -200,7 +205,7 @@ export function useEmailActionItems(
   const openItem = useCallback((item: DetectedActionItem) => {
     if (item.source === 'rule' && aiItems.length > 0 && item.startAt) {
       const matchedL2 = aiItems.find(
-        (candidate) => candidate.status !== 'dismissed' && sameDatePrefix(candidate.startAt, item.startAt),
+        (candidate) => candidate.status !== 'dismissed' && matchesCandidateTime(candidate, item),
       )
       if (matchedL2) {
         setEditingItem({
@@ -219,13 +224,24 @@ export function useEmailActionItems(
 
   const markStatus = useCallback(async (itemId: string, status: ActionItemStatus) => {
     if (!emailId) return
+    const prevIcs = icsItems
+    const prevAi = aiItems
+    const prevL1 = l1Items
     const apply = (list: DetectedActionItem[]) =>
       list.map((item) => (item.id === itemId ? { ...item, status } : item))
     setIcsItems(apply)
     setAiItems(apply)
     setL1ItemsState(apply)
-    await client.setActionItemStatus(emailId, itemId, status)
-  }, [client, emailId])
+    try {
+      await client.setActionItemStatus(emailId, itemId, status)
+    } catch {
+      if (currentEmailId.current === emailId) {
+        setIcsItems(prevIcs)
+        setAiItems(prevAi)
+        setL1ItemsState(prevL1)
+      }
+    }
+  }, [client, emailId, icsItems, aiItems, l1Items])
 
   const runState = requestedFresh !== null ? run.state : 'idle'
   let phase: ActionItemsPhase = aiItems.length > 0 ? 'done' : 'idle'

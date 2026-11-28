@@ -98,7 +98,9 @@ impl Storage {
 
     pub(crate) fn summary_delete_all(&mut self) -> Result<u64, AppError> {
         let removed = self.db.execute("DELETE FROM message_summaries", [])?;
-        let removed_actions = self.db.execute("DELETE FROM message_action_extractions", [])?;
+        let removed_actions = self
+            .db
+            .execute("DELETE FROM message_action_extractions", [])?;
         Ok((removed + removed_actions) as u64)
     }
 }

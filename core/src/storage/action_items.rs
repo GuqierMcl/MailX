@@ -29,7 +29,8 @@ impl Storage {
         items: &[DetectedActionItem],
     ) -> Result<String, AppError> {
         let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let items_json = serde_json::to_string(items).map_err(|_| AppError::new(crate::ErrorCode::Internal))?;
+        let items_json =
+            serde_json::to_string(items).map_err(|_| AppError::new(crate::ErrorCode::Internal))?;
         self.db.execute(
             "INSERT OR REPLACE INTO message_action_extractions
                 (message_id, source_sha256, prompt_version, items_json, updated_at)
@@ -97,9 +98,9 @@ impl Storage {
         &self,
         message_id: &str,
     ) -> Result<HashMap<String, ActionItemStatus>, AppError> {
-        let mut stmt = self.db.prepare(
-            "SELECT item_key, status FROM message_action_states WHERE message_id = ?1",
-        )?;
+        let mut stmt = self
+            .db
+            .prepare("SELECT item_key, status FROM message_action_states WHERE message_id = ?1")?;
         let rows = stmt.query_map(params![message_id], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;

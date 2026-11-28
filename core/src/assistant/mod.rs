@@ -55,15 +55,15 @@ use runs::Runs;
 use summary::SummaryCache;
 pub use types::{
     AssistantEvent, AssistantEventKind, CachedEmailActionItems, CachedEmailSummary, ChatContext,
-    ChatTurn,
-    ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ComposeAssistState, ComposeTask,
-    ConfirmAction, ConfirmAttachment, ConfirmDraftChange, ConfirmOutcome, ConfirmWarning,
-    ConfirmationDetails, ConfirmationRequest, ConversationChange, ConversationDetail,
-    ConversationList, ConversationSummary, ConversationsChanged, DEFAULT_CONVERSATION_PAGE,
-    FinishedReason, FlagRestore, MAX_COMPOSE_INSTRUCTION_CHARS, MAX_COMPOSE_TEXT_CHARS,
-    MAX_CONTEXT_EMAILS, MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, Occasion, OrganizeChange,
-    PendingConfirmation, RewriteStyle, RunKind, RunKindTag, RunReasoning, RunSnapshot, RunState,
-    StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo, TurnState,
+    ChatTurn, ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ComposeAssistState,
+    ComposeTask, ConfirmAction, ConfirmAttachment, ConfirmDraftChange, ConfirmOutcome,
+    ConfirmWarning, ConfirmationDetails, ConfirmationRequest, ConversationChange,
+    ConversationDetail, ConversationList, ConversationSummary, ConversationsChanged,
+    DEFAULT_CONVERSATION_PAGE, FinishedReason, FlagRestore, MAX_COMPOSE_INSTRUCTION_CHARS,
+    MAX_COMPOSE_TEXT_CHARS, MAX_CONTEXT_EMAILS, MAX_CONVERSATION_PAGE, MAX_MESSAGE_CHARS, Occasion,
+    OrganizeChange, PendingConfirmation, RewriteStyle, RunKind, RunKindTag, RunReasoning,
+    RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
+    TurnState,
 };
 
 /// The built-in assistant. Cheap to clone; clones share their runs.
@@ -618,11 +618,13 @@ impl Assistant {
             let (key_id, sha) = (source.message_id.clone(), source.sha256.clone());
             let cached = inner
                 .with_store(move |service| {
-                    service.action_extraction_get(&crate::storage::action_items::ActionExtractionKey {
-                        message_id: &key_id,
-                        source_sha256: &sha,
-                        prompt_version: prompt::ACTION_ITEMS_PROMPT_VERSION,
-                    })
+                    service.action_extraction_get(
+                        &crate::storage::action_items::ActionExtractionKey {
+                            message_id: &key_id,
+                            source_sha256: &sha,
+                            prompt_version: prompt::ACTION_ITEMS_PROMPT_VERSION,
+                        },
+                    )
                 })
                 .await?;
             if let Some(found) = cached {
@@ -633,10 +635,9 @@ impl Assistant {
                 ));
             }
         }
-        let run_id =
-            inner
-                .runs
-                .create(RunKindTag::ExtractActionItems, None, RunState::Running)?;
+        let run_id = inner
+            .runs
+            .create(RunKindTag::ExtractActionItems, None, RunState::Running)?;
         let task = tokio::spawn(agent::extract_action_items(
             inner.clone(),
             run_id.clone(),

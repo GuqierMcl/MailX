@@ -1,7 +1,7 @@
 import { errorDetail } from '@/i18n/errors'
 import { t } from '@/i18n'
 import { useTranslation } from 'react-i18next'
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { ErrorNotice } from '@/components/error-notice'
 import { Button } from '@/components/ui/button'
@@ -134,6 +134,9 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
   const currentToken = useRef<string | null>(null)
   const loaded = useRef(false)
   const active = useRef(false)
+  const handleActionClick = useEffectEvent((item: DetectedActionItem) => {
+    onActionItemClick?.(item)
+  })
   useEffect(() => {
     let live = true
     const release = (value: string) => { void client.releaseBody(emailId, value).catch(() => undefined) }
@@ -163,7 +166,7 @@ export function BodySession({ client, emailId, allowImages = false, hasRemoteIma
           if (!live || !active.current || !loaded.current || document.visibilityState === 'hidden' || event.emailId !== emailId ||
             event.documentToken !== currentToken.current || !event.requestId || seenActions.has(event.requestId)) return
           seenActions.add(event.requestId)
-          onActionItemClick?.(event.item)
+          handleActionClick(event.item)
         })
       : () => undefined
     const preparation = draftRevision !== undefined

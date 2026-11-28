@@ -114,6 +114,13 @@ export interface DocumentActions {
   items: DetectedActionItem[]
 }
 
+export interface NativeCalendarCapabilities {
+  calendarWrite: boolean
+  remindersWrite: boolean
+}
+
+export type NativeAddOutcome = 'added' | 'permissionDenied' | 'unavailable' | 'unsupported'
+
 /** Current-user OS login registration, managed only by the desktop host. */
 export interface AutostartSnapshot {
   enabled: boolean
@@ -338,6 +345,12 @@ export interface MailxClient {
   saveActionItemIcs(input: ActionItemExportInput): Promise<'saved' | 'cancelled'>
   /** Formats a task as plain text and copies it to the system clipboard. */
   copyActionItemText(input: ActionItemExportInput): Promise<void>
+  /** Reports whether this platform supports native direct write to Calendar / Reminders (macOS EventKit). */
+  getActionItemCapabilities(): Promise<NativeCalendarCapabilities>
+  /** Writes a confirmed event or task directly via native EventKit on macOS. */
+  addActionItemNative(input: ActionItemExportInput): Promise<NativeAddOutcome>
+  /** Opens OS privacy settings for Calendar or Reminders on macOS. */
+  openCalendarPrivacySettings(kind: 'event' | 'task'): Promise<void>
   /** App preferences from the core's `settings.json`; available even when startup failed. */
   getSettings(): Promise<SettingsSnapshot>
   /** Updates preference sections (layout fields merge individually) and returns the canonical form. */
@@ -757,6 +770,9 @@ export function createDesktopClient(): MailxClient {
     openActionItemCalendar: (input) => call<'saved' | 'cancelled'>('mail_open_action_item_calendar', { input }),
     saveActionItemIcs: (input) => call<'saved' | 'cancelled'>('mail_save_action_item_ics', { input }),
     copyActionItemText: (input) => call<void>('mail_copy_action_item_text', { input }),
+    getActionItemCapabilities: () => call<NativeCalendarCapabilities>('mail_action_item_capabilities', {}),
+    addActionItemNative: (input) => call<NativeAddOutcome>('mail_add_action_item_native', { input }),
+    openCalendarPrivacySettings: (kind) => call<void>('mail_open_calendar_privacy_settings', { kind }),
     getSettings: () => call<SettingsSnapshot>('settings_get'),
     async onSettingsChanged(listener) {
       if (!available) return () => undefined

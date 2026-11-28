@@ -1152,6 +1152,9 @@ export function createMockClient(options: MockClientOptions = {}): MailxClient {
     openActionItemCalendar: async () => 'saved',
     saveActionItemIcs: async () => 'saved',
     copyActionItemText: async () => undefined,
+    getActionItemCapabilities: async () => ({ calendarWrite: false, remindersWrite: false }),
+    addActionItemNative: async () => 'unsupported',
+    openCalendarPrivacySettings: async () => undefined,
     // A browser has no notification center or sound device to drive.
     testNotification: async () => undefined,
     previewSound: async () => undefined,

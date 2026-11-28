@@ -145,4 +145,30 @@ describe('ActionItems UI', () => {
     await userEvent.click(screen.getByRole('button', { name: '关闭提示' }))
     expect(state.dismissEmptyNotice).toHaveBeenCalledOnce()
   })
+
+  it('uses native EventKit on macOS and shows permission guidance with fallback when denied', async () => {
+    const client = testClient()
+    client.getActionItemCapabilities.mockResolvedValue({ calendarWrite: true, remindersWrite: true })
+    client.addActionItemNative.mockResolvedValueOnce('permissionDenied')
+    const onAdded = vi.fn()
+    render(
+      <ActionItemDialog
+        client={client}
+        emailSummary={SAMPLE_SUMMARY}
+        item={makeItem()}
+        onClose={vi.fn()}
+        onAdded={onAdded}
+      />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: '添加到系统日历' }))
+    expect(client.addActionItemNative).toHaveBeenCalledOnce()
+    expect(await screen.findByText('未获得系统日历写入权限，无法直接添加。')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: '打开系统设置' }))
+    expect(client.openCalendarPrivacySettings).toHaveBeenCalledWith('event')
+
+    await userEvent.click(screen.getByRole('button', { name: '改用 .ics 打开' }))
+    expect(client.openActionItemCalendar).toHaveBeenCalledOnce()
+    expect(onAdded).toHaveBeenCalledWith('ai:event:2026-12-03:abc')
+  })
 })

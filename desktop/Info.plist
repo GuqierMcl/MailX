@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+  <string>MailX uses write-only calendar access to save events you explicitly confirm from your emails into Apple Calendar, without reading your existing events.</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>MailX saves events you explicitly confirm from your emails into Apple Calendar.</string>
+  <key>NSRemindersFullAccessUsageDescription</key>
+  <string>MailX saves tasks you explicitly confirm from your emails into Apple Reminders.</string>
+  <key>NSRemindersUsageDescription</key>
+  <string>MailX saves tasks you explicitly confirm from your emails into Apple Reminders.</string>
+</dict>
+</plist>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { MoreHorizontalIcon } from '@hugeicons/core-free-icons'
@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toast'
 import type { ActionItemExportInput, ActionItemKind, DetectedActionItem, EmailSummary } from '@/generated/accounts'
-import { clientFailure, type ClientFailure, type MailxClient } from '@/lib/mailx-client'
+import { clientFailure, type ClientFailure, type MailxClient, type NativeCalendarCapabilities } from '@/lib/mailx-client'
 import { cn } from '@/lib/utils'
 
 function toDatetimeLocalValue(iso: string | null, allDay: boolean): string {
@@ -91,6 +91,17 @@ function ActionItemDialogBody({
   const [notes, setNotes] = useState(() => defaultNotes(item, emailSummary))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ClientFailure | null>(null)
+  const [permissionDenied, setPermissionDenied] = useState(false)
+  const [caps, setCaps] = useState<NativeCalendarCapabilities>({ calendarWrite: false, remindersWrite: false })
+
+  useEffect(() => {
+    let alive = true
+    client.getActionItemCapabilities().then(
+      (result) => { if (alive) setCaps(result) },
+      () => undefined,
+    )
+    return () => { alive = false }
+  }, [client])
 
   const [openedAt] = useState(() => Date.now())
   const isPast = useMemo(() => {
@@ -117,6 +128,7 @@ function ActionItemDialogBody({
   const runAction = async (fn: () => Promise<void>) => {
     setBusy(true)
     setError(null)
+    setPermissionDenied(false)
     try {
       await fn()
     } catch (cause) {
@@ -126,8 +138,32 @@ function ActionItemDialogBody({
     }
   }
 
-  const openCalendar = () => runAction(async () => {
+  const openCalendarIcs = () => runAction(async () => {
     const outcome = await client.openActionItemCalendar(buildPayload())
+    if (outcome === 'saved') {
+      onAdded(item.id)
+      toast.success(t('mail:actionItemCalendarOpened'))
+      onClose()
+    }
+  })
+
+  const addEventPrimary = () => runAction(async () => {
+    const payload = buildPayload()
+    // Recurring events with RRULE use `.ics` so recurrence rules are preserved.
+    if (caps.calendarWrite && !payload.rrule) {
+      const native = await client.addActionItemNative(payload)
+      if (native === 'added') {
+        onAdded(item.id)
+        toast.success(t('mail:actionItemNativeCalendarAdded'))
+        onClose()
+        return
+      }
+      if (native === 'permissionDenied') {
+        setPermissionDenied(true)
+        return
+      }
+    }
+    const outcome = await client.openActionItemCalendar(payload)
     if (outcome === 'saved') {
       onAdded(item.id)
       toast.success(t('mail:actionItemCalendarOpened'))
@@ -146,6 +182,27 @@ function ActionItemDialogBody({
 
   const copyTask = () => runAction(async () => {
     await client.copyActionItemText(buildPayload())
+    onAdded(item.id)
+    toast.success(t('mail:actionItemTaskCopied'))
+    onClose()
+  })
+
+  const addTaskPrimary = () => runAction(async () => {
+    const payload = buildPayload()
+    if (caps.remindersWrite) {
+      const native = await client.addActionItemNative(payload)
+      if (native === 'added') {
+        onAdded(item.id)
+        toast.success(t('mail:actionItemNativeReminderAdded'))
+        onClose()
+        return
+      }
+      if (native === 'permissionDenied') {
+        setPermissionDenied(true)
+        return
+      }
+    }
+    await client.copyActionItemText(payload)
     onAdded(item.id)
     toast.success(t('mail:actionItemTaskCopied'))
     onClose()
@@ -284,6 +341,32 @@ function ActionItemDialogBody({
             </div>
           )}
 
+          {permissionDenied && (
+            <div role="alert" className="flex flex-col gap-2 rounded-md bg-muted px-3 py-2 text-xs">
+              <span className="text-foreground">
+                {kind === 'event' ? t('mail:actionItemCalendarPermissionDenied') : t('mail:actionItemRemindersPermissionDenied')}
+              </span>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 text-xs"
+                  onClick={() => { void client.openCalendarPrivacySettings(kind) }}
+                >
+                  {t('mail:actionItemOpenPrivacySettings')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 text-xs"
+                  onClick={() => { void (kind === 'event' ? openCalendarIcs() : copyTask()) }}
+                >
+                  {kind === 'event' ? t('mail:actionItemFallbackIcs') : t('mail:actionItemFallbackCopy')}
+                </Button>
+              </div>
+            </div>
+          )}
+
           {error && <ErrorNotice message={t('mail:actionItemActionFailed')} detail={errorDetail(error)} />}
         </div>
 
@@ -304,18 +387,28 @@ function ActionItemDialogBody({
               <HugeiconsIcon icon={MoreHorizontalIcon} className="size-4" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
+              {kind === 'event' && caps.calendarWrite && (
+                <DropdownMenuItem onClick={() => void openCalendarIcs()}>
+                  {t('mail:actionItemFallbackIcs')}
+                </DropdownMenuItem>
+              )}
+              {kind === 'task' && caps.remindersWrite && (
+                <DropdownMenuItem onClick={() => void copyTask()}>
+                  {t('mail:actionItemCopyTask')}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => void saveIcs()}>
                 {kind === 'event' ? t('mail:actionItemSaveIcs') : t('mail:actionItemExportVtodo')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           {kind === 'event' ? (
-            <Button disabled={busy || !canSubmitEvent} onClick={() => void openCalendar()}>
+            <Button disabled={busy || !canSubmitEvent} onClick={() => void addEventPrimary()}>
               {t('mail:actionItemAddToCalendar')}
             </Button>
           ) : (
-            <Button disabled={busy || !canSubmitTask} onClick={() => void copyTask()}>
-              {t('mail:actionItemCopyTask')}
+            <Button disabled={busy || !canSubmitTask} onClick={() => void addTaskPrimary()}>
+              {caps.remindersWrite ? t('mail:actionItemAddToReminders') : t('mail:actionItemCopyTask')}
             </Button>
           )}
         </DialogFooter>

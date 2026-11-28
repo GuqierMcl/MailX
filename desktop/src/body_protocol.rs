@@ -2,7 +2,7 @@
 //! never opens an external application; only the trusted command can do that.
 use std::{
     collections::HashMap,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -151,9 +151,14 @@ pub(crate) fn navigation(app: &tauri::AppHandle, url: &Url) -> bool {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 let protocol = app.state::<std::sync::Arc<BodyProtocol>>();
-                if let Ok(event) = protocol.prepare_action(&id, &token, index) {
-                    let _ =
-                        app.emit_to(EventTarget::webview_window("main"), ACTION_ITEM_EVENT, event);
+                if !protocol.numbered_links
+                    && let Ok(event) = protocol.prepare_action(&id, &token, index)
+                {
+                    let _ = app.emit_to(
+                        EventTarget::webview_window("main"),
+                        ACTION_ITEM_EVENT,
+                        event,
+                    );
                 }
             });
             false
@@ -172,6 +177,8 @@ struct Document {
     /// Translated variant of a received message: validated target language and
     /// the quote setting it was prepared with. Never set for drafts.
     translation: Option<(String, bool)>,
+    /// L1 action items bound strictly to this document's lifetime.
+    actions: Arc<Mutex<Vec<DetectedActionItem>>>,
 }
 
 #[derive(Clone)]
@@ -188,7 +195,6 @@ pub(crate) struct BodyProtocol {
     locale: Mutex<mailx_core::SupportedLocale>,
     detect_action_items: Mutex<bool>,
     documents: Mutex<HashMap<String, Document>>,
-    document_actions: Mutex<HashMap<String, Vec<DetectedActionItem>>>,
     confirmations: Mutex<HashMap<String, Confirmation>>,
 }
 
@@ -452,7 +458,6 @@ impl BodyProtocol {
             locale: Mutex::new(Default::default()),
             detect_action_items: Mutex::new(true),
             documents: Mutex::new(HashMap::new()),
-            document_actions: Mutex::new(HashMap::new()),
             confirmations: Mutex::new(HashMap::new()),
         }
     }
@@ -490,6 +495,7 @@ impl BodyProtocol {
                 remote_images: false,
                 explicit_images: false,
                 translation,
+                actions: Arc::new(Mutex::new(Vec::new())),
             },
         );
         Ok(token)
@@ -635,9 +641,6 @@ impl BodyProtocol {
         if let Ok(mut confirmations) = self.confirmations.lock() {
             confirmations.clear();
         }
-        if let Ok(mut actions) = self.document_actions.lock() {
-            actions.clear();
-        }
     }
 
     pub(crate) async fn image_status(
@@ -697,6 +700,7 @@ impl BodyProtocol {
                     remote_images: true,
                     explicit_images: current.explicit_images,
                     translation: current.translation.clone(),
+                    actions: Arc::new(Mutex::new(Vec::new())),
                 },
             );
             documents.remove(token);
@@ -725,9 +729,6 @@ impl BodyProtocol {
             .lock()
             .map_err(|_| missing())?
             .retain(|_, confirmation| confirmation.document.token != token);
-        if let Ok(mut actions) = self.document_actions.lock() {
-            actions.remove(token);
-        }
         Ok(())
     }
 
@@ -828,11 +829,7 @@ impl BodyProtocol {
                 // L1 local rule annotation runs after translation/folding and before
                 // binding on received mail (both original and translated variants),
                 // never on drafts or local sent copies.
-                let detect_enabled = self
-                    .detect_action_items
-                    .lock()
-                    .map(|v| *v)
-                    .unwrap_or(true);
+                let detect_enabled = self.detect_action_items.lock().map(|v| *v).unwrap_or(true);
                 let html = if detect_enabled
                     && matches!(document.binding, BodySource::Email(_))
                     && !id.starts_with(LOCAL_SENT_PREFIX)
@@ -841,19 +838,30 @@ impl BodyProtocol {
                         .email_l1_context(id.clone())
                         .await
                         .unwrap_or_else(|_| (String::new(), None));
+                    // Re-verify document grant after async lookup so a released
+                    // token never writes orphaned data.
+                    let current_doc = self.resolve(&id, &token)?;
+                    // Convert UTC `received_at` into the user's local offset so
+                    // inline relative dates & local clock times resolve accurately.
+                    let local_ref = received_at.as_deref().and_then(|raw| {
+                        chrono::DateTime::parse_from_rfc3339(raw).ok().map(|dt| {
+                            dt.with_timezone(&chrono::Local)
+                                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                        })
+                    });
                     let (annotated, detected) = action_detect::annotate_html(
                         &html,
                         &subject,
-                        received_at.as_deref(),
+                        local_ref.as_deref(),
                         action_detect::MAX_DETECTED_ITEMS,
                     );
-                    if let Ok(mut actions) = self.document_actions.lock() {
-                        actions.insert(token.clone(), detected);
+                    if let Ok(mut actions) = current_doc.actions.lock() {
+                        *actions = detected;
                     }
                     annotated
                 } else {
-                    if let Ok(mut actions) = self.document_actions.lock() {
-                        actions.remove(&token);
+                    if let Ok(mut actions) = document.actions.lock() {
+                        actions.clear();
                     }
                     html
                 };
@@ -981,14 +989,8 @@ impl BodyProtocol {
         id: String,
         token: String,
     ) -> Result<DocumentActions, AppError> {
-        let _ = self.resolve(&id, &token)?;
-        let items = self
-            .document_actions
-            .lock()
-            .map_err(|_| missing())?
-            .get(&token)
-            .cloned()
-            .unwrap_or_default();
+        let document = self.resolve(&id, &token)?;
+        let items = document.actions.lock().map_err(|_| missing())?.clone();
         Ok(DocumentActions {
             document_token: token,
             items,
@@ -1001,13 +1003,12 @@ impl BodyProtocol {
         token: &str,
         index: usize,
     ) -> Result<ActionItemRequest, AppError> {
-        let _ = self.resolve(id, token)?;
-        let item = self
-            .document_actions
+        let document = self.resolve(id, token)?;
+        let item = document
+            .actions
             .lock()
             .map_err(|_| missing())?
-            .get(token)
-            .and_then(|list| list.get(index))
+            .get(index)
             .cloned()
             .ok_or_else(missing)?;
         Ok(ActionItemRequest {

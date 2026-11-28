@@ -12,6 +12,7 @@ mod compose;
 mod compose_assist;
 mod compose_files;
 mod diagnostics;
+mod eventkit;
 mod lifecycle;
 mod locale;
 mod mcp;
@@ -426,6 +427,9 @@ fn main() {
             action_items::mail_open_action_item_calendar,
             action_items::mail_save_action_item_ics,
             action_items::mail_copy_action_item_text,
+            action_items::mail_action_item_capabilities,
+            action_items::mail_add_action_item_native,
+            action_items::mail_open_calendar_privacy_settings,
             compose_assist::compose_assist_state,
             compose_assist::compose_assist_grant_consent,
             compose_assist::compose_assist_start,

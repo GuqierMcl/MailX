@@ -2,7 +2,8 @@
 //! generation (`docs/architecture/action-items.md` §2.1 & §3.3).
 use std::collections::HashSet;
 
-use chrono::{DateTime, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Offset, TimeZone, Utc};
+use chrono_tz::Tz;
 use mail_parser::{MessageParser, MimeHeaders, PartType};
 
 use super::action_items::{
@@ -158,9 +159,7 @@ impl RawVEvent {
             "DURATION" => self.duration = parse_ics_duration(value),
             "RRULE" => self.rrule = sanitize_rrule(value),
             "LOCATION" => self.location = Some(clean_text(&unescaped, MAX_LOCATION_CHARS, false)),
-            "DESCRIPTION" => {
-                self.description = Some(clean_text(&unescaped, MAX_NOTES_CHARS, true))
-            }
+            "DESCRIPTION" => self.description = Some(clean_text(&unescaped, MAX_NOTES_CHARS, true)),
             "URL" => self.url = sanitize_http_url(value.trim()),
             "STATUS" => self.status = Some(value.trim().to_ascii_uppercase()),
             _ => {}
@@ -174,7 +173,21 @@ impl RawVEvent {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "Calendar event".to_owned());
         let end_at = if let Some(end) = self.dtend {
-            Some(end.iso)
+            if dtstart.all_day && end.all_day {
+                // RFC 5545 all-day DTEND is exclusive; normalize to inclusive
+                // `YYYY-MM-DD` to match our internal DTO & EventKit semantics.
+                match (
+                    NaiveDate::parse_from_str(&dtstart.iso, "%Y-%m-%d").ok(),
+                    NaiveDate::parse_from_str(&end.iso, "%Y-%m-%d").ok(),
+                ) {
+                    (Some(s), Some(e)) if e > s => {
+                        Some((e - Duration::days(1)).format("%Y-%m-%d").to_string())
+                    }
+                    _ => Some(end.iso),
+                }
+            } else {
+                Some(end.iso)
+            }
         } else if let (Some(start_utc), Some(dur)) = (dtstart.utc, self.duration) {
             let end_utc = start_utc + dur;
             Some(end_utc.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
@@ -185,8 +198,7 @@ impl RawVEvent {
             .uid
             .filter(|u| !u.is_empty())
             .unwrap_or_else(|| format!("{}:{}", title, dtstart.iso));
-        let cancelled =
-            method == "CANCEL" || self.status.as_deref() == Some("CANCELLED");
+        let cancelled = method == "CANCEL" || self.status.as_deref() == Some("CANCELLED");
         let url = self
             .url
             .or_else(|| self.location.as_deref().and_then(extract_first_http_url))
@@ -215,18 +227,20 @@ fn unfold_lines(input: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for raw in input.lines() {
         let line = raw.strip_suffix('\r').unwrap_or(raw);
-        if let Some(rest) = line.strip_prefix(' ').or_else(|| line.strip_prefix('\t')) {
-            if let Some(last) = lines.last_mut() {
-                last.push_str(rest);
-                continue;
-            }
+        if let Some(rest) = line.strip_prefix(' ').or_else(|| line.strip_prefix('\t'))
+            && let Some(last) = lines.last_mut()
+        {
+            last.push_str(rest);
+            continue;
         }
         lines.push(line.to_owned());
     }
     lines
 }
 
-fn parse_property(line: &str) -> Option<(&str, Vec<(&str, &str)>, &str)> {
+type ParsedProperty<'a> = (&'a str, Vec<(&'a str, &'a str)>, &'a str);
+
+fn parse_property(line: &str) -> Option<ParsedProperty<'_>> {
     // Find first ':' outside double quotes.
     let mut in_quotes = false;
     let mut colon_idx = None;
@@ -305,10 +319,12 @@ fn parse_ics_datetime(value: &str, params: &[(&str, &str)]) -> Option<ParsedDt> 
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("TZID"))
         .map(|(_, val)| *val);
-    if let Some(offset) = tzid.and_then(tzid_to_fixed_offset) {
-        let dt = offset.from_local_datetime(&naive).single()?;
+    if let Some(tz) = tzid.and_then(resolve_tzid)
+        && let Some(dt) = tz.from_local_datetime(&naive).earliest()
+    {
+        let fixed = dt.with_timezone(&dt.offset().fix());
         return Some(ParsedDt {
-            iso: dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            iso: fixed.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             all_day: false,
             utc: Some(dt.with_timezone(&Utc)),
         });
@@ -330,36 +346,32 @@ fn parse_ics_datetime(value: &str, params: &[(&str, &str)]) -> Option<ParsedDt> 
     })
 }
 
-/// Maps common Windows and IANA TZID names to fixed offsets (covering Outlook
-/// invitations such as `China Standard Time`).
-fn tzid_to_fixed_offset(tzid: &str) -> Option<FixedOffset> {
+/// Resolves IANA TZID names directly via `chrono_tz` (preserving DST) and maps
+/// common Windows TZID names (e.g. Outlook invitations) to their IANA equivalents.
+fn resolve_tzid(tzid: &str) -> Option<Tz> {
     let normalized = tzid.trim().trim_matches('"');
-    let secs = match normalized {
-        "UTC" | "Etc/UTC" | "GMT" | "Greenwich Standard Time" => 0,
-        "China Standard Time"
-        | "Asia/Shanghai"
-        | "Asia/Chongqing"
-        | "Asia/Hong_Kong"
-        | "Asia/Taipei"
-        | "Asia/Singapore"
-        | "Taipei Standard Time"
-        | "Singapore Standard Time" => 8 * 3600,
-        "Tokyo Standard Time" | "Asia/Tokyo" | "Korea Standard Time" | "Asia/Seoul" => 9 * 3600,
-        "India Standard Time" | "Asia/Kolkata" => 5 * 3600 + 1800,
-        "Central European Standard Time"
-        | "W. Europe Standard Time"
-        | "Romance Standard Time"
-        | "Europe/Berlin"
-        | "Europe/Paris" => 3600,
-        "GMT Standard Time" | "Europe/London" => 0,
-        "Eastern Standard Time" | "America/New_York" => -5 * 3600,
-        "Central Standard Time" | "America/Chicago" => -6 * 3600,
-        "Mountain Standard Time" | "America/Denver" => -7 * 3600,
-        "Pacific Standard Time" | "America/Los_Angeles" => -8 * 3600,
-        "AUS Eastern Standard Time" | "Australia/Sydney" => 10 * 3600,
+    if let Ok(tz) = normalized.parse::<Tz>() {
+        return Some(tz);
+    }
+    let iana = match normalized {
+        "Greenwich Standard Time" => "Etc/UTC",
+        "China Standard Time" => "Asia/Shanghai",
+        "Taipei Standard Time" => "Asia/Taipei",
+        "Singapore Standard Time" => "Asia/Singapore",
+        "Tokyo Standard Time" => "Asia/Tokyo",
+        "Korea Standard Time" => "Asia/Seoul",
+        "India Standard Time" => "Asia/Kolkata",
+        "Central European Standard Time" | "W. Europe Standard Time" => "Europe/Berlin",
+        "Romance Standard Time" => "Europe/Paris",
+        "GMT Standard Time" => "Europe/London",
+        "Eastern Standard Time" => "America/New_York",
+        "Central Standard Time" => "America/Chicago",
+        "Mountain Standard Time" => "America/Denver",
+        "Pacific Standard Time" => "America/Los_Angeles",
+        "AUS Eastern Standard Time" => "Australia/Sydney",
         _ => return None,
     };
-    FixedOffset::east_opt(secs)
+    iana.parse::<Tz>().ok()
 }
 
 fn parse_ics_duration(raw: &str) -> Option<Duration> {
@@ -378,7 +390,11 @@ fn parse_ics_duration(raw: &str) -> Option<Duration> {
     for ch in rest.chars() {
         match ch {
             'T' => in_time = true,
-            '0'..='9' => num = num.saturating_mul(10).saturating_add((ch as u8 - b'0') as i64),
+            '0'..='9' => {
+                num = num
+                    .saturating_mul(10)
+                    .saturating_add((ch as u8 - b'0') as i64)
+            }
             'W' => {
                 total_secs = total_secs.saturating_add(num.saturating_mul(7 * 86400));
                 num = 0;
@@ -405,7 +421,11 @@ fn parse_ics_duration(raw: &str) -> Option<Duration> {
     if total_secs == 0 {
         return None;
     }
-    Some(Duration::seconds(if neg { -total_secs } else { total_secs }))
+    Some(Duration::seconds(if neg {
+        -total_secs
+    } else {
+        total_secs
+    }))
 }
 
 fn extract_first_http_url(text: &str) -> Option<String> {
@@ -444,8 +464,15 @@ pub fn generate_ics(input: &ActionItemExportInput) -> Result<String, AppError> {
         .as_deref()
         .map(|s| clean_text(s, MAX_NOTES_CHARS, true))
         .filter(|s| !s.is_empty());
-    let url = match input.url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(raw) => Some(sanitize_http_url(raw).ok_or_else(|| AppError::validation("actionItem.url"))?),
+    let url = match input
+        .url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(raw) => {
+            Some(sanitize_http_url(raw).ok_or_else(|| AppError::validation("actionItem.url"))?)
+        }
         None => None,
     };
     let rrule = input.rrule.as_deref().and_then(sanitize_rrule);
@@ -472,14 +499,23 @@ pub fn generate_ics(input: &ActionItemExportInput) -> Result<String, AppError> {
             if input.all_day {
                 let start_date = parse_date_only(start_raw)
                     .ok_or_else(|| AppError::validation("actionItem.startAt"))?;
-                let end_date = input
+                // Internal DTO `end_at` for all-day events is inclusive; RFC 5545
+                // `DTEND;VALUE=DATE` is exclusive, so always add 1 day.
+                let inclusive_end = input
                     .end_at
                     .as_deref()
                     .and_then(parse_date_only)
-                    .filter(|end| *end > start_date)
-                    .unwrap_or_else(|| start_date + Duration::days(1));
-                lines.push(format!("DTSTART;VALUE=DATE:{}", start_date.format("%Y%m%d")));
-                lines.push(format!("DTEND;VALUE=DATE:{}", end_date.format("%Y%m%d")));
+                    .filter(|end| *end >= start_date)
+                    .unwrap_or(start_date);
+                let exclusive_end = inclusive_end + Duration::days(1);
+                lines.push(format!(
+                    "DTSTART;VALUE=DATE:{}",
+                    start_date.format("%Y%m%d")
+                ));
+                lines.push(format!(
+                    "DTEND;VALUE=DATE:{}",
+                    exclusive_end.format("%Y%m%d")
+                ));
             } else {
                 let start_utc = parse_rfc3339_utc(start_raw)
                     .ok_or_else(|| AppError::validation("actionItem.startAt"))?;
@@ -717,5 +753,55 @@ END:VCALENDAR\r\n";
             notes: None,
         };
         assert!(generate_ics(&input).is_err());
+    }
+
+    #[test]
+    fn preserves_dst_offset_and_normalizes_all_day_inclusive_end_dates() {
+        let ics = "\
+BEGIN:VCALENDAR\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:dst-summer@example.com\r\n\
+DTSTART;TZID=America/New_York:20260715T100000\r\n\
+DTEND;TZID=America/New_York:20260715T110000\r\n\
+SUMMARY:Summer NY Sync\r\n\
+END:VEVENT\r\n\
+BEGIN:VEVENT\r\n\
+UID:all-day-1@example.com\r\n\
+DTSTART;VALUE=DATE:20261203\r\n\
+DTEND;VALUE=DATE:20261204\r\n\
+SUMMARY:Single Day Offsite\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+
+        let items = parse_ics(ics);
+        assert_eq!(items.len(), 2);
+        // July in America/New_York is EDT (-04:00), not EST (-05:00).
+        assert_eq!(
+            items[0].start_at.as_deref(),
+            Some("2026-07-15T10:00:00-04:00")
+        );
+        // Single-day all-day event normalizes DTEND 20261204 (exclusive) -> 2026-12-03 (inclusive).
+        assert!(items[1].all_day);
+        assert_eq!(items[1].start_at.as_deref(), Some("2026-12-03"));
+        assert_eq!(items[1].end_at.as_deref(), Some("2026-12-03"));
+
+        // Re-exporting that inclusive all-day event must emit RFC 5545 exclusive DTEND 20261204.
+        let exported = generate_ics(&ActionItemExportInput {
+            email_id: "email-1".into(),
+            item_id: items[1].id.clone(),
+            kind: ActionItemKind::Event,
+            title: items[1].title.clone(),
+            start_at: items[1].start_at.clone(),
+            end_at: items[1].end_at.clone(),
+            all_day: true,
+            rrule: None,
+            location: None,
+            url: None,
+            notes: None,
+        })
+        .unwrap();
+        assert!(exported.contains("DTSTART;VALUE=DATE:20261203\r\n"));
+        assert!(exported.contains("DTEND;VALUE=DATE:20261204\r\n"));
     }
 }

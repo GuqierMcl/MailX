@@ -169,7 +169,11 @@ pub fn clean_text(raw: &str, max_chars: usize, allow_newlines: bool) -> String {
 fn is_bidi_control(ch: char) -> bool {
     matches!(
         ch,
-        '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+        '\u{200B}'..='\u{200F}'
+            | '\u{061C}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
     )
 }
 
@@ -179,7 +183,9 @@ pub fn sanitize_http_url(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty()
         || trimmed.chars().count() > MAX_URL_CHARS
-        || trimmed.chars().any(|c| c.is_control() || is_bidi_control(c))
+        || trimmed
+            .chars()
+            .any(|c| c.is_control() || is_bidi_control(c))
     {
         return None;
     }
@@ -262,7 +268,12 @@ pub fn deterministic_ics_uid(email_id: &str, item_id: &str) -> String {
 pub fn format_task_text(input: &ActionItemExportInput) -> String {
     let title = clean_text(&input.title, MAX_TITLE_CHARS, false);
     let mut lines = vec![format!("- [ ] {title}")];
-    if let Some(start) = input.start_at.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(start) = input
+        .start_at
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         lines.push(format!("  Due: {start}"));
     }
     if let Some(url) = input.url.as_deref().and_then(sanitize_http_url) {

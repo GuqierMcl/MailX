@@ -40,9 +40,12 @@ base64 = "0.22.1"
 rustix = { version = "1", features = ["fs"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
 keyring = { version = "3.6.3", features = ["apple-native"] }
+objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSDockTile"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSUserDefaults"] }
+objc2-event-kit = { version = "0.3.2", default-features = false, features = ["std", "block2", "EKCalendar", "EKCalendarItem", "EKEvent", "EKEventStore", "EKObject", "EKReminder", "EKTypes"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSCalendar", "NSDate", "NSError", "NSProcessInfo", "NSString", "NSURL", "NSUserDefaults"] }
 security-framework = "3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -75,5 +78,7 @@ tauri = { workspace = true, features = ["test"] }
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
-[lints]
-workspace = true
+[lints.rust]
+# Keep unsafe code denied across the desktop host, allowing only the isolated
+# macOS EventKit FFI boundary in `src/eventkit.rs`.
+unsafe_code = "deny"

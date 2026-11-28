@@ -57,11 +57,11 @@ pub use app::{
 pub use app::{DiscoverEwsSettings, EwsDiscoveryStatus, EwsSettingsDiscovery};
 pub use assistant::{
     Assistant, AssistantEvent, AssistantEventKind, CachedEmailActionItems, CachedEmailSummary,
-    ChatContext,
-    ComposeAssistState, ComposeTask, ConfirmAction, ConfirmAttachment, ConfirmDraftChange,
-    ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason, FlagRestore,
-    Occasion, OrganizeChange, PendingConfirmation, RewriteStyle, RunKind, RunKindTag, RunReasoning,
-    RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus, ToolUndo,
+    ChatContext, ComposeAssistState, ComposeTask, ConfirmAction, ConfirmAttachment,
+    ConfirmDraftChange, ConfirmWarning, ConfirmationDetails, ConfirmationRequest, FinishedReason,
+    FlagRestore, Occasion, OrganizeChange, PendingConfirmation, RewriteStyle, RunKind, RunKindTag,
+    RunReasoning, RunSnapshot, RunState, StartRun, ToolActivity, ToolActivitySummary, ToolStatus,
+    ToolUndo,
 };
 pub use assistant::{
     ChatTurn, ChatTurnConfirmation, ChatTurnReasoning, ChatTurnTool, ConfirmOutcome,
@@ -87,13 +87,12 @@ pub use net::images::ImageFetchError;
 pub use send::types::*;
 pub use settings::{
     ActionItemSettings, AiConsent, AppSettings, AppearanceSettings, AssistantMode,
-    AssistantSendMode,
-    AssistantSettings, BadgeSettings, CloseBehavior, ComposeOpenMode, ComposeSettings, FontSize,
-    GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailSettings, MailTheme, MailboxLabel,
-    McpSettings, NotificationSettings, NotificationSound, NowArrangement, NowSettings,
-    PreviewLines, ReadingMode, RemoteImagePolicy, SecuritySettings, ServiceRoute, SettingsChanged,
-    SettingsPatch, SettingsSnapshot, SettingsStore, StartupView, SyncWindow, ThemeMode,
-    TranslationProviderId, TranslationSettings, WeekStartsOn, mail_body_css,
+    AssistantSendMode, AssistantSettings, BadgeSettings, CloseBehavior, ComposeOpenMode,
+    ComposeSettings, FontSize, GeneralSettings, LayoutSettings, LayoutSettingsPatch, MailSettings,
+    MailTheme, MailboxLabel, McpSettings, NotificationSettings, NotificationSound, NowArrangement,
+    NowSettings, PreviewLines, ReadingMode, RemoteImagePolicy, SecuritySettings, ServiceRoute,
+    SettingsChanged, SettingsPatch, SettingsSnapshot, SettingsStore, StartupView, SyncWindow,
+    ThemeMode, TranslationProviderId, TranslationSettings, WeekStartsOn, mail_body_css,
 };
 pub use startup::StartupStatus;
 pub use sync::backfill::{AccountBackfillTask, BackfillControlAction, BackfillPhase};

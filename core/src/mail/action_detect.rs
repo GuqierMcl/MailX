@@ -5,7 +5,9 @@
 //! settings. Operates on safe HTML text nodes after quote folding and before
 //! resource binding so translation segments and stored sanitized HTML remain
 //! untouched.
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc, Weekday};
+use chrono::{
+    DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc, Weekday,
+};
 use html5ever::{Attribute, LocalName, Namespace, QualName};
 use scraper::{
     Html, Node,
@@ -112,7 +114,11 @@ pub fn annotate_html(
                 },
             ];
             let element = Element::new(
-                QualName::new(None, Namespace::from("http://www.w3.org/1999/xhtml"), LocalName::from("a")),
+                QualName::new(
+                    None,
+                    Namespace::from("http://www.w3.org/1999/xhtml"),
+                    LocalName::from("a"),
+                ),
                 attrs,
             );
             let frag_pos = fragments.len();
@@ -154,7 +160,14 @@ fn is_skipped_ancestor(node: ego_tree::NodeRef<'_, Node>) -> bool {
             let name = el.name();
             if matches!(
                 name,
-                "a" | "button" | "code" | "pre" | "style" | "script" | "blockquote" | "details" | "summary"
+                "a" | "button"
+                    | "code"
+                    | "pre"
+                    | "style"
+                    | "script"
+                    | "blockquote"
+                    | "details"
+                    | "summary"
             ) {
                 return true;
             }
@@ -307,7 +320,10 @@ fn parse_hm_time(s: &str) -> Option<(NaiveTime, usize)> {
     // Try HH:MM (or H:MM)
     let (h, h_len) = take_u32(time_part, 2)?;
     let after_h = &time_part[h_len..];
-    if let Some(after_colon) = after_h.strip_prefix(':').or_else(|| after_h.strip_prefix('：')) {
+    if let Some(after_colon) = after_h
+        .strip_prefix(':')
+        .or_else(|| after_h.strip_prefix('：'))
+    {
         let (m, m_len) = take_u32(after_colon, 2)?;
         let mut consumed = i + h_len + (after_h.len() - after_colon.len()) + m_len;
         let (ampm, suffix_len) = take_ampm(&s[consumed..]);
@@ -317,7 +333,10 @@ fn parse_hm_time(s: &str) -> Option<(NaiveTime, usize)> {
         return Some((time, consumed));
     }
     // Try Chinese "3点" / "3点半" / "3点30分"
-    if let Some(after_dian) = after_h.strip_prefix('点').or_else(|| after_h.strip_prefix('时')) {
+    if let Some(after_dian) = after_h
+        .strip_prefix('点')
+        .or_else(|| after_h.strip_prefix('时'))
+    {
         let mut consumed = i + h_len + (after_h.len() - after_dian.len());
         let min = if let Some(rest_half) = after_dian.strip_prefix('半') {
             consumed += after_dian.len() - rest_half.len();
@@ -438,40 +457,40 @@ fn find_iso_dates(
     let bytes = text.as_bytes();
     let mut i = 0;
     while i + 8 <= bytes.len() {
-        if bytes[i].is_ascii_digit() && is_boundary_before(text, i) {
-            if let Some((y, 4)) = take_u32(&text[i..], 4)
-                && (2020..=2100).contains(&y)
-            {
-                let sep = bytes.get(i + 4).copied();
-                if matches!(sep, Some(b'-') | Some(b'/')) {
-                    let sep = sep.unwrap();
-                    if let Some((m, m_len)) = take_u32(&text[i + 5..], 2)
-                        && (1..=12).contains(&m)
-                        && bytes.get(i + 5 + m_len) == Some(&sep)
-                        && let Some((d, d_len)) = take_u32(&text[i + 6 + m_len..], 2)
-                        && let Some(date) = NaiveDate::from_ymd_opt(y as i32, m, d)
-                    {
-                        let mut end = i + 6 + m_len + d_len;
-                        if is_boundary_after(text, end) {
-                            let mut time = None;
-                            if let Some((t, t_len)) = parse_hm_time(&text[end..]) {
-                                time = Some(t);
-                                end += t_len;
-                            }
-                            let (start_at, all_day) =
-                                format_date_or_datetime(date, time, *reference.offset());
-                            out.push(TextSpanMatch {
-                                start: i,
-                                end,
-                                kind: ActionItemKind::Event,
-                                start_at: Some(start_at),
-                                all_day,
-                                matched_text: text[i..end].to_owned(),
-                                suggested_title: subject.to_owned(),
-                            });
-                            i = end;
-                            continue;
+        if bytes[i].is_ascii_digit()
+            && is_boundary_before(text, i)
+            && let Some((y, 4)) = take_u32(&text[i..], 4)
+            && (2020..=2100).contains(&y)
+        {
+            let sep = bytes.get(i + 4).copied();
+            if matches!(sep, Some(b'-') | Some(b'/')) {
+                let sep = sep.unwrap();
+                if let Some((m, m_len)) = take_u32(&text[i + 5..], 2)
+                    && (1..=12).contains(&m)
+                    && bytes.get(i + 5 + m_len) == Some(&sep)
+                    && let Some((d, d_len)) = take_u32(&text[i + 6 + m_len..], 2)
+                    && let Some(date) = NaiveDate::from_ymd_opt(y as i32, m, d)
+                {
+                    let mut end = i + 6 + m_len + d_len;
+                    if is_boundary_after(text, end) {
+                        let mut time = None;
+                        if let Some((t, t_len)) = parse_hm_time(&text[end..]) {
+                            time = Some(t);
+                            end += t_len;
                         }
+                        let (start_at, all_day) =
+                            format_date_or_datetime(date, time, *reference.offset());
+                        out.push(TextSpanMatch {
+                            start: i,
+                            end,
+                            kind: ActionItemKind::Event,
+                            start_at: Some(start_at),
+                            all_day,
+                            matched_text: text[i..end].to_owned(),
+                            suggested_title: subject.to_owned(),
+                        });
+                        i = end;
+                        continue;
                     }
                 }
             }
@@ -525,8 +544,17 @@ fn find_cn_dates(
                     None
                 };
                 if let Some(suf) = day_suffix
-                    && let Some(date) = NaiveDate::from_ymd_opt(year, m, d)
+                    && let Some(mut date) = NaiveDate::from_ymd_opt(year, m, d)
                 {
+                    // If no year was specified and the date is more than 60 days
+                    // before the reference date (e.g. "Jan 5" in a December email),
+                    // roll forward to next year.
+                    if !has_year
+                        && date < reference.date_naive() - Duration::days(60)
+                        && let Some(next_year_date) = NaiveDate::from_ymd_opt(year + 1, m, d)
+                    {
+                        date = next_year_date;
+                    }
                     let mut end = i + after_d + suf;
                     let mut time = None;
                     if let Some((t, t_len)) = parse_hm_time(&text[end..]) {
@@ -702,8 +730,7 @@ fn find_cn_relative_dates(
             // Bare "周X" without "本/下" requires an attached time or deadline context to avoid noise.
             let is_bare_zhou = slice.starts_with('周') && time.is_none();
             if !is_bare_zhou {
-                let (start_at, all_day) =
-                    format_date_or_datetime(date, time, *reference.offset());
+                let (start_at, all_day) = format_date_or_datetime(date, time, *reference.offset());
                 out.push(TextSpanMatch {
                     start: i,
                     end,
@@ -804,8 +831,7 @@ fn find_en_relative_dates(
                     time = Some(t);
                     end += t_len;
                 }
-                let (start_at, all_day) =
-                    format_date_or_datetime(date, time, *reference.offset());
+                let (start_at, all_day) = format_date_or_datetime(date, time, *reference.offset());
                 out.push(TextSpanMatch {
                     start: i,
                     end,
@@ -967,8 +993,14 @@ mod tests {
             15,
         );
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0].start_at.as_deref(), Some("2026-11-28T10:00:00+08:00"));
-        assert_eq!(items[1].start_at.as_deref(), Some("2026-12-03T14:30:00+08:00"));
+        assert_eq!(
+            items[0].start_at.as_deref(),
+            Some("2026-11-28T10:00:00+08:00")
+        );
+        assert_eq!(
+            items[1].start_at.as_deref(),
+            Some("2026-12-03T14:30:00+08:00")
+        );
         assert!(html.contains("data-mailx-action=\"0\""));
         assert!(html.contains("data-mailx-action=\"1\""));
     }

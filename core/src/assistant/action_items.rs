@@ -121,6 +121,7 @@ fn read_blocking(
         .email_sanitized_links(email_id)
         .unwrap_or_default()
         .into_iter()
+        .filter_map(|raw| sanitize_http_url(&raw))
         .collect();
     Ok(build_source(email_id, time_zone, &output, allowed_links))
 }
@@ -218,7 +219,8 @@ pub(crate) fn parse_model_output(
     raw: &str,
     allowed_links: &HashSet<String>,
 ) -> Result<Vec<DetectedActionItem>, AppError> {
-    let json_slice = extract_json_array(raw).ok_or_else(|| AppError::new(ErrorCode::AiInvalidResponse))?;
+    let json_slice =
+        extract_json_array(raw).ok_or_else(|| AppError::new(ErrorCode::AiInvalidResponse))?;
     let parsed: Vec<RawAiItem> = serde_json::from_str(json_slice)
         .map_err(|_| AppError::new(ErrorCode::AiInvalidResponse))?;
 
