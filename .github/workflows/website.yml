@@ -1,30 +1,29 @@
 name: Website
 
-# Builds mailxapp.com (website/) and deploys it to Cloudflare Workers.
-#   - push to main, or run by hand on main: deploys;
-#   - release published: deploys main again, so the download page and changelog
-#     show the new version.
-# Pull requests are checked by the Website job in ci.yml. The paths match
-# SITE_INPUT in scripts/lib/change-scope.mjs.
+# Builds mailxapp.com (website/) and deploys it to Cloudflare Workers, only from
+# a main commit whose CI result passed:
+#   - CI finished on a push to main: deploys that commit if CI passed and it is
+#     still the head of main. A newer push gets its own run, which deploys a
+#     commit containing this one; an older commit never overwrites a newer site.
+#     Every passing head deploys, not only website changes: CI on main cancels
+#     superseded queued runs, so a path filter could skip a website change for
+#     good. Cloudflare only uploads assets that changed.
+#   - release published, or run by hand: deploys the head of main, again only
+#     if its CI result passed, so the download page and changelog show the new
+#     version.
+# Pull requests are checked by the Website job in ci.yml.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths:
-      - "website/**"
-      - "docs/guides/**"
-      - "docs/assets/screenshots/**"
-      - "branding/**"
-      - "frontend/public/**"
-      - "CHANGELOG.md"
-      - "package.json"
-      - "bun.lock"
-      - ".github/workflows/website.yml"
   release:
     types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
+  checks: read
 
 # Deploys run one after another.
 concurrency:
@@ -38,25 +37,59 @@ env:
 jobs:
   website:
     name: Deploy website
+    # Only CI runs for pushes to main; a cancelled or failed run deploys nothing.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - name: Choose a main commit whose CI passed
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          sha=${TRIGGER_SHA:-$head}
+          if [ "$sha" != "$head" ]; then
+            echo "main has moved on to $head; its own run deploys it."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          conclusions=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha/check-runs?check_name=CI%20result&filter=all" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions") | (.conclusion // .status)] | join(" ")')
+          echo "CI result on $sha: ${conclusions:-none}"
+          case " $conclusions " in
+            *" success "*) ;;
+            *)
+              echo "::error::CI on main has not passed for $sha yet (${conclusions:-no run}). The site deploys once it does; for a release, re-run this workflow then."
+              exit 1
+              ;;
+          esac
+          { echo "deploy=true"; echo "sha=$sha"; } >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
+        if: steps.target.outputs.deploy == 'true'
         with:
-          # A release event checks out its tag by default; the site is always
-          # built from main.
-          ref: ${{ github.event_name == 'release' && 'main' || '' }}
+          ref: ${{ steps.target.outputs.sha }}
       - uses: oven-sh/setup-bun@v2
+        if: steps.target.outputs.deploy == 'true'
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
+        if: steps.target.outputs.deploy == 'true'
+      # The same checks as the Website job in ci.yml, on the exact files deployed.
+      - run: bun run version:check
+        if: steps.target.outputs.deploy == 'true'
       - run: bun run site:check
+        if: steps.target.outputs.deploy == 'true'
       - run: bun run site:build
+        if: steps.target.outputs.deploy == 'true'
         env:
           # Reads the latest release for the download page.
           GITHUB_TOKEN: ${{ github.token }}
       - name: Deploy to Cloudflare
-        if: github.event_name == 'release' || github.ref == 'refs/heads/main'
+        if: steps.target.outputs.deploy == 'true'
         run: bun run --cwd website deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
